@@ -7,7 +7,7 @@ spec:
   restartPolicy: Never
   initContainers:
     - name: seed-config
-      image: localhost/mirakc:latest
+      image: ghcr.io/5ym/mirakc:sha-64488f82daff
       imagePullPolicy: IfNotPresent
       command:
         - sh
@@ -18,7 +18,7 @@ spec:
           mountPath: /etc/mirakc
   containers:
     - name: scan-tuner
-      image: localhost/mirakc:latest
+      image: ghcr.io/5ym/mirakc:sha-64488f82daff
       imagePullPolicy: IfNotPresent
       securityContext:
         privileged: true

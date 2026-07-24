@@ -17,7 +17,7 @@ spec:
     spec:
       initContainers:
         - name: seed-config
-          image: localhost/mirakc:latest
+          image: ghcr.io/5ym/mirakc:sha-64488f82daff
           imagePullPolicy: IfNotPresent
           command:
             - sh
@@ -28,7 +28,7 @@ spec:
               mountPath: /etc/mirakc
       containers:
         - name: mirakc
-          image: localhost/mirakc:latest
+          image: ghcr.io/5ym/mirakc:sha-64488f82daff
           imagePullPolicy: IfNotPresent
           securityContext:
             privileged: true
@@ -135,7 +135,7 @@ spec:
     spec:
       containers:
         - name: epgstation
-          image: localhost/epgstation:latest
+          image: ghcr.io/5ym/epgstation:sha-64488f82daff
           imagePullPolicy: IfNotPresent
           env:
             - name: TZ
