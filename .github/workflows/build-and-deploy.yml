@@ -73,8 +73,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/epg-mirakc:${{ steps.tag.outputs.tag }}
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/epg-mirakc:latest
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/mirakc:${{ steps.tag.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/mirakc:latest
 
       - name: Build and push epgstation image
         if: steps.changes.outputs.epgstation == 'true'
@@ -84,8 +84,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/epg-epgstation:${{ steps.tag.outputs.tag }}
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/epg-epgstation:latest
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/epgstation:${{ steps.tag.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/epgstation:latest
 
       - name: Rewrite image tags in manifests
         if: steps.changes.outputs.mirakc == 'true' || steps.changes.outputs.epgstation == 'true'
@@ -96,10 +96,10 @@ jobs:
           FILES="k3s/deployment.yaml k3s/cronjob.yaml mirakc/scan-pod.yaml"
 
           if [ "${{ steps.changes.outputs.mirakc }}" = "true" ]; then
-            sed -i -E "s#image: [^[:space:]]*/epg-mirakc:[^[:space:]]*#image: ${{ env.REGISTRY }}/${OWNER}/epg-mirakc:${TAG}#g" ${FILES}
+            sed -i -E "s#image: [^[:space:]]*/mirakc:[^[:space:]]*#image: ${{ env.REGISTRY }}/${OWNER}/mirakc:${TAG}#g" ${FILES}
           fi
           if [ "${{ steps.changes.outputs.epgstation }}" = "true" ]; then
-            sed -i -E "s#image: [^[:space:]]*/epg-epgstation:[^[:space:]]*#image: ${{ env.REGISTRY }}/${OWNER}/epg-epgstation:${TAG}#g" k3s/deployment.yaml
+            sed -i -E "s#image: [^[:space:]]*/epgstation:[^[:space:]]*#image: ${{ env.REGISTRY }}/${OWNER}/epgstation:${TAG}#g" k3s/deployment.yaml
           fi
 
       - name: Commit and push manifest updates

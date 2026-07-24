@@ -7,7 +7,7 @@ spec:
   restartPolicy: Never
   initContainers:
     - name: seed-config
-      image: localhost/epg-mirakc:latest
+      image: localhost/mirakc:latest
       imagePullPolicy: IfNotPresent
       command:
         - sh
@@ -18,7 +18,7 @@ spec:
           mountPath: /etc/mirakc
   containers:
     - name: scan-tuner
-      image: localhost/epg-mirakc:latest
+      image: localhost/mirakc:latest
       imagePullPolicy: IfNotPresent
       securityContext:
         privileged: true
