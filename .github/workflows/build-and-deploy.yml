@@ -1,0 +1,117 @@
+name: Build and deploy images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'mirakc/Dockerfile'
+      - 'mirakc/*.sh'
+      - 'mirakc/config.yml'
+      - 'epgstation/Dockerfile'
+      - 'epgstation/*.js'
+      - 'epgstation/*.yml'
+      - '.github/workflows/build-and-deploy.yml'
+  workflow_dispatch: {}
+
+# Only manifests under k3s/ and mirakc/scan-pod.yaml are rewritten by this
+# workflow, and neither path is in the trigger filter above, so the
+# rewrite-and-push step below can't retrigger this same workflow.
+concurrency:
+  group: build-and-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed components
+        id: changes
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ]; then
+            echo "mirakc=true" >> "$GITHUB_OUTPUT"
+            echo "epgstation=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed="$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}")"
+          echo "${changed}"
+          echo "mirakc=$(echo "${changed}" | grep -qE '^mirakc/(Dockerfile|.*\.sh|config\.yml)$' && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "epgstation=$(echo "${changed}" | grep -qE '^epgstation/(Dockerfile|.*\.js|.*\.yml)$' && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - name: Compute image tag
+        id: tag
+        run: echo "tag=sha-$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        if: steps.changes.outputs.mirakc == 'true' || steps.changes.outputs.epgstation == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        if: steps.changes.outputs.mirakc == 'true' || steps.changes.outputs.epgstation == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push mirakc image
+        if: steps.changes.outputs.mirakc == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: ./mirakc
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/epg-mirakc:${{ steps.tag.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/epg-mirakc:latest
+
+      - name: Build and push epgstation image
+        if: steps.changes.outputs.epgstation == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: ./epgstation
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/epg-epgstation:${{ steps.tag.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/epg-epgstation:latest
+
+      - name: Rewrite image tags in manifests
+        if: steps.changes.outputs.mirakc == 'true' || steps.changes.outputs.epgstation == 'true'
+        run: |
+          set -eu
+          OWNER="${{ github.repository_owner }}"
+          TAG="${{ steps.tag.outputs.tag }}"
+          FILES="k3s/deployment.yaml k3s/cronjob.yaml mirakc/scan-pod.yaml"
+
+          if [ "${{ steps.changes.outputs.mirakc }}" = "true" ]; then
+            sed -i -E "s#image: [^[:space:]]*/epg-mirakc:[^[:space:]]*#image: ${{ env.REGISTRY }}/${OWNER}/epg-mirakc:${TAG}#g" ${FILES}
+          fi
+          if [ "${{ steps.changes.outputs.epgstation }}" = "true" ]; then
+            sed -i -E "s#image: [^[:space:]]*/epg-epgstation:[^[:space:]]*#image: ${{ env.REGISTRY }}/${OWNER}/epg-epgstation:${TAG}#g" k3s/deployment.yaml
+          fi
+
+      - name: Commit and push manifest updates
+        if: steps.changes.outputs.mirakc == 'true' || steps.changes.outputs.epgstation == 'true'
+        run: |
+          set -eu
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add k3s/deployment.yaml k3s/cronjob.yaml mirakc/scan-pod.yaml
+          if git diff --cached --quiet; then
+            echo "no manifest changes to commit"
+            exit 0
+          fi
+          git commit -m "chore: bump image tag to ${{ steps.tag.outputs.tag }} [skip ci]"
+          git push

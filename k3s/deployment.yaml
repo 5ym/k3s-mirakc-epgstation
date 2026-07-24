@@ -1,0 +1,171 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mirakc
+  namespace: epg
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: mirakc
+  template:
+    metadata:
+      labels:
+        app: mirakc
+    spec:
+      initContainers:
+        - name: seed-config
+          image: localhost/epg-mirakc:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - '[ -f /etc/mirakc/config.yml ] || cp /etc/mirakc.default/config.yml /etc/mirakc/config.yml'
+          volumeMounts:
+            - name: mirakc-config
+              mountPath: /etc/mirakc
+      containers:
+        - name: mirakc
+          image: localhost/epg-mirakc:latest
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+          command:
+            - sh
+            - -c
+            - |
+              pcscd --foreground --disable-polkit &
+              for i in $(seq 1 50); do
+                [ -S /run/pcscd/pcscd.comm ] && break
+                sleep 0.1
+              done
+              exec /usr/local/bin/mirakc
+          env:
+            - name: TZ
+              value: Asia/Tokyo
+            - name: RUST_LOG
+              value: info
+          ports:
+            - containerPort: 40772
+          volumeMounts:
+            - name: mirakc-epg
+              mountPath: /var/lib/mirakc/epg
+            - name: mirakc-config
+              mountPath: /etc/mirakc
+            - name: mirakc-logos
+              mountPath: /var/lib/mirakc/logos
+            - name: dev-bus
+              mountPath: /dev/bus
+            - name: dev-dvb
+              mountPath: /dev/dvb
+      volumes:
+        - name: mirakc-epg
+          persistentVolumeClaim:
+            claimName: mirakc-epg
+        - name: mirakc-config
+          persistentVolumeClaim:
+            claimName: mirakc-config
+        - name: mirakc-logos
+          persistentVolumeClaim:
+            claimName: mirakc-logos
+        - name: dev-bus
+          hostPath:
+            path: /dev/bus
+            type: Directory
+        - name: dev-dvb
+          hostPath:
+            path: /dev/dvb
+            type: Directory
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: db
+  namespace: epg
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: db
+  template:
+    metadata:
+      labels:
+        app: db
+    spec:
+      containers:
+        - name: db
+          image: mariadb:11.1
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              value: epgstation
+            - name: MYSQL_DATABASE
+              value: epgstation
+            - name: TZ
+              value: Asia/Tokyo
+          ports:
+            - containerPort: 3306
+          args:
+            - --character-set-server=utf8mb4
+            - --collation-server=utf8mb4_unicode_ci
+          volumeMounts:
+            - name: db-data
+              mountPath: /var/lib/mysql
+      volumes:
+        - name: db-data
+          persistentVolumeClaim:
+            claimName: epg-db
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: epgstation
+  namespace: epg
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: epgstation
+  template:
+    metadata:
+      labels:
+        app: epgstation
+    spec:
+      containers:
+        - name: epgstation
+          image: localhost/epg-epgstation:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: TZ
+              value: Asia/Tokyo
+            - name: XOOL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: epgstation-secrets
+                  key: xool-api-key
+          ports:
+            - containerPort: 8888
+          volumeMounts:
+            - name: epgstation-data
+              mountPath: /app/data
+            - name: epgstation-thumbnail
+              mountPath: /app/thumbnail
+            - name: epgstation-logs
+              mountPath: /app/logs
+            - name: recorded
+              mountPath: /app/recorded
+      volumes:
+        - name: epgstation-data
+          persistentVolumeClaim:
+            claimName: epgstation-data
+        - name: epgstation-thumbnail
+          persistentVolumeClaim:
+            claimName: epgstation-thumbnail
+        - name: epgstation-logs
+          persistentVolumeClaim:
+            claimName: epgstation-logs
+        - name: recorded
+          persistentVolumeClaim:
+            claimName: epgstation-recorded

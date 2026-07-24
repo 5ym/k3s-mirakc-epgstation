@@ -1,0 +1,256 @@
+epg:
+  cache-dir: /var/lib/mirakc/epg
+jobs:
+  scan-services:
+    command: mirakc-arib scan-services{{#sids}} --sids={{{.}}}{{/sids}}{{#xsids}} --xsids={{{.}}}{{/xsids}}
+    schedule: 0 1 8,20 * * * *
+    disabled: false
+  sync-clocks:
+    command: mirakc-arib sync-clocks{{#sids}} --sids={{{.}}}{{/sids}}{{#xsids}} --xsids={{{.}}}{{/xsids}}
+    schedule: 0 5,35 * * * * *
+    disabled: false
+  update-schedules:
+    command: mirakc-arib collect-eits{{#sids}} --sids={{{.}}}{{/sids}}{{#xsids}} --xsids={{{.}}}{{/xsids}}
+    schedule: 0 20,50 * * * * *
+    disabled: false
+server:
+  addrs:
+    - http: '0.0.0.0:40772'
+  mounts:
+    /miraview:
+      path: /var/lib/miraview
+      index: index.html
+channels:
+  - name: 'J:COMテレビ'
+    type: 'GR'
+    channel: 'T13'
+  - name: 'tvk1'
+    type: 'GR'
+    channel: 'T15'
+  - name: 'TOKYO MX1'
+    type: 'GR'
+    channel: 'T19'
+  - name: 'フジテレビ'
+    type: 'GR'
+    channel: 'T21'
+  - name: 'テレ東'
+    type: 'GR'
+    channel: 'T23'
+  - name: '日テレ1'
+    type: 'GR'
+    channel: 'T25'
+  - name: 'NHK総合1・東京'
+    type: 'GR'
+    channel: 'T27'
+  - name: 'チバテレ1'
+    type: 'GR'
+    channel: 'T18'
+  - name: 'TBS1'
+    type: 'GR'
+    channel: 'T22'
+  - name: 'テレビ朝日'
+    type: 'GR'
+    channel: 'T24'
+  - name: 'NHKEテレ1東京'
+    type: 'GR'
+    channel: 'T26'
+  - name: 'J:COMチャンネル'
+    type: 'GR'
+    channel: 'T36'
+  - name: 'BS朝日1'
+    type: 'BS'
+    channel: 'BS01_0'
+  - name: 'BSテレ東'
+    type: 'BS'
+    channel: 'BS01_2'
+  - name: 'WOWOWプライム'
+    type: 'BS'
+    channel: 'BS03_0'
+  - name: 'BS釣りビジョン'
+    type: 'BS'
+    channel: 'BS03_2'
+  - name: 'WOWOWライブ'
+    type: 'BS'
+    channel: 'BS05_0'
+  - name: 'BS11イレブン'
+    type: 'BS'
+    channel: 'BS09_0'
+  - name: 'BS日テレ'
+    type: 'BS'
+    channel: 'BS13_0'
+  - name: '放送大学テレビ'
+    type: 'BS'
+    channel: 'BS13_2'
+  - name: 'NHK BS'
+    type: 'BS'
+    channel: 'BS15_0'
+  - name: 'BS10'
+    type: 'BS'
+    channel: 'BS15_2'
+  - name: 'J SPORTS 4'
+    type: 'BS'
+    channel: 'BS19_0'
+  - name: 'J SPORTS 2'
+    type: 'BS'
+    channel: 'BS19_2'
+  - name: 'WOWOWプラス'
+    type: 'BS'
+    channel: 'BS21_0'
+  - name: 'グリーンチャンネル'
+    type: 'BS'
+    channel: 'BS21_2'
+  - name: 'ディズニーch'
+    type: 'BS'
+    channel: 'BS23_0'
+  - name: 'J:COM BS'
+    type: 'BS'
+    channel: 'BS23_2'
+  - name: 'BS-TBS'
+    type: 'BS'
+    channel: 'BS01_1'
+  - name: 'BSアニマックス'
+    type: 'BS'
+    channel: 'BS03_1'
+  - name: 'WOWOWシネマ'
+    type: 'BS'
+    channel: 'BS05_1'
+  - name: 'BS12トゥエルビ'
+    type: 'BS'
+    channel: 'BS09_1'
+  - name: 'BSフジ・181'
+    type: 'BS'
+    channel: 'BS13_1'
+  - name: 'BS10プレミアム'
+    type: 'BS'
+    channel: 'BS15_1'
+  - name: 'J SPORTS 1'
+    type: 'BS'
+    channel: 'BS19_1'
+  - name: 'J SPORTS 3'
+    type: 'BS'
+    channel: 'BS19_3'
+  - name: '日本映画専門ch'
+    type: 'BS'
+    channel: 'BS21_1'
+  - name: 'BSよしもと'
+    type: 'BS'
+    channel: 'BS23_1'
+  - name: 'CS2'
+    type: 'CS'
+    channel: 'CS2'
+  - name: 'CS6'
+    type: 'CS'
+    channel: 'CS6'
+  - name: 'CS10'
+    type: 'CS'
+    channel: 'CS10'
+  - name: 'CS14'
+    type: 'CS'
+    channel: 'CS14'
+  - name: 'CS18'
+    type: 'CS'
+    channel: 'CS18'
+  - name: 'CS22'
+    type: 'CS'
+    channel: 'CS22'
+  - name: 'CS4'
+    type: 'CS'
+    channel: 'CS4'
+  - name: 'CS8'
+    type: 'CS'
+    channel: 'CS8'
+  - name: 'CS12'
+    type: 'CS'
+    channel: 'CS12'
+  - name: 'CS16'
+    type: 'CS'
+    channel: 'CS16'
+  - name: 'CS20'
+    type: 'CS'
+    channel: 'CS20'
+  - name: 'CS24'
+    type: 'CS'
+    channel: 'CS24'
+tuners:
+  - name: adapter0
+    types: [BS, CS]
+    command: >-
+      recisdb tune --device /dev/dvb/adapter0/frontend0 --channel {{channel}} -
+  - name: adapter1
+    types: [GR]
+    command: >-
+      recisdb tune --device /dev/dvb/adapter1/frontend0 --channel {{channel}} -
+  - name: adapter2
+    types: [BS, CS]
+    command: >-
+      recisdb tune --device /dev/dvb/adapter2/frontend0 --channel {{channel}} -
+  - name: adapter3
+    types: [GR]
+    command: >-
+      recisdb tune --device /dev/dvb/adapter3/frontend0 --channel {{channel}} -
+resource:
+  logos:
+    - service-id: 3232727704
+      image: /var/lib/mirakc/logos/3232727704.png
+    - service-id: 3232727705
+      image: /var/lib/mirakc/logos/3232727705.png
+    - service-id: 3232727706
+      image: /var/lib/mirakc/logos/3232727706.png
+    - service-id: 3233527768
+      image: /var/lib/mirakc/logos/3233527768.png
+    - service-id: 3233527769
+      image: /var/lib/mirakc/logos/3233527769.png
+    - service-id: 3233527770
+      image: /var/lib/mirakc/logos/3233527770.png
+    - service-id: 3237524632
+      image: /var/lib/mirakc/logos/3237524632.png
+    - service-id: 3237524633
+      image: /var/lib/mirakc/logos/3237524633.png
+    - service-id: 3237524634
+      image: /var/lib/mirakc/logos/3237524634.png
+    - service-id: 3239123608
+      image: /var/lib/mirakc/logos/3239123608.png
+    - service-id: 3239123609
+      image: /var/lib/mirakc/logos/3239123609.png
+    - service-id: 3239123610
+      image: /var/lib/mirakc/logos/3239123610.png
+    - service-id: 3239723656
+      image: /var/lib/mirakc/logos/3239723656.png
+    - service-id: 3239723657
+      image: /var/lib/mirakc/logos/3239723657.png
+    - service-id: 3273601024
+      image: /var/lib/mirakc/logos/3273601024.png
+    - service-id: 3273601025
+      image: /var/lib/mirakc/logos/3273601025.png
+    - service-id: 3273701032
+      image: /var/lib/mirakc/logos/3273701032.png
+    - service-id: 3273701033
+      image: /var/lib/mirakc/logos/3273701033.png
+    - service-id: 3273701034
+      image: /var/lib/mirakc/logos/3273701034.png
+    - service-id: 3273801040
+      image: /var/lib/mirakc/logos/3273801040.png
+    - service-id: 3273801041
+      image: /var/lib/mirakc/logos/3273801041.png
+    - service-id: 3273901048
+      image: /var/lib/mirakc/logos/3273901048.png
+    - service-id: 3273901049
+      image: /var/lib/mirakc/logos/3273901049.png
+    - service-id: 3274001056
+      image: /var/lib/mirakc/logos/3274001056.png
+    - service-id: 3274001057
+      image: /var/lib/mirakc/logos/3274001057.png
+    - service-id: 3274001058
+      image: /var/lib/mirakc/logos/3274001058.png
+    - service-id: 3274101064
+      image: /var/lib/mirakc/logos/3274101064.png
+    - service-id: 3274101065
+      image: /var/lib/mirakc/logos/3274101065.png
+    - service-id: 3274101066
+      image: /var/lib/mirakc/logos/3274101066.png
+    - service-id: 3274201072
+      image: /var/lib/mirakc/logos/3274201072.png
+    - service-id: 3274201073
+      image: /var/lib/mirakc/logos/3274201073.png
+    - service-id: 3274201074
+      image: /var/lib/mirakc/logos/3274201074.png
