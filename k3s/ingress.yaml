@@ -1,7 +1,7 @@
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
-  name: mirakc
+  name: mirakurun
   namespace: epg
 spec:
   entryPoints:
@@ -16,7 +16,7 @@ spec:
         - name: forward-auth
           namespace: auth
       services:
-        - name: mirakc
+        - name: mirakurun
           port: 40772
 ---
 apiVersion: traefik.io/v1alpha1

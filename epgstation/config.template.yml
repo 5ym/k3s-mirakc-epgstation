@@ -1,7 +1,7 @@
 port: 8888
 socketioPort: 8888
 clientSocketioPort: 443
-mirakurunPath: http://mirakc:40772/
+mirakurunPath: http://mirakurun:40772/
 
 dbtype: mysql
 mysql:

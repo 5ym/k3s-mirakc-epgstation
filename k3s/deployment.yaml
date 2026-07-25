@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: mirakc
+  name: mirakurun
   namespace: epg
 spec:
   replicas: 1
@@ -9,68 +9,50 @@ spec:
     type: Recreate
   selector:
     matchLabels:
-      app: mirakc
+      app: mirakurun
   template:
     metadata:
       labels:
-        app: mirakc
+        app: mirakurun
     spec:
       initContainers:
         - name: seed-config
-          image: ghcr.io/5ym/mirakc:sha-c04e865b2a8e
+          image: ghcr.io/5ym/mirakurun:sha-c04e865b2a8e
           imagePullPolicy: IfNotPresent
           command:
             - sh
             - -c
-            - '[ -f /etc/mirakc/config.yml ] || cp /etc/mirakc.default/config.yml /etc/mirakc/config.yml'
+            - 'cp -n /app-config.default/*.yml /app-config/'
           volumeMounts:
-            - name: mirakc-config
-              mountPath: /etc/mirakc
+            - name: mirakurun-config
+              mountPath: /app-config
       containers:
-        - name: mirakc
-          image: ghcr.io/5ym/mirakc:sha-c04e865b2a8e
+        - name: mirakurun
+          image: ghcr.io/5ym/mirakurun:sha-c04e865b2a8e
           imagePullPolicy: IfNotPresent
           securityContext:
             privileged: true
-          command:
-            - sh
-            - -c
-            - |
-              pcscd --foreground --disable-polkit &
-              for i in $(seq 1 50); do
-                [ -S /run/pcscd/pcscd.comm ] && break
-                sleep 0.1
-              done
-              exec /usr/local/bin/mirakc
           env:
             - name: TZ
               value: Asia/Tokyo
-            - name: RUST_LOG
-              value: info
           ports:
             - containerPort: 40772
           volumeMounts:
-            - name: mirakc-epg
-              mountPath: /var/lib/mirakc/epg
-            - name: mirakc-config
-              mountPath: /etc/mirakc/config.yml
-              subPath: config.yml
-            - name: mirakc-logos
-              mountPath: /var/lib/mirakc/logos
+            - name: mirakurun-config
+              mountPath: /app-config
+            - name: mirakurun-data
+              mountPath: /app-data
             - name: dev-bus
               mountPath: /dev/bus
             - name: dev-dvb
               mountPath: /dev/dvb
       volumes:
-        - name: mirakc-epg
+        - name: mirakurun-config
           persistentVolumeClaim:
-            claimName: mirakc-epg
-        - name: mirakc-config
+            claimName: mirakurun-config
+        - name: mirakurun-data
           persistentVolumeClaim:
-            claimName: mirakc-config
-        - name: mirakc-logos
-          persistentVolumeClaim:
-            claimName: mirakc-logos
+            claimName: mirakurun-data
         - name: dev-bus
           hostPath:
             path: /dev/bus
