@@ -53,7 +53,7 @@ spec:
             - name: mirakc-epg
               mountPath: /var/lib/mirakc/epg
             - name: mirakc-config
-              mountPath: /etc/mirakc
+              mountPath: /etc/mirakc/config.yml
               subPath: config.yml
             - name: mirakc-logos
               mountPath: /var/lib/mirakc/logos
