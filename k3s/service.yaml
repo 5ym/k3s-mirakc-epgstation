@@ -1,11 +1,11 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: mirakc
+  name: mirakurun
   namespace: epg
 spec:
   selector:
-    app: mirakc
+    app: mirakurun
   ports:
     - name: http
       port: 40772
