@@ -58,9 +58,7 @@ spec:
   entryPoints:
     - websecure
   tls:
-    certResolver: mydnschallenge
-    domains:
-      - main: e.doany.io
+    secretName: e-home-arpa-tls
   routes:
     - match: Host(`e.home.arpa`) && ClientIP(`10.10.0.0/16`)
       kind: Rule

@@ -146,6 +146,11 @@ spec:
                 secretKeyRef:
                   name: epgstation-secrets
                   key: xool-api-key
+            - name: BASIC_AUTH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: epgstation-secrets
+                  key: basic-auth-password
           ports:
             - containerPort: 8888
           volumeMounts:

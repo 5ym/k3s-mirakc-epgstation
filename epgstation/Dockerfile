@@ -5,7 +5,7 @@ ENV DEV="curl ca-certificates build-essential cmake pkg-config nasm zlib1g-dev l
 ENV FFMPEG_VERSION=8.1
 
 RUN apt-get update && \
-    apt-get -y --no-install-recommends install $DEV libopus0 libsvtav1enc2 libx265-215 libdav1d7 libfontconfig1 libfreetype6 && \
+    apt-get -y --no-install-recommends install $DEV libopus0 libsvtav1enc2 libx265-215 libdav1d7 libfontconfig1 libfreetype6 gettext-base && \
     mkdir -p /usr/share/fonts/truetype/rounded-mplus-arib && \
     curl -fsSL https://raw.githubusercontent.com/5ym/arib-font/main/rounded-mplus-1m-arib.ttf \
       -o /usr/share/fonts/truetype/rounded-mplus-arib/rounded-mplus-1m-arib.ttf && \
@@ -36,8 +36,8 @@ RUN apt-get update && \
 COPY --from=docker.io/l3tnun/epgstation /app /app/
 COPY --from=docker.io/l3tnun/epgstation /app/client /app/client/
 
-COPY config.yml enc.js rec.js epgUpdaterLogConfig.yml operatorLogConfig.yml serviceLogConfig.yml /app/config/
+COPY config.template.yml enc.js rec.js epgUpdaterLogConfig.yml operatorLogConfig.yml serviceLogConfig.yml /app/config/
 
 EXPOSE 8888
 WORKDIR /app
-CMD bash -c "source /root/.nvm/nvm.sh && npm start"
+CMD bash -c "source /root/.nvm/nvm.sh && envsubst < /app/config/config.template.yml > /app/config/config.yml && npm start"
