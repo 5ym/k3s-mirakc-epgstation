@@ -17,7 +17,7 @@ spec:
     spec:
       initContainers:
         - name: seed-config
-          image: ghcr.io/5ym/mirakurun:sha-2ab89a8ccd44
+          image: ghcr.io/5ym/mirakurun:sha-46121e3004ec
           imagePullPolicy: IfNotPresent
           command:
             - sh
@@ -28,7 +28,7 @@ spec:
               mountPath: /app-config
       containers:
         - name: mirakurun
-          image: ghcr.io/5ym/mirakurun:sha-2ab89a8ccd44
+          image: ghcr.io/5ym/mirakurun:sha-46121e3004ec
           imagePullPolicy: IfNotPresent
           securityContext:
             privileged: true
@@ -118,7 +118,7 @@ spec:
     spec:
       containers:
         - name: epgstation
-          image: ghcr.io/5ym/epgstation:sha-e8a54f013cd6
+          image: ghcr.io/5ym/epgstation:sha-46121e3004ec
           imagePullPolicy: IfNotPresent
           env:
             - name: TZ
