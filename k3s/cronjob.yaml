@@ -49,7 +49,7 @@ spec:
           serviceAccountName: collect-logos
           initContainers:
             - name: seed-config
-              image: ghcr.io/5ym/mirakc:sha-64488f82daff
+              image: ghcr.io/5ym/mirakc:sha-c04e865b2a8e
               imagePullPolicy: IfNotPresent
               command:
                 - sh
@@ -60,7 +60,7 @@ spec:
                   mountPath: /etc/mirakc
           containers:
             - name: collect-logos
-              image: ghcr.io/5ym/mirakc:sha-64488f82daff
+              image: ghcr.io/5ym/mirakc:sha-c04e865b2a8e
               imagePullPolicy: IfNotPresent
               command:
                 - /scheduled-collect-logos.sh
