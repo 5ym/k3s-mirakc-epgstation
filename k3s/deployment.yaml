@@ -54,6 +54,7 @@ spec:
               mountPath: /var/lib/mirakc/epg
             - name: mirakc-config
               mountPath: /etc/mirakc
+              subPath: config.yml
             - name: mirakc-logos
               mountPath: /var/lib/mirakc/logos
             - name: dev-bus
