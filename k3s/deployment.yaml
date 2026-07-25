@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: mirakurun
-          image: ghcr.io/5ym/mirakurun:sha-46121e3004ec
+          image: ghcr.io/5ym/mirakurun:sha-9ea89507d2f7
           imagePullPolicy: IfNotPresent
           securityContext:
             privileged: true
