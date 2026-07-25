@@ -17,7 +17,7 @@ spec:
     spec:
       initContainers:
         - name: seed-config
-          image: ghcr.io/5ym/mirakurun:sha-269093c7a16b
+          image: ghcr.io/5ym/mirakurun:sha-2ab89a8ccd44
           imagePullPolicy: IfNotPresent
           command:
             - sh
@@ -28,7 +28,7 @@ spec:
               mountPath: /app-config
       containers:
         - name: mirakurun
-          image: ghcr.io/5ym/mirakurun:sha-269093c7a16b
+          image: ghcr.io/5ym/mirakurun:sha-2ab89a8ccd44
           imagePullPolicy: IfNotPresent
           securityContext:
             privileged: true
