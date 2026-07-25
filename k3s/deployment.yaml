@@ -136,7 +136,7 @@ spec:
     spec:
       containers:
         - name: epgstation
-          image: ghcr.io/5ym/epgstation:sha-c04e865b2a8e
+          image: ghcr.io/5ym/epgstation:sha-e8a54f013cd6
           imagePullPolicy: IfNotPresent
           env:
             - name: TZ
