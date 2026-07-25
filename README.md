@@ -22,11 +22,11 @@ Mirakurun は録画・視聴で開いたチューナーセッションにもEPG�
 ## 補足
 
 - Mirakurunの設定は `mirakurun/server.yml`/`tuners.yml`/`channels.yml` の3
-  ファイルで管理しています。これらは Docker イメージのビルド時に
-  `/app-config.default/` へ焼き込まれ、`mirakurun-config` PVC (`/app-config`)
-  が空の場合にのみ初回起動時の initContainer でコピーされます。2回目以降の
-  起動では、Mirakurun が自動スキャンで書き込んだ `channels.yml` の更新分
-  (自動解決されたサービスIDなど)がPVC側に残ります。
+  ファイルで管理しています。epgstationの `config.template.yml` と同様に
+  Docker イメージの `/app-config` へそのまま焼き込まれ、PVCなどによる永続化は
+  していません(pod再起動のたびにイメージ内の内容で作り直されます)。
+  サービスIDの解決結果や番組表そのものは `/app-data` (下記) に保存される
+  ため、`channels.yml` 自体は素の宣言(`name`/`type`/`channel`)だけで十分です。
 - `mirakurun-data` PVC (`/app-data`) には EPG データベースと収集済みの
   局ロゴが格納されます。
 - ビルド元ファイルは `mirakurun/` 以下にあり、サーバー上で直接編集してください。

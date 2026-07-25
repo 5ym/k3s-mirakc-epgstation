@@ -1,1 +1,3 @@
-port: 40772
+hostname: m.doany.io
+allowOrigins:
+  - https://m.doany.io

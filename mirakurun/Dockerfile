@@ -9,7 +9,4 @@ RUN apt-get update && apt-get -y install curl && \
     rm -rf /var/lib/apt/lists/* && \
     rm -rf /tmp/*
 
-# /app-config is a PVC-backed volume seeded by an initContainer (see
-# k3s/deployment.yaml), so the defaults live at a separate path here and get
-# copied onto the volume only on first boot (if not already present).
-COPY server.yml channels.yml tuners.yml /app-config.default/
+COPY server.yml channels.yml tuners.yml /app-config/

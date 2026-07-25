@@ -15,17 +15,6 @@ spec:
       labels:
         app: mirakurun
     spec:
-      initContainers:
-        - name: seed-config
-          image: ghcr.io/5ym/mirakurun:sha-46121e3004ec
-          imagePullPolicy: IfNotPresent
-          command:
-            - sh
-            - -c
-            - 'cp -n /app-config.default/*.yml /app-config/'
-          volumeMounts:
-            - name: mirakurun-config
-              mountPath: /app-config
       containers:
         - name: mirakurun
           image: ghcr.io/5ym/mirakurun:sha-46121e3004ec
@@ -38,8 +27,6 @@ spec:
           ports:
             - containerPort: 40772
           volumeMounts:
-            - name: mirakurun-config
-              mountPath: /app-config
             - name: mirakurun-data
               mountPath: /app-data
             - name: dev-bus
@@ -47,9 +34,6 @@ spec:
             - name: dev-dvb
               mountPath: /dev/dvb
       volumes:
-        - name: mirakurun-config
-          persistentVolumeClaim:
-            claimName: mirakurun-config
         - name: mirakurun-data
           persistentVolumeClaim:
             claimName: mirakurun-data
