@@ -62,7 +62,7 @@ jobs:
 
       - name: Set up Docker Buildx
         if: steps.changes.outputs.mirakurun == 'true' || steps.changes.outputs.epgstation == 'true'
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build and push mirakurun image
         if: steps.changes.outputs.mirakurun == 'true'
