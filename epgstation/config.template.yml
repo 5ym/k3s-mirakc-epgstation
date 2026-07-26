@@ -95,7 +95,7 @@ stream:
                       '%FFMPEG% -sub_type bitmap -font Rounded%SPACE%M+%SPACE%1m%SPACE%for%SPACE%ARIB -dual_mono_mode main -i pipe:0
                       -ignore_unknown
                       -filter_complex [0:v]bwdif,format=yuv420p[bwdif];[bwdif][0:s:0]overlay[v]
-                      -map [v] -c:v libsvtav1
+                      -map [v] -c:v libsvtav1 -preset 8
                       -map 0:a -c:a libopus -b:a 256k
                       -max_muxing_queue_size 1024
                       -f hls -hls_time 3 -hls_list_size 0 -hls_allow_cache 1 -hls_segment_type fmp4
@@ -110,7 +110,7 @@ stream:
                       '%FFMPEG% -c:v libdav1d -ss %SS% -i %INPUT%
                       -ignore_unknown
                       -filter_complex [0:v][0:s:0]overlay[v]
-                      -map [v] -c:v libsvtav1
+                      -map [v] -c:v libsvtav1 -preset 8
                       -map 0:a -c:a copy
                       -max_muxing_queue_size 1024
                       -f hls -hls_time 3 -hls_list_size 0 -hls_allow_cache 1 -hls_segment_type fmp4
