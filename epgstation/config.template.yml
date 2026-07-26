@@ -64,7 +64,7 @@ stream:
                 - name: raw
                 - name: compress
                   cmd:
-                      '%FFMPEG% -y -sub_type bitmap -font Rounded%SPACE%M+%SPACE%1m%SPACE%for%SPACE%ARIB -dual_mono_mode main -i pipe:0
+                      '%FFMPEG% -y -fix_sub_duration -sub_type bitmap -font Rounded%SPACE%M+%SPACE%1m%SPACE%for%SPACE%ARIB -dual_mono_mode main -i pipe:0
                       -ignore_unknown
                       -map 0:s? -c:s dvdsub
                       -map 0:a -c:a libopus -b:a 256k
