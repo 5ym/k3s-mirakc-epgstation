@@ -100,7 +100,6 @@ stream:
                       -max_muxing_queue_size 1024
                       -f hls -hls_time 3 -hls_list_size 0 -hls_allow_cache 1 -hls_segment_type fmp4
                       -hls_segment_filename %streamFileDir%/stream%streamNum%-%09d.m4s -hls_flags delete_segments
-                      -var_stream_map v:0,a:0
                       -master_pl_name stream%streamNum%.m3u8 %streamFileDir%/stream%streamNum%-child.m3u8'
         encoded:
             webm: []
@@ -116,5 +115,4 @@ stream:
                       -max_muxing_queue_size 1024
                       -f hls -hls_time 3 -hls_list_size 0 -hls_allow_cache 1 -hls_segment_type fmp4
                       -hls_segment_filename %streamFileDir%/stream%streamNum%-%09d.m4s -hls_flags delete_segments
-                      -var_stream_map v:0,a:0
                       -master_pl_name stream%streamNum%.m3u8 %streamFileDir%/stream%streamNum%-child.m3u8'
