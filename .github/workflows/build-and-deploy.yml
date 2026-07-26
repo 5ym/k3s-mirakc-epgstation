@@ -35,25 +35,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Detect changed components
-        id: changes
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ]; then
-            echo "mirakurun=true" >> "$GITHUB_OUTPUT"
-            echo "epgstation=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          changed="$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}")"
-          echo "${changed}"
-          echo "mirakurun=$(echo "${changed}" | grep -qE '^mirakurun/(Dockerfile|.*\.yml)$' && echo true || echo false)" >> "$GITHUB_OUTPUT"
-          echo "epgstation=$(echo "${changed}" | grep -qE '^epgstation/(Dockerfile|.*\.js|.*\.yml)$' && echo true || echo false)" >> "$GITHUB_OUTPUT"
-
       - name: Compute image tag
         id: tag
         run: echo "tag=sha-$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
-        if: steps.changes.outputs.mirakurun == 'true' || steps.changes.outputs.epgstation == 'true'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -61,48 +47,45 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
-        if: steps.changes.outputs.mirakurun == 'true' || steps.changes.outputs.epgstation == 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Build and push mirakurun image
-        if: steps.changes.outputs.mirakurun == 'true'
         uses: docker/build-push-action@v7
         with:
           context: ./mirakurun
           platforms: linux/amd64
           push: true
+          pull: true
+          cache-from: type=gha,scope=mirakurun
+          cache-to: type=gha,mode=max,scope=mirakurun
           tags: |
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/mirakurun:${{ steps.tag.outputs.tag }}
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/mirakurun:latest
 
       - name: Build and push epgstation image
-        if: steps.changes.outputs.epgstation == 'true'
         uses: docker/build-push-action@v7
         with:
           context: ./epgstation
           platforms: linux/amd64
           push: true
+          pull: true
+          cache-from: type=gha,scope=epgstation
+          cache-to: type=gha,mode=max,scope=epgstation
           tags: |
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/epgstation:${{ steps.tag.outputs.tag }}
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/epgstation:latest
 
       - name: Rewrite image tags in manifests
-        if: steps.changes.outputs.mirakurun == 'true' || steps.changes.outputs.epgstation == 'true'
         run: |
           set -eu
           OWNER="${{ github.repository_owner }}"
           TAG="${{ steps.tag.outputs.tag }}"
           FILES="k3s/deployment.yaml"
 
-          if [ "${{ steps.changes.outputs.mirakurun }}" = "true" ]; then
-            sed -i -E "s#image: [^[:space:]]*/mirakurun:[^[:space:]]*#image: ${{ env.REGISTRY }}/${OWNER}/mirakurun:${TAG}#g" ${FILES}
-          fi
-          if [ "${{ steps.changes.outputs.epgstation }}" = "true" ]; then
-            sed -i -E "s#image: [^[:space:]]*/epgstation:[^[:space:]]*#image: ${{ env.REGISTRY }}/${OWNER}/epgstation:${TAG}#g" k3s/deployment.yaml
-          fi
+          sed -i -E "s#image: [^[:space:]]*/mirakurun:[^[:space:]]*#image: ${{ env.REGISTRY }}/${OWNER}/mirakurun:${TAG}#g" ${FILES}
+          sed -i -E "s#image: [^[:space:]]*/epgstation:[^[:space:]]*#image: ${{ env.REGISTRY }}/${OWNER}/epgstation:${TAG}#g" ${FILES}
 
       - name: Commit and push manifest updates
-        if: steps.changes.outputs.mirakurun == 'true' || steps.changes.outputs.epgstation == 'true'
         run: |
           set -eu
           git config user.name "github-actions[bot]"
@@ -113,4 +96,14 @@ jobs:
             exit 0
           fi
           git commit -m "chore: bump image tag to ${{ steps.tag.outputs.tag }} [skip ci]"
-          git push
+
+          for i in 1 2 3 4 5; do
+            if git push; then
+              exit 0
+            fi
+            echo "push rejected, rebasing onto origin/main and retrying (${i})"
+            git fetch origin main
+            git rebase origin/main
+          done
+          echo "failed to push manifest updates after retries"
+          exit 1

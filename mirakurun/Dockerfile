@@ -1,4 +1,4 @@
-FROM chinachu/mirakurun:4.1.3
+FROM docker.io/chinachu/mirakurun:latest
 
 RUN apt-get update && apt-get -y install curl && \
     cd /tmp && \
