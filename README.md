@@ -2,6 +2,41 @@
 
 このディレクトリには EPG スタックの k3s マニフェストとローカルファイルが置かれています。
 
+## クラスタ側の前提条件
+
+このリポジトリには `epg` namespace 内のアプリ本体のマニフェストしか含まれていません。
+k3sホストの初期構築やクラスタ共通のアドオン類は別の(プライベートな) bootstrap
+リポジトリ側で管理しており、このリポジトリのマニフェストを適用する前に以下が
+クラスタ側に用意されている必要があります。
+
+- **StorageClass `local-path-retain`**: `k3s/pvc.yaml` の全PVCが参照。
+  `reclaimPolicy: Retain` の local-path プロビジョナー。
+- **`auth` namespace とTraefik Middleware**: `k3s/ingress.yaml` が参照する
+  `forward-auth`(OIDCによるログイン要求)と `basic-auth` の2つのMiddlewareが
+  `auth` namespaceに必要。
+- **Traefik のCRD/証明書設定**: `mydnschallenge` certResolver
+  (Cloudflare DNS-01でのワイルドカード証明書取得)、および
+  `providers.kubernetesCRD.allowCrossNamespace: true`
+  (namespaceをまたいだMiddleware参照を許可)が有効になっていること。
+- **Sealed Secrets controller**: `kube-system` namespaceの
+  `sealed-secrets-controller`。`k3s/sealed-secret.yaml` は対応する秘密鍵を
+  持つクラスタでしか復号できないため、新しいクラスタでは
+  (バックアップ復元ではなく)ゼロから作る場合、`xool-api-key` /
+  `basic-auth-password` を入れ直して作り直す必要がある。
+- **ArgoCD**: このリポジトリには `argocd` topicが付与されており、push時に
+  ArgoCDへのwebhookが自動登録される運用。ArgoCD Application自体はクラスタの
+  state.dbバックアップ/リストアで復元される前提のため、このリポジトリにも
+  bootstrap側にもマニフェストとしては存在しない。
+- **DNS**: `m.doany.io` / `e.doany.io` がTraefikの外部IPを指すこと。
+  `e.home.arpa` はLAN内(`10.10.0.0/16`)専用で、`k3s/tls-secret.yaml` に
+  同梱の自己署名証明書で処理される。
+- **チューナードライバ**: `k3s/deployment.yaml` の mirakurun は
+  `privileged: true` かつ `/dev/bus`・`/dev/dvb` をhostPathでマウントする
+  ため、ノード側にPT3/PX4系チューナーのドライバが読み込まれている必要がある。
+- **GHCRイメージの公開設定**: `ghcr.io/5ym/mirakurun` /
+  `ghcr.io/5ym/epgstation` をpullできること(imagePullSecrets未設定のため
+  publicパッケージである前提)。
+
 ## チャンネルスキャン
 
 - Mirakurunの Web UI (`http://<host>:40772/`) → 「チャンネル設定」画面右上の
@@ -41,15 +76,3 @@
   `C:\Program Files\VideoLAN\VLC\vlc.exe` を起動します。VLCのインストール
   先が異なる場合はパスを書き換えてください。
 - `uninstall-vlc-protocol.ps1`: 登録した `cvlc` プロトコルの削除用です。
-
-## 補足
-
-- Mirakurunの設定は `mirakurun/server.yml`/`tuners.yml`/`channels.yml` の3
-  ファイルで管理しています。epgstationの `config.template.yml` と同様に
-  Docker イメージの `/app-config` へそのまま焼き込まれ、PVCなどによる永続化は
-  していません(pod再起動のたびにイメージ内の内容で作り直されます)。
-  サービスIDの解決結果や番組表そのものは `/app-data` (下記) に保存される
-  ため、`channels.yml` 自体は素の宣言(`name`/`type`/`channel`)だけで十分です。
-- `mirakurun-data` PVC (`/app-data`) には EPG データベースと収集済みの
-  局ロゴが格納されます。
-- ビルド元ファイルは `mirakurun/` 以下にあり、サーバー上で直接編集してください。
