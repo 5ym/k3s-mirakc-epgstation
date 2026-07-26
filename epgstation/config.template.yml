@@ -112,7 +112,7 @@ stream:
                       -ignore_unknown
                       -filter_complex [0:v][0:s:0]overlay[v]
                       -map [v] -c:v libsvtav1
-                      -map 0:a -c:a copy
+                      -map 0:a -c:a libopus -b:a 256k
                       -max_muxing_queue_size 1024
                       -f hls -hls_time 3 -hls_list_size 0 -hls_allow_cache 1 -hls_segment_type fmp4
                       -hls_segment_filename %streamFileDir%/stream%streamNum%-%09d.m4s -hls_flags delete_segments
