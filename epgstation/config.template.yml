@@ -62,7 +62,7 @@ stream:
         ts:
             m2ts:
                 - name: raw
-                - name: comparess
+                - name: compress
                   cmd:
                       '%FFMPEG% -y -dual_mono_mode main -i pipe:0
                       -ignore_unknown
@@ -72,7 +72,7 @@ stream:
                       -map 0:v -c:v libx265 -preset superfast -crf 26
                       -f mpegts pipe:1'
             m2tsll:
-                - name: comparess
+                - name: compress
                   cmd:
                       '%FFMPEG% -y -dual_mono_mode main -f mpegts -analyzeduration 500000 -i pipe:0
                       -fflags nobuffer -flags low_delay -max_delay 250000 -max_interleave_delta 1 -flags +cgop
