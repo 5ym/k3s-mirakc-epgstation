@@ -99,7 +99,13 @@ stream:
             webm:
                 - name: origin
                   cmd:
-                      ''
+                      '%FFMPEG% -sub_type bitmap -font Rounded%SPACE%M+%SPACE%1m%SPACE%for%SPACE%ARIB -dual_mono_mode main -i pipe:0
+                      -ignore_unknown
+                      -filter_complex [0:v]bwdif,format=yuv420p[bwdif];[bwdif][0:s:0]overlay[v]
+                      -map [v] -c:v libsvtav1
+                      -map 0:a -c:a libopus -b:a 256k
+                      -max_muxing_queue_size 1024
+                      -f webm pipe:1'
             mp4:
                 - name: origin
                   cmd:
@@ -107,20 +113,18 @@ stream:
             hls:
                 - name: origin
                   cmd:
-                      '%FFMPEG% -sub_type bitmap -font Rounded%SPACE%M+%SPACE%1m%SPACE%for%SPACE%ARIB -dual_mono_mode main -i pipe:0
-                      -threads 0 -ignore_unknown
-                      -filter_complex [0:v]bwdif,format=yuv420p[bwdif];[bwdif][0:s:0]overlay[v]
-                      -map [v] -c:v libsvtav1 -maxrate 6M -bufsize 12M
-                      -map 0:a -c:a libopus -b:a 256k
-                      -max_muxing_queue_size 1024
-                      -f hls -hls_time 3 -hls_list_size 0 -hls_allow_cache 1 -hls_segment_type fmp4
-                      -hls_segment_filename %streamFileDir%/stream%streamNum%-%09d.m4s -hls_flags delete_segments
-                      -master_pl_name stream%streamNum%.m3u8 %streamFileDir%/stream%streamNum%-child.m3u8'
+                      ''
         encoded:
             webm:
                 - name: origin
                   cmd:
-                      ''
+                      '%FFMPEG% -c:v libdav1d -ss %SS% -i %INPUT%
+                      -ignore_unknown
+                      -filter_complex [0:v][0:s:0]overlay[v]
+                      -map [v] -c:v libsvtav1
+                      -map 0:a -c:a copy
+                      -max_muxing_queue_size 1024
+                      -f webm pipe:1'
             mp4:
                 - name: origin
                   cmd:
@@ -128,12 +132,4 @@ stream:
             hls:
                 - name: origin
                   cmd:
-                      '%FFMPEG% -c:v libdav1d -ss %SS% -i %INPUT%
-                      -threads 0 -ignore_unknown
-                      -filter_complex [0:v][0:s:0]overlay[v]
-                      -map [v] -c:v libsvtav1 -maxrate 6M -bufsize 12M
-                      -map 0:a -c:a copy
-                      -max_muxing_queue_size 1024
-                      -f hls -hls_time 3 -hls_list_size 0 -hls_allow_cache 1 -hls_segment_type fmp4
-                      -hls_segment_filename %streamFileDir%/stream%streamNum%-%09d.m4s -hls_flags delete_segments
-                      -master_pl_name stream%streamNum%.m3u8 %streamFileDir%/stream%streamNum%-child.m3u8'
+                      ''
