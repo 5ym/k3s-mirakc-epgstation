@@ -2,22 +2,45 @@
 
 このディレクトリには EPG スタックの k3s マニフェストとローカルファイルが置かれています。
 
-## チャンネルスキャン・局ロゴ
+## チャンネルスキャン
 
-Mirakurun は録画・視聴で開いたチューナーセッションにもEPGパーサーを常時
-アタッチしているため、通常の録画がそのままサービス/EPG情報の更新を兼ねます。
-局ロゴもTR-B15のエンジニアリングサービスから自動抽出され、`server.yml`の
-`logoDataInterval`(既定7日 = 604800000ms)で鮮度管理されます。mirakc時代の
-ような専用スキャンスクリプトやCronJobは不要です。
+- Mirakurunの Web UI (`http://<host>:40772/`) → 「チャンネル設定」画面右上の
+  **Channel Scan** から、`Channel Type`(GR/BS/CS) と `Min/Max Channel` を
+  指定してスキャンできます。実機のチューナーで受信状況を見ながら現在使える
+  チャンネルを検出する機能です。既存のチャンネル一覧を更新する形にするため
+  **Refresh (Update existing channels)** を有効にして実行してください。
+- 目視での転記はミスの元なので、`kubectl cp` でスキャン後のファイルを
+  そのまま取り出してリポジトリに上書きするのがおすすめです。
 
-`mirakurun/channels.yml` に登録済みのチャンネルは `serviceId` を明示していない
-ため、Mirakurun が自動でサービスをスキャンして解決します。新しいチャンネルを
-追加したい場合は `mirakurun/channels.yml` に `name`/`type`/`channel` を追記して
-コミットしてください(CIがイメージを再ビルドし、`k3s/deployment.yaml` の
-イメージタグを自動で更新します)。
+  ```sh
+  kubectl -n epg cp \
+    "$(kubectl -n epg get pod -l app=mirakurun -o jsonpath='{.items[0].metadata.name}'):/app-config/channels.yml" \
+    ./mirakurun/channels.yml
+  ```
 
-現在のチューニング状況・登録サービス一覧はMirakurunのWeb UI
-(`https://m.doany.io/`)から確認できます。
+  `git diff` で意図しない変更が無いか確認してからcommit・pushしてください。
+  `build-and-deploy.yml` が `mirakurun/*.yml` の変更を検知してイメージを
+  再ビルド・再デプロイします。
+
+## Windows でのVLC視聴
+
+- `vlc/` 以下は、EPGStationのWeb UIにある視聴/ダウンロードリンク
+  (`cvlc://user:...@ADDRESS` 形式。`epgstation/config.template.yml` の
+  `urlscheme` 参照)をWindows上でクリックしたときにVLCが直接起動して
+  再生されるようにするための設定一式です。
+- `install-vlc-protocol.ps1`: `cvlc://` プロトコルをレジストリに登録し、
+  ハンドラとして `%USERPROFILE%\OneDrive\Tool\vlc.bat` を呼び出す
+  ように設定します(REG_EXPAND_SZ で登録しているので `%USERPROFILE%` は
+  環境ごとに自動展開されます)。視聴用PCの `OneDrive\Tool\` 以下に
+  `vlc.bat` を配置してから実行してください。管理者権限が必要ですが、
+  スクリプト自身が非管理者で起動された場合はUACプロンプトを出して
+  自動的に昇格・再実行するので、右クリック→「Run with PowerShell」で
+  そのまま実行してかまいません。配置先を変える場合はスクリプト内の
+  パスも書き換えが必要です。
+- `vlc.bat`: 渡された `cvlc://...` のURLから `https://...` を組み立てて
+  `C:\Program Files\VideoLAN\VLC\vlc.exe` を起動します。VLCのインストール
+  先が異なる場合はパスを書き換えてください。
+- `uninstall-vlc-protocol.ps1`: 登録した `cvlc` プロトコルの削除用です。
 
 ## 補足
 
