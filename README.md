@@ -52,8 +52,7 @@ k3sホストの初期構築やクラスタ共通のアドオン類は別の(プ�
   そのまま取り出してリポジトリに上書きするのがおすすめです。
 
   ```sh
-  kubectl -n epg exec "$(kubectl -n epg get pod -l app=mirakurun -o jsonpath='{.items[0].metadata.name}')" -- \
-    cat /app-config/channels.yml > ./mirakurun/channels.yml
+  kubectl -n epg exec deploy/mirakurun -- cat /app-config/channels.yml > ./mirakurun/channels.yml
   ```
 
   `git diff` で意図しない変更が無いか確認してからcommit・pushしてください。
