@@ -39,6 +39,9 @@ text += `\n${to}`
 
 fetch('http://xool.xool:3000/api/tweets', {
     method: 'POST',
+    headers: {
+        'Content-Type': 'application/json',
+    },
     body: JSON.stringify({
         key: process.env.XOOL_API_KEY,
         text: text,
