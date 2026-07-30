@@ -33,8 +33,8 @@ k3sホストの初期構築やクラスタ共通のアドオン類は別の(プ�
 - **チューナードライバ**: `k3s/deployment.yaml` の mirakurun は
   `privileged: true` かつ `/dev/bus`・`/dev/dvb` をhostPathでマウントする
   ため、ノード側にPT3/PX4系チューナーのドライバが読み込まれている必要がある。
-- **GHCRイメージの公開設定**: `ghcr.io/5ym/mirakurun` /
-  `ghcr.io/5ym/epgstation` をpullできること(imagePullSecrets未設定のため
+- **GHCRイメージの公開設定**: `ghcr.io/danything/mirakurun` /
+  `ghcr.io/danything/epgstation` をpullできること(imagePullSecrets未設定のため
   publicパッケージである前提)。
 
 ## チャンネルスキャン
