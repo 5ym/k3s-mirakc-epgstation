@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: mirakurun
-          image: ghcr.io/danything/mirakurun:sha-a0364b07b383
+          image: ghcr.io/danything/mirakurun:sha-28be20ae1b55
           imagePullPolicy: IfNotPresent
           securityContext:
             privileged: true
@@ -102,7 +102,7 @@ spec:
     spec:
       containers:
         - name: epgstation
-          image: ghcr.io/danything/epgstation:sha-a0364b07b383
+          image: ghcr.io/danything/epgstation:sha-28be20ae1b55
           imagePullPolicy: IfNotPresent
           env:
             - name: TZ
