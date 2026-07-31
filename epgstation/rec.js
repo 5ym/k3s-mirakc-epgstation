@@ -52,7 +52,9 @@ fetch('http://xool.xool:3000/api/tweets', {
         throw new Error(`HTTP ${res.status}: ${body}`)
     }
     const result = JSON.parse(body)
-    if (result.error || result.errors) {
+    // The endpoint answers 200 even when the upstream X API rejects the post,
+    // reporting it either as {error} or as an X error object {status, title, detail}.
+    if (result.error || result.errors || result.detail || result.status >= 400) {
         throw new Error(`API error: ${body}`)
     }
     console.log(result)
