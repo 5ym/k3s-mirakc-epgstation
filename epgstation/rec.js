@@ -46,7 +46,15 @@ fetch('http://xool.xool:3000/api/tweets', {
         key: process.env.XOOL_API_KEY,
         text: text,
     })
-}).then((data) => data.json()).then((result) => {
+}).then(async (res) => {
+    const body = await res.text()
+    if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${body}`)
+    }
+    const result = JSON.parse(body)
+    if (result.error || result.errors) {
+        throw new Error(`API error: ${body}`)
+    }
     console.log(result)
 }).catch((error) => {
     console.error(error)
