@@ -300,22 +300,3 @@ k3sホストの初期構築やクラスタ共通のアドオン類は別の(プ�
   `build-and-deploy.yml` が `mirakurun/*.yml` の変更を検知してイメージを
   再ビルド・再デプロイします。
 
-## Windows でのVLC視聴
-
-- `vlc/` 以下は、EPGStationのWeb UIにある視聴/ダウンロードリンク
-  (`cvlc://user:...@ADDRESS` 形式。`epgstation/config.template.yml` の
-  `urlscheme` 参照)をWindows上でクリックしたときにVLCが直接起動して
-  再生されるようにするための設定一式です。
-- `install-vlc-protocol.ps1`: `cvlc://` プロトコルをレジストリに登録し、
-  ハンドラとして `%USERPROFILE%\OneDrive\Tool\vlc.bat` を呼び出す
-  ように設定します(REG_EXPAND_SZ で登録しているので `%USERPROFILE%` は
-  環境ごとに自動展開されます)。視聴用PCの `OneDrive\Tool\` 以下に
-  `vlc.bat` を配置してから実行してください。管理者権限が必要ですが、
-  スクリプト自身が非管理者で起動された場合はUACプロンプトを出して
-  自動的に昇格・再実行するので、右クリック→「Run with PowerShell」で
-  そのまま実行してかまいません。配置先を変える場合はスクリプト内の
-  パスも書き換えが必要です。
-- `vlc.bat`: 渡された `cvlc://...` のURLから `https://...` を組み立てて
-  `C:\Program Files\VideoLAN\VLC\vlc.exe` を起動します。VLCのインストール
-  先が異なる場合はパスを書き換えてください。
-- `uninstall-vlc-protocol.ps1`: 登録した `cvlc` プロトコルの削除用です。
