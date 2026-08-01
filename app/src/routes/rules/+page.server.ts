@@ -1,11 +1,10 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { genreName } from '$lib/arib';
-import { isCmMode } from '$lib/server/cm';
-import { config } from '$lib/server/config';
 import { database, now, queryAll, queryOne } from '$lib/server/db';
-import { isVideoCodec } from '$lib/server/encoder';
-import { applyRules, matches } from '$lib/server/rules';
+import { sync } from '$lib/server/epg';
+import { matches } from '$lib/server/rules';
 import { resolveConflicts } from '$lib/server/scheduler';
+import { settings } from '$lib/server/settings';
 import type { Program, Rule, Service } from '$lib/types';
 
 interface Row extends Rule {
@@ -40,8 +39,8 @@ function conditionsFrom(params: URLSearchParams): Rule | null {
         priority: 2,
         encode: 1,
         keep_original: 0,
-        cm_cut: config.cmCutDefault,
-        codec: config.encodeCodec,
+        cm_cut: settings().cmCut,
+        codec: settings().codec,
         source: null,
         created_at: 0,
     };
@@ -98,7 +97,7 @@ export function load({ url }) {
     const services = database().prepare('SELECT * FROM services ORDER BY type, channel').all() as Service[];
     // フォームの初期値は「編集中のルール」か「URLに載った条件」。
     // preview と別々に組み立てると、画面に出ている結果と保存されるものがズレる
-    return { rules, services, editing: editing ?? null, seed: conditions, preview };
+    return { rules, services, editing: editing ?? null, seed: conditions, preview, defaults: settings() };
 }
 
 /** 選択されたチャンネルを JSON 配列に。未選択(=全チャンネル)は NULL で表す */
@@ -152,9 +151,13 @@ function ruleName(
         : `${parts.slice(0, 3).join('・')}${parts.length > 3 ? ' ほか' : ''}`;
 }
 
+/**
+ * ルールを当て直す。先に番組表を取り直してから当てる。
+ * 押す動機はたいてい「新しい番組に当ててほしい」なので、古い番組表のまま
+ * 当てても期待どおりにならない。
+ */
 async function reapply(): Promise<void> {
-    applyRules();
-    await resolveConflicts();
+    await sync();
 }
 
 export const actions = {
@@ -171,10 +174,9 @@ export const actions = {
             });
         }
         const services = queryAll<Service>('SELECT * FROM services');
+        const current = settings();
         const name = ruleName(keyword, types, ids, genreIds, services);
 
-        const cmCut = form.get('cmCut');
-        const codec = form.get('codec');
         database()
             .prepare(
                 `INSERT INTO rules (name, keyword, ignore_keyword, service_ids, service_types, genres,
@@ -192,8 +194,8 @@ export const actions = {
                 Number(form.get('priority') ?? 2) || 2,
                 form.get('encode') === 'on' ? 1 : 0,
                 form.get('keepOriginal') === 'on' ? 1 : 0,
-                isCmMode(cmCut) ? cmCut : config.cmCutDefault,
-                isVideoCodec(codec) ? codec : config.encodeCodec,
+                current.cmCut,
+                current.codec,
                 now(),
             );
 
@@ -217,8 +219,7 @@ export const actions = {
         }
 
         const services = queryAll<Service>('SELECT * FROM services');
-        const cmCut = form.get('cmCut');
-        const codec = form.get('codec');
+        const current = settings();
         database()
             .prepare(
                 `UPDATE rules SET name = ?, keyword = ?, ignore_keyword = ?, service_ids = ?,
@@ -236,8 +237,8 @@ export const actions = {
                 Number(form.get('priority') ?? 2) || 2,
                 form.get('encode') === 'on' ? 1 : 0,
                 form.get('keepOriginal') === 'on' ? 1 : 0,
-                isCmMode(cmCut) ? cmCut : config.cmCutDefault,
-                isVideoCodec(codec) ? codec : config.encodeCodec,
+                current.cmCut,
+                current.codec,
                 id,
             );
 

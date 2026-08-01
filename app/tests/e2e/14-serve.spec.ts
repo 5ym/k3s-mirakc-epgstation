@@ -12,7 +12,7 @@ const CREDENTIALS = { username: 'denpa', password: 'ひみつ' };
 test.describe('配信とベーシック認証', () => {
     test('画面には認証がかからない', async ({ page }) => {
         await goto(page, '/');
-        await expect(page.getByRole('heading', { level: 1 })).toHaveText('録画');
+        await expect(page.getByRole('heading', { level: 1 })).toHaveText('予約と録画');
     });
 
     test('ファイルの口は資格情報が無いと断る', async ({ request }) => {

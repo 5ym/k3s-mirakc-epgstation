@@ -13,17 +13,16 @@ test.describe('ダッシュボードと画面遷移', () => {
     test('EPG取得後に局・番組が反映され、全ページを開ける', async ({ page, request }) => {
         await syncEpg(request);
 
-        await goto(page, '/reservations');
+        // 状態と番組数は番組表に出す。古いことに気づくのはこの画面なので
+        await goto(page, '/guide');
         await expect(page.getByTestId('status')).toContainText('Mirakurun');
-
-        // 偽Mirakurunは3局を返す。取り込めていればヘッダの「局」が3になる
-        await expect(page.getByTestId('status')).toContainText('局 3');
+        await expect(page.locator('.badge').filter({ hasText: '局' })).toContainText('局 3');
 
         for (const [name, heading] of [
             ['nav-guide', '番組表'],
             ['nav-rules', '自動予約ルール'],
             ['nav-settings', '設定'],
-            ['nav-home', '録画'],
+            ['nav-home', '予約と録画'],
         ] as const) {
             await page.getByTestId(name).click();
             await expect(page.getByRole('heading', { level: 1 })).toHaveText(heading);
@@ -31,7 +30,7 @@ test.describe('ダッシュボードと画面遷移', () => {
     });
 
     test('ダッシュボードのボタンからEPGを取り直せる', async ({ page }) => {
-        await goto(page, '/reservations');
+        await goto(page, '/guide');
         await page.getByTestId('sync-button').click();
         await expect(page.getByTestId('sync-result')).toContainText('局 3');
     });
@@ -91,10 +90,10 @@ test.describe('ダッシュボードと画面遷移', () => {
     });
 
     test('アクション中はボタンを押せなくし、ローディングを出す', async ({ page }) => {
-        await goto(page, '/reservations');
+        await goto(page, '/guide');
 
         // EPG取得は実機だと数秒かかる。その間に二度押しできないことを確かめたいので遅らせる
-        await page.route('**/?/sync', async (route) => {
+        await page.route('**/guide?/sync', async (route) => {
             await new Promise((resolve) => setTimeout(resolve, 2000));
             await route.continue();
         });
@@ -111,7 +110,7 @@ test.describe('ダッシュボードと画面遷移', () => {
     });
 
     test('サーバ側の変化が通知で届く', async ({ page }) => {
-        await goto(page, '/reservations');
+        await goto(page, '/');
 
         // 受け取ったイベントを溜める。ポーリングではなく push で届くことを確かめる
         await page.evaluate(() => {
@@ -162,7 +161,7 @@ test.describe('ダッシュボードと画面遷移', () => {
 
         await page.getByTestId('rule-row').first().getByTestId('rule-delete').click();
         await expect(page.getByTestId('rule-row')).toHaveCount(0);
-        await goto(page, '/reservations');
+        await goto(page, '/');
         for (let i = 0; i < 80; i++) {
             const buttons = page.getByTestId('cancel-button');
             if ((await buttons.count()) === 0) break;

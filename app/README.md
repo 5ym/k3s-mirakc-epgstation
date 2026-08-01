@@ -31,6 +31,7 @@ Mirakurun から EPG と TS を受け取り、予約・録画・エンコード�
 | `src/lib/server/webhook.ts` | 録画の節目を外部へ通知する |
 | `src/lib/server/runtime.ts` | 常駐処理の起動 (hooks.server.ts から呼ばれる) |
 | `src/lib/server/config.ts` | 環境変数 |
+| `src/lib/server/settings.ts` | 画面から変えられる設定 (環境変数を初期値にDBで上書き) |
 | `src/lib/server/db.ts` / `schema.ts` | SQLite と スキーマ |
 
 ## 状態遷移
@@ -73,7 +74,7 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 | `START_MARGIN` / `END_MARGIN` | `10000` / `15000` | 録画の前後マージン(ms) |
 | `EPG_SYNC_INTERVAL` | `600000` | EPG取得の間隔(ms) |
 | `SCHEDULER_TICK` | `5000` | 予約チェックの間隔(ms) |
-| `CM_CUT_DEFAULT` | `chapter` | `off` / `chapter` / `cut` |
+| `CM_CUT_DEFAULT` | `chapter` | `off` / `chapter` / `cut` の**初期値**。設定画面で変えられる |
 | `CM_DETECTOR` | `silence` | `silence` / `jls` |
 | `CM_SILENCE_NOISE` | `-50dB` | 無音とみなす音量 |
 | `CM_SILENCE_DURATION` | `0.4` | 無音とみなす最短の長さ(秒) |
@@ -90,11 +91,10 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 
 | 画面 | 役割 |
 | --- | --- |
-| `/` | **録画一覧**。再生リンク・再エンコード・削除・実体との照合 |
-| `/reservations` | ダッシュボード兼**予約一覧**。状態・失敗の通知・録画中と、予約の取消/競合再計算 |
-| `/guide` | 番組表(グリッド)と番組検索。検索はルールと同じ条件で絞り込め、そのままルールにできる |
+| `/` | **予約と録画**を2ペインで並べる。予約の取消/競合再計算、再生リンク・再エンコード・削除 |
+| `/guide` | 番組表(グリッド)と番組検索、EPG取得。検索はルールと同じ条件で絞り込め、そのままルールにできる |
 | `/rules` | 自動予約ルールの一覧と作成 |
-| `/settings` | 通知先(Webhook)と EPGStation からの引き継ぎ |
+| `/settings` | 録画のしかた(コーデック/CM)、通知先(Webhook)、EPGStation からの引き継ぎ |
 | `/api/recordings/<id>/file` | 録画ファイル。Range 対応 |
 | `/dav` | WebDAV (PROPFIND / GET / HEAD)。Kodi 用。書き込みは受けない |
 

@@ -1,10 +1,8 @@
-import type { CmMode, Program, Recording, Reservation, VideoCodec } from '../types';
-import { isCmMode } from './cm';
-import { config } from './config';
+import type { Program, Recording, Reservation } from '../types';
 import { database, now, queryOne } from './db';
-import { isVideoCodec } from './encoder';
 import { stopRecording } from './recorder';
 import { resolveConflicts } from './scheduler';
+import { settings } from './settings';
 
 /** 手動予約。ルール由来の予約が既にあれば手動扱いに昇格させて優先度を上げる */
 export async function reserve(
@@ -13,8 +11,6 @@ export async function reserve(
         priority?: number;
         encode?: boolean;
         keepOriginal?: boolean;
-        cmCut?: CmMode;
-        codec?: VideoCodec;
     } = {},
 ): Promise<Reservation> {
     const program = queryOne<Program>('SELECT * FROM programs WHERE id = ?', programId);
@@ -26,8 +22,8 @@ export async function reserve(
     const priority = options.priority ?? 3;
     const encode = options.encode === false ? 0 : 1;
     const keepOriginal = options.keepOriginal === true ? 1 : 0;
-    const cmCut = isCmMode(options.cmCut) ? options.cmCut : config.cmCutDefault;
-    const codec = isVideoCodec(options.codec) ? options.codec : config.encodeCodec;
+    // コーデックとCMの扱いは全体で1つ。予約ごとには持たせない
+    const { cmCut, codec } = settings();
 
     database()
         .prepare(

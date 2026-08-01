@@ -22,6 +22,52 @@
     <div class="alert alert-info mb-4" data-testid="migrate-started">{form.migrate}</div>
 {/if}
 
+{#if form?.saved}
+    <div class="alert alert-success mb-4" data-testid="saved-result">保存しました。</div>
+{/if}
+
+<section class="card bg-base-100 mb-6 shadow">
+    <div class="card-body">
+        <h2 class="card-title">録画のしかた</h2>
+        <p class="text-base-content/70 text-sm">
+            全部の録画に効きます。番組ごとに変えたくなることは実際にはほとんど無いので、
+            ルールにも予約にも同じ選択肢を並べず、ここ1箇所で決めます。
+        </p>
+        <form method="POST" action="?/saveRecording" use:submitting class="grid gap-4 sm:grid-cols-2">
+            <label class="flex flex-col gap-1">
+                <span class="text-sm font-medium">映像コーデック</span>
+                <select name="codec" class="select select-bordered w-full" data-testid="global-codec">
+                    <option value="av1" selected={data.recording.codec === 'av1'}>
+                        AV1 (小さい・遅い)
+                    </option>
+                    <option value="h264" selected={data.recording.codec === 'h264'}>
+                        H.264 (速い・非力なマシン向け)
+                    </option>
+                </select>
+                {#if data.fromEnv.codec}
+                    <span class="text-base-content/60 text-xs">いまは環境変数の値です</span>
+                {/if}
+            </label>
+            <label class="flex flex-col gap-1">
+                <span class="text-sm font-medium">CM</span>
+                <select name="cmCut" class="select select-bordered w-full" data-testid="global-cmcut">
+                    <option value="chapter" selected={data.recording.cmCut === 'chapter'}>
+                        チャプターを打つだけ (安全)
+                    </option>
+                    <option value="cut" selected={data.recording.cmCut === 'cut'}>実際に切る</option>
+                    <option value="off" selected={data.recording.cmCut === 'off'}>何もしない</option>
+                </select>
+                {#if data.fromEnv.cmCut}
+                    <span class="text-base-content/60 text-xs">いまは環境変数の値です</span>
+                {/if}
+            </label>
+            <div class="sm:col-span-2">
+                <button class="btn btn-primary" data-testid="save-recording">保存</button>
+            </div>
+        </form>
+    </div>
+</section>
+
 <section class="card bg-base-100 shadow">
     <div class="card-body">
         <h2 class="card-title">通知</h2>

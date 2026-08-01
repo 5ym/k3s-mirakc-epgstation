@@ -44,8 +44,7 @@
     }
 
     const links = [
-        { href: '/', label: '録画' },
-        { href: '/reservations', label: '予約' },
+        { href: '/', label: '予約と録画' },
         { href: '/guide', label: '番組表' },
         { href: '/rules', label: 'ルール' },
         { href: '/settings', label: '設定' },

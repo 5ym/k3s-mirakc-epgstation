@@ -242,61 +242,40 @@
 
             <fieldset class="border-base-300 rounded-box border p-4">
                 <legend class="px-2 text-sm font-medium">録画のしかた</legend>
-                <div class="grid gap-4 lg:grid-cols-4">
-                    <label class="flex flex-col gap-1">
-                        <span class="text-sm font-medium">映像コーデック</span>
-                        <select name="codec" class="select select-bordered w-full" data-testid="rule-codec">
-                            <option value="av1" selected={(data.seed?.codec ?? 'av1') === 'av1'}>
-                                AV1 (小さい・遅い)
-                            </option>
-                            <option value="h264" selected={data.seed?.codec === 'h264'}>
-                                H.264 (速い・非力なマシン向け)
-                            </option>
-                        </select>
+                <div class="flex flex-wrap gap-x-6 gap-y-2">
+                    <label class="flex cursor-pointer items-center gap-2">
+                        <input
+                            type="checkbox"
+                            name="encode"
+                            class="checkbox checkbox-sm"
+                            checked={data.seed ? data.seed.encode === 1 : true}
+                        />
+                        <span class="text-sm">エンコードする</span>
                     </label>
-                    <label class="flex flex-col gap-1">
-                        <span class="text-sm font-medium">CM</span>
-                        <select name="cmCut" class="select select-bordered w-full" data-testid="rule-cmcut">
-                            <option value="chapter" selected={(data.seed?.cm_cut ?? 'chapter') === 'chapter'}>
-                                チャプターだけ (安全)
-                            </option>
-                            <option value="cut" selected={data.seed?.cm_cut === 'cut'}>
-                                実際に切る (字幕は落ちる)
-                            </option>
-                            <option value="off" selected={data.seed?.cm_cut === 'off'}>何もしない</option>
-                        </select>
+                    <label class="flex cursor-pointer items-center gap-2">
+                        <input
+                            type="checkbox"
+                            name="keepOriginal"
+                            class="checkbox checkbox-sm"
+                            checked={data.seed ? data.seed.keep_original === 1 : false}
+                        />
+                        <span class="text-sm">生TSも残す</span>
                     </label>
-                    <div class="flex flex-col justify-center gap-2 lg:col-span-2">
-                        <div class="grid gap-2 sm:grid-cols-3">
-                            <label class="flex cursor-pointer items-center gap-2">
-                                <input
-                                    type="checkbox"
-                                    name="encode"
-                                    class="checkbox checkbox-sm"
-                                    checked={data.seed ? data.seed.encode === 1 : true}
-                                />
-                                <span class="text-sm">エンコードする</span>
-                            </label>
-                            <label class="flex cursor-pointer items-center gap-2">
-                                <input
-                                    type="checkbox"
-                                    name="keepOriginal"
-                                    class="checkbox checkbox-sm"
-                                    checked={data.seed ? data.seed.keep_original === 1 : false}
-                                />
-                                <span class="text-sm">生TSも残す</span>
-                            </label>
-                            <label class="flex cursor-pointer items-center gap-2">
-                                <input
-                                    type="checkbox"
-                                    name="freeOnly"
-                                    class="checkbox checkbox-sm"
-                                    checked={data.seed ? data.seed.free_only === 1 : true}
-                                />
-                                <span class="text-sm">無料放送のみ</span>
-                            </label>
-                        </div>
-                    </div>
+                    <label class="flex cursor-pointer items-center gap-2">
+                        <input
+                            type="checkbox"
+                            name="freeOnly"
+                            class="checkbox checkbox-sm"
+                            checked={data.seed ? data.seed.free_only === 1 : true}
+                        />
+                        <span class="text-sm">無料放送のみ</span>
+                    </label>
+                    <!-- コーデックとCMの扱いは全体で1つ。ここで選ばせると
+                         どこで決まったのか分からなくなる -->
+                    <span class="text-base-content/60 self-center text-xs">
+                        コーデックとCMの扱いは<a class="link" href="/settings">設定</a>で決めます ({data.defaults.codec.toUpperCase()}
+                        / CM: {CM_LABEL[data.defaults.cmCut]})
+                    </span>
                 </div>
             </fieldset>
 
@@ -382,14 +361,7 @@
                     </td>
                     <td class="text-error text-sm">{rule.ignore_keyword || '-'}</td>
                     <td class="max-w-xs truncate text-sm">{describe(rule)}</td>
-                    <td class="text-sm whitespace-nowrap">
-                        <span class="badge badge-sm badge-ghost" data-testid="rule-codec-badge">
-                            {rule.codec.toUpperCase()}
-                        </span>
-                        <span class="badge badge-sm badge-ghost" data-testid="rule-cmcut-badge">
-                            CM: {CM_LABEL[rule.cm_cut]}
-                        </span>
-                    </td>
+                    <td class="text-sm whitespace-nowrap"> </td>
                     <td>{rule.priority}</td>
                     <td>{rule.reservations}</td>
                     <td class="flex flex-nowrap gap-2">

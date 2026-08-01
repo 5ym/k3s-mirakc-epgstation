@@ -1,7 +1,7 @@
 <script lang="ts">
     import { dragScroll, submitting } from '$lib/actions';
     import { type Audio, audioLabel, type Genre, genreLabel, videoLabel } from '$lib/arib';
-    import { dateTime, duration, stateLabel, time } from '$lib/format';
+    import { CM_LABEL, dateTime, duration, stateLabel, time } from '$lib/format';
 
     let { data, form } = $props();
 
@@ -128,6 +128,22 @@
         </label>
         <button class="btn btn-primary" type="submit">検索</button>
     </form>
+</div>
+
+<div class="mb-3 flex flex-wrap items-center gap-2">
+    <div class="badge badge-lg {data.mirakurun.ok ? 'badge-success' : 'badge-error'}" data-testid="status">
+        Mirakurun {data.mirakurun.ok ? (data.mirakurun.version ?? 'OK') : 'NG'}
+    </div>
+    <div class="badge badge-lg badge-ghost">番組 {data.counts.programs} / 局 {data.counts.services}</div>
+    <!-- 番組表が古いと気づくのはこの画面なので、取り直すのもここに置く -->
+    <form method="POST" action="?/sync" use:submitting>
+        <button class="btn btn-sm" data-testid="sync-button">EPGを今すぐ取得</button>
+    </form>
+    {#if form?.sync}
+        <span class="text-sm" data-testid="sync-result">
+            局 {form.sync.services} / 番組 {form.sync.programs} / 新規予約 {form.sync.reserved}
+        </span>
+    {/if}
 </div>
 
 {#if form?.message}
@@ -335,39 +351,6 @@
                             <span class="text-base-content/60">(開かなければ既定のまま)</span>
                         </summary>
                         <div class="grid gap-3 px-3 pb-3 sm:grid-cols-2" data-testid="reserve-options">
-                            <label class="flex flex-col gap-1">
-                                <span class="text-sm font-medium">映像コーデック</span>
-                                <select
-                                    name="codec"
-                                    class="select select-bordered select-sm w-full"
-                                    data-testid="reserve-codec"
-                                >
-                                    <option value="av1" selected={data.defaults.codec === 'av1'}>
-                                        AV1 (小さい・遅い)
-                                    </option>
-                                    <option value="h264" selected={data.defaults.codec === 'h264'}>
-                                        H.264 (速い)
-                                    </option>
-                                </select>
-                            </label>
-                            <label class="flex flex-col gap-1">
-                                <span class="text-sm font-medium">CM</span>
-                                <select
-                                    name="cmCut"
-                                    class="select select-bordered select-sm w-full"
-                                    data-testid="reserve-cmcut"
-                                >
-                                    <option value="chapter" selected={data.defaults.cmCut === 'chapter'}>
-                                        チャプターだけ
-                                    </option>
-                                    <option value="cut" selected={data.defaults.cmCut === 'cut'}>
-                                        実際に切る
-                                    </option>
-                                    <option value="off" selected={data.defaults.cmCut === 'off'}>
-                                        何もしない
-                                    </option>
-                                </select>
-                            </label>
                             <label class="flex cursor-pointer items-center gap-2">
                                 <input
                                     type="checkbox"
@@ -388,6 +371,11 @@
                                 />
                                 <span class="text-sm">生TSも残す</span>
                             </label>
+                            <!-- コーデックとCMの扱いは全体で1つ -->
+                            <span class="text-base-content/60 text-xs sm:col-span-2">
+                                コーデックとCMの扱いは<a class="link" href="/settings">設定</a>で決めます ({data.defaults.codec.toUpperCase()}
+                                / CM: {CM_LABEL[data.defaults.cmCut]})
+                            </span>
                         </div>
                     </details>
                     <div class="modal-action mt-0">

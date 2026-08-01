@@ -37,7 +37,7 @@ test.describe('録画とエンコード', () => {
         const programId = await reserveSoon(page, request, 'BS');
 
         const reservationRow = `[data-testid="reservation-row"][data-program-id="${programId}"]`;
-        await waitForRowState(page, '/reservations?all=1', reservationRow, 'reservation-state', '完了');
+        await waitForRowState(page, '/?all=1', reservationRow, 'reservation-state', '完了');
 
         const recordingRow = `[data-testid="recording-row"][data-program-id="${programId}"]`;
         await waitForRowState(page, '/', recordingRow, 'recording-state', '視聴可能');
@@ -87,12 +87,17 @@ test.describe('CMの実カット', () => {
         test.setTimeout(180_000);
         await syncEpg(request);
 
-        // 番組ごとに CM の扱いを選べる。ここでは実際に切らせる
+        // CM の扱いは全体設定。実際に切る側にしてから録る
+        await goto(page, '/settings');
+        await page.getByTestId('global-cmcut').selectOption('cut');
+        await page.getByTestId('save-recording').click();
+        await expect(page.getByTestId('saved-result')).toBeVisible();
+
         await goto(page, '/guide?type=BS');
         const cells = await upcoming(page);
         const target = cells[0];
         const res = await request.post('/guide?/reserve', {
-            form: { programId: target.programId, options: '1', encode: 'on', cmCut: 'cut' },
+            form: { programId: target.programId, options: '1', encode: 'on' },
         });
         expect(res.ok()).toBeTruthy();
 

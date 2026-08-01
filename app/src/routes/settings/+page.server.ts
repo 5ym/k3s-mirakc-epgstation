@@ -1,11 +1,16 @@
 import { fail } from '@sveltejs/kit';
+import { isCmMode } from '$lib/server/cm';
 import { database, now, queryAll, queryOne } from '$lib/server/db';
+import { isVideoCodec } from '$lib/server/encoder';
 import { available as migrateAvailable, source, start, status } from '$lib/server/migrate';
+import { isStored, saveSettings, settings } from '$lib/server/settings';
 import { send, type Webhook } from '$lib/server/webhook';
 import { EVENTS } from '$lib/webhook-events';
 
 export function load() {
     return {
+        recording: settings(),
+        fromEnv: { codec: !isStored('codec'), cmCut: !isStored('cmCut') },
         webhooks: queryAll<Webhook>('SELECT * FROM webhooks ORDER BY id'),
         events: EVENTS,
         migrate: {
@@ -17,6 +22,18 @@ export function load() {
 }
 
 export const actions = {
+    /** 録画のしかた。番組ごとに変えたくなることが実際にはほとんど無いので全体で1つ */
+    saveRecording: async ({ request }) => {
+        const form = await request.formData();
+        const codec = String(form.get('codec') ?? '');
+        const cmCut = String(form.get('cmCut') ?? '');
+        if (!isVideoCodec(codec) || !isCmMode(cmCut)) {
+            return fail(400, { message: 'コーデックかCMの指定が不正です' });
+        }
+        saveSettings({ codec, cmCut });
+        return { success: true, saved: true };
+    },
+
     addWebhook: async ({ request }) => {
         const form = await request.formData();
         const url = String(form.get('url') ?? '').trim();

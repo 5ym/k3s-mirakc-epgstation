@@ -1,9 +1,9 @@
 import { fail } from '@sveltejs/kit';
-import { isCmMode } from '$lib/server/cm';
-import { config } from '$lib/server/config';
-import { queryAll } from '$lib/server/db';
-import { isVideoCodec } from '$lib/server/encoder';
+import { queryAll, queryOne } from '$lib/server/db';
+import { sync } from '$lib/server/epg';
+import { ping } from '$lib/server/mirakurun';
 import { reserve } from '$lib/server/reservations';
+import { settings } from '$lib/server/settings';
 import type { ChannelType, Program, Service } from '$lib/types';
 
 const HOUR = 60 * 60 * 1000;
@@ -32,7 +32,7 @@ interface GridProgram extends Program {
  * キーワードなし: 時間×チャンネルのグリッド。並びを眺めて選ぶとき用
  * キーワードあり: 全チャンネル横断のリスト。探しているものが決まっているとき用
  */
-export function load({ url }) {
+export async function load({ url }) {
     const type = (TYPES.find((t) => t === url.searchParams.get('type')) ?? 'GR') as ChannelType;
 
     // 既定は今日の放送日。めくるときだけ start が付く
@@ -66,11 +66,20 @@ export function load({ url }) {
         programs,
         services,
         // 予約の詳細で初期値として出す
-        defaults: { cmCut: config.cmCutDefault, codec: config.encodeCodec },
+        defaults: settings(),
+        mirakurun: await ping(),
+        counts: queryOne<{ programs: number; services: number }>(
+            'SELECT (SELECT COUNT(*) FROM programs) AS programs, (SELECT COUNT(*) FROM services) AS services',
+        )!,
     };
 }
 
 export const actions = {
+    /** 番組表が古いときに取り直す。番組表の追従と新規予約もここで走る */
+    sync: async () => {
+        return { success: true, sync: await sync() };
+    },
+
     reserve: async ({ request }) => {
         const form = await request.formData();
         const programId = Number(form.get('programId'));
@@ -80,14 +89,10 @@ export const actions = {
         // チェックを外した状態はキーごと消えるので、画面から来たことを印で見分ける。
         // 印が無い(APIから番組IDだけ投げた)ときは既定のまま
         const fromForm = form.get('options') === '1';
-        const cmCut = form.get('cmCut');
-        const codec = form.get('codec');
         try {
             await reserve(programId, {
                 encode: fromForm ? form.get('encode') === 'on' : undefined,
                 keepOriginal: fromForm && form.get('keepOriginal') === 'on',
-                cmCut: isCmMode(cmCut) ? cmCut : undefined,
-                codec: isVideoCodec(codec) ? codec : undefined,
             });
         } catch (error) {
             return fail(400, { message: String(error) });

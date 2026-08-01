@@ -19,7 +19,7 @@ test.describe('手動予約', () => {
         // 予約済みになると見た目が変わる
         await expect(cell).toContainText('予約済み');
 
-        await goto(page, '/reservations');
+        await goto(page, '/');
         const reservation = page.locator(
             `[data-testid="reservation-row"][data-program-id="${target.programId}"]`,
         );
@@ -31,7 +31,7 @@ test.describe('手動予約', () => {
         await expect(reservation).toHaveCount(0);
 
         // 取り消したものは「完了分も表示」でだけ見える
-        await goto(page, '/reservations?all=1');
+        await goto(page, '/?all=1');
         await expect(
             page.locator(`[data-testid="reservation-row"][data-program-id="${target.programId}"]`),
         ).toContainText('キャンセル');
@@ -54,7 +54,7 @@ test.describe('手動予約', () => {
             await expect(cell).toContainText('予約済み');
         }
 
-        await goto(page, '/reservations');
+        await goto(page, '/');
         for (const target of [first, second!]) {
             const reservation = page.locator(
                 `[data-testid="reservation-row"][data-program-id="${target.programId}"]`,
@@ -80,17 +80,16 @@ test.describe('予約の細かい指定', () => {
         await expect(page.getByTestId('reserve-options')).not.toBeVisible();
         await page.getByTestId('reserve-options-summary').click();
 
-        await page.getByTestId('reserve-codec').selectOption('h264');
-        await page.getByTestId('reserve-cmcut').selectOption('cut');
+        // コーデックとCMは全体設定。ここで選べるのは録画のしかただけ
+        await expect(page.getByTestId('reserve-options')).toContainText('設定');
         await page.getByTestId('reserve-keep').check();
         await page.getByTestId('detail-reserve').click();
 
-        await goto(page, '/reservations');
+        await goto(page, '/');
         const reservation = page.locator(
             `[data-testid="reservation-row"][data-program-id="${target.programId}"]`,
         );
-        await expect(reservation).toContainText('H264');
-        await expect(reservation).toContainText('カット');
+        await expect(reservation).toContainText('生TSも残す');
 
         await reservation.getByTestId('cancel-button').click();
         await expect(reservation).toHaveCount(0);
@@ -114,7 +113,7 @@ test.describe('予約の細かい指定', () => {
         await page.getByTestId('detail-reserve').click();
         await expect(page.getByTestId('guide-error')).toContainText('放送が終わっています');
 
-        await goto(page, '/reservations');
+        await goto(page, '/');
         await expect(
             page.locator(`[data-testid="reservation-row"][data-program-id="${past[0].id}"]`),
         ).toHaveCount(0);

@@ -30,7 +30,6 @@ test.describe('ルールの編集', () => {
         await page.getByTestId('rule-ignore').fill('再放送');
         await page.getByTestId('channel-summary').click();
         await page.getByTestId('rule-services').locator(`input[value="${BS11.id}"]`).check();
-        await page.getByTestId('rule-cmcut').selectOption('cut');
         await page.getByTestId('rule-update').click();
         await page.waitForURL('**/rules');
 
@@ -40,7 +39,6 @@ test.describe('ルールの編集', () => {
         await expect(row).toContainText('ニュース');
         await expect(row).toContainText('再放送');
         await expect(row).toContainText('BS11イレブン');
-        await expect(row.getByTestId('rule-cmcut-badge')).toContainText('カット');
 
         // 編集画面に入り直しても、変えた内容が入っている
         await page.getByTestId('rule-edit').first().click();
@@ -49,7 +47,7 @@ test.describe('ルールの編集', () => {
 
         await page.getByTestId('rule-cancel-edit').click();
         await page.getByTestId('rule-delete').first().click();
-        await goto(page, '/reservations');
+        await goto(page, '/');
         for (let i = 0; i < 80; i++) {
             const buttons = page.getByTestId('cancel-button');
             if ((await buttons.count()) === 0) break;
@@ -80,7 +78,7 @@ test.describe('ルールの作り直し', () => {
             await page.getByTestId('rule-submit').click();
             await expect(page.getByTestId('rule-row')).toHaveCount(1);
 
-            await goto(page, '/reservations');
+            await goto(page, '/');
             await expect(
                 page.getByTestId('reservation-row').filter({ hasText: 'テストアニメ' }).first(),
                 `${round} 回目`,
