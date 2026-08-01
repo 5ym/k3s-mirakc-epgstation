@@ -90,36 +90,40 @@ jobs:
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/denpa:${{ steps.tag.outputs.tag }}
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/denpa:latest
 
-      - name: Rewrite image tags in manifests
+      # 書き換えとpushを1つにまとめてある。
+      # actions/checkout はブランチ先端ではなく「トリガーしたコミット」を取るので、
+      # 2つのrunが重なると後発は先発のタグ更新を知らないまま同じ行を書き換えてしまう。
+      # rebase では同じ行の衝突を解けないため、毎回 origin/main に戻してから
+      # 書き換え直す(sedはTAGから一意に決まるので何度やっても同じ結果になる)。
+      - name: Rewrite image tags and push
         run: |
           set -eu
           OWNER="${{ github.repository_owner }}"
           TAG="${{ steps.tag.outputs.tag }}"
           FILES="k3s/deployment.yaml"
 
-          sed -i -E "s#image: [^[:space:]]*/mirakurun:[^[:space:]]*#image: ${{ env.REGISTRY }}/${OWNER}/mirakurun:${TAG}#g" ${FILES}
-          sed -i -E "s#image: [^[:space:]]*/epgstation:[^[:space:]]*#image: ${{ env.REGISTRY }}/${OWNER}/epgstation:${TAG}#g" ${FILES}
-          sed -i -E "s#image: [^[:space:]]*/denpa:[^[:space:]]*#image: ${{ env.REGISTRY }}/${OWNER}/denpa:${TAG}#g" ${FILES}
-
-      - name: Commit and push manifest updates
-        run: |
-          set -eu
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add k3s/deployment.yaml
-          if git diff --cached --quiet; then
-            echo "no manifest changes to commit"
-            exit 0
-          fi
-          git commit -m "chore: bump image tag to ${{ steps.tag.outputs.tag }} [skip ci]"
 
           for i in 1 2 3 4 5; do
+            git fetch origin main
+            git reset --hard origin/main
+
+            for image in mirakurun epgstation denpa; do
+              sed -i -E "s#image: [^[:space:]]*/${image}:[^[:space:]]*#image: ${{ env.REGISTRY }}/${OWNER}/${image}:${TAG}#g" ${FILES}
+            done
+
+            git add ${FILES}
+            if git diff --cached --quiet; then
+              echo "no manifest changes to commit"
+              exit 0
+            fi
+            git commit -m "chore: bump image tag to ${TAG} [skip ci]"
+
             if git push; then
               exit 0
             fi
-            echo "push rejected, rebasing onto origin/main and retrying (${i})"
-            git fetch origin main
-            git rebase origin/main
+            echo "push rejected, retrying from the new origin/main (${i})"
           done
           echo "failed to push manifest updates after retries"
           exit 1
