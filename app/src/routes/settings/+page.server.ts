@@ -1,5 +1,6 @@
 import { fail } from '@sveltejs/kit';
 import { config } from '$lib/server/config';
+import { database, now, queryAll, queryOne } from '$lib/server/db';
 import {
     allowDeletion,
     issueApiKey,
@@ -8,6 +9,8 @@ import {
     setupLibrary,
 } from '$lib/server/jellyfin';
 import { isStored, saveSettings, settings } from '$lib/server/settings';
+import { send, type Webhook } from '$lib/server/webhook';
+import { EVENTS } from '$lib/webhook-events';
 
 export function load({ url }) {
     const current = settings();
@@ -24,6 +27,8 @@ export function load({ url }) {
         // Jellyfin から見た denpa のURL。M3U に書き込まれる
         iptvOrigin: config.iptvOrigin === '' ? url.origin : config.iptvOrigin,
         liveProfile: config.liveProfile,
+        webhooks: queryAll<Webhook>('SELECT * FROM webhooks ORDER BY id'),
+        events: EVENTS,
     };
 }
 
@@ -61,6 +66,51 @@ export const actions = {
         } catch (error) {
             return fail(400, { message: String(error instanceof Error ? error.message : error) });
         }
+    },
+
+    addWebhook: async ({ request }) => {
+        const form = await request.formData();
+        const name = String(form.get('name') ?? '').trim();
+        const url = String(form.get('url') ?? '').trim();
+        if (name === '' || !/^https?:\/\//.test(url)) {
+            return fail(400, { message: '名前と http(s) で始まるURLを入力してください' });
+        }
+        // 何も選ばなければ全部の通知を受け取る
+        const events = form.getAll('events').map(String).filter(Boolean);
+
+        database()
+            .prepare('INSERT INTO webhooks (name, url, events, enabled, created_at) VALUES (?, ?, ?, 1, ?)')
+            .run(name, url, JSON.stringify(events), now());
+        return { success: true, webhookAdded: true };
+    },
+
+    toggleWebhook: async ({ request }) => {
+        const form = await request.formData();
+        const id = Number(form.get('id'));
+        if (!Number.isFinite(id)) return fail(400, { message: 'IDが不正です' });
+        database().prepare('UPDATE webhooks SET enabled = 1 - enabled WHERE id = ?').run(id);
+        return { success: true };
+    },
+
+    deleteWebhook: async ({ request }) => {
+        const form = await request.formData();
+        const id = Number(form.get('id'));
+        if (!Number.isFinite(id)) return fail(400, { message: 'IDが不正です' });
+        database().prepare('DELETE FROM webhooks WHERE id = ?').run(id);
+        return { success: true };
+    },
+
+    testWebhook: async ({ request }) => {
+        const form = await request.formData();
+        const id = Number(form.get('id'));
+        const webhook = queryOne<Webhook>('SELECT * FROM webhooks WHERE id = ?', id);
+        if (webhook === undefined) return fail(400, { message: '通知先が見つかりません' });
+
+        const status = await send(webhook, {
+            event: 'recording.finished',
+            text: 'denpa からのテスト送信です',
+        });
+        return { success: true, tested: status };
     },
 
     /** ライブラリ・メタデータ・削除許可・ライブTV をまとめて設定する */

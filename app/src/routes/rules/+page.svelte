@@ -4,6 +4,18 @@
 
     let { data, form } = $props();
 
+    /** 編集中のルールで選ばれているチャンネルと種別 */
+    function parse(json: string | null): (string | number)[] {
+        if (json === null) return [];
+        try {
+            return JSON.parse(json) as (string | number)[];
+        } catch {
+            return [];
+        }
+    }
+    const editingTypes = $derived(parse(data.editing?.service_types ?? null).map(String));
+    const editingServices = $derived(parse(data.editing?.service_ids ?? null).map(Number));
+
     const TYPE_LABEL: Record<string, string> = { GR: '地上波', BS: 'BS', CS: 'CS', SKY: 'SKY' };
 
     function describe(rule: { service_types: string | null; service_ids: string | null }): string {
@@ -41,12 +53,15 @@
 
 <div class="card bg-base-100 mb-6 shadow">
     <div class="card-body">
-        <h2 class="card-title">ルールを追加</h2>
+        <h2 class="card-title">{data.editing ? 'ルールを編集' : 'ルールを追加'}</h2>
         <p class="text-base-content/70 text-sm">
             条件に合う番組を、これから放送されるぶんから自動で予約します。ルール名はキーワードから付きます。
         </p>
 
         <form method="POST" use:submitting class="mt-2 max-w-3xl space-y-5">
+            {#if data.editing}
+                <input type="hidden" name="id" value={data.editing.id} />
+            {/if}
             <div class="grid gap-4 sm:grid-cols-2">
                 <label class="flex flex-col gap-1">
                     <span class="text-sm font-medium">キーワード</span>
@@ -54,6 +69,7 @@
                         name="keyword"
                         class="input input-bordered w-full"
                         placeholder="例: 名探偵"
+                        value={data.editing?.keyword ?? ''}
                         data-testid="rule-keyword"
                     />
                     <span class="text-base-content/60 text-xs">
@@ -66,6 +82,7 @@
                         name="ignoreKeyword"
                         class="input input-bordered w-full"
                         placeholder="例: 再放送 総集編"
+                        value={data.editing?.ignore_keyword ?? ''}
                         data-testid="rule-ignore"
                     />
                     <span class="text-base-content/60 text-xs">
@@ -88,6 +105,7 @@
                                         type="checkbox"
                                         name="serviceTypes"
                                         value={group.type}
+                                        checked={editingTypes.includes(group.type)}
                                         class="checkbox checkbox-sm"
                                     />
                                     <span class="text-sm">
@@ -113,6 +131,7 @@
                                                     type="checkbox"
                                                     name="serviceIds"
                                                     value={service.id}
+                                                    checked={editingServices.includes(service.id)}
                                                     class="checkbox checkbox-sm"
                                                 />
                                                 <span class="truncate text-sm">{service.name}</span>
@@ -136,16 +155,27 @@
                     <label class="flex flex-col gap-1">
                         <span class="text-sm font-medium">映像コーデック</span>
                         <select name="codec" class="select select-bordered w-full" data-testid="rule-codec">
-                            <option value="av1" selected>AV1 (小さい・エンコードが遅い)</option>
-                            <option value="h264">H.264 (速い・非力なマシン向け)</option>
+                            <option value="av1" selected={(data.editing?.codec ?? 'av1') === 'av1'}>
+                                AV1 (小さい・エンコードが遅い)
+                            </option>
+                            <option value="h264" selected={data.editing?.codec === 'h264'}>
+                                H.264 (速い・非力なマシン向け)
+                            </option>
                         </select>
                     </label>
                     <label class="flex flex-col gap-1">
                         <span class="text-sm font-medium">CM</span>
                         <select name="cmCut" class="select select-bordered w-full" data-testid="rule-cmcut">
-                            <option value="chapter" selected>チャプターを付けるだけ (安全)</option>
-                            <option value="cut">実際に切る (字幕は落ちる)</option>
-                            <option value="off">何もしない</option>
+                            <option
+                                value="chapter"
+                                selected={(data.editing?.cm_cut ?? 'chapter') === 'chapter'}
+                            >
+                                チャプターを付けるだけ (安全)
+                            </option>
+                            <option value="cut" selected={data.editing?.cm_cut === 'cut'}>
+                                実際に切る (字幕は落ちる)
+                            </option>
+                            <option value="off" selected={data.editing?.cm_cut === 'off'}>何もしない</option>
                         </select>
                     </label>
                     <label class="flex flex-col gap-1">
@@ -166,22 +196,46 @@
                     </label>
                     <div class="flex flex-col justify-center gap-2">
                         <label class="flex cursor-pointer items-center gap-2">
-                            <input type="checkbox" name="encode" class="checkbox checkbox-sm" checked />
+                            <input
+                                type="checkbox"
+                                name="encode"
+                                class="checkbox checkbox-sm"
+                                checked={data.editing ? data.editing.encode === 1 : true}
+                            />
                             <span class="text-sm">エンコードする</span>
                         </label>
                         <label class="flex cursor-pointer items-center gap-2">
-                            <input type="checkbox" name="keepOriginal" class="checkbox checkbox-sm" />
+                            <input
+                                type="checkbox"
+                                name="keepOriginal"
+                                class="checkbox checkbox-sm"
+                                checked={data.editing ? data.editing.keep_original === 1 : false}
+                            />
                             <span class="text-sm">生TSも残す</span>
                         </label>
                         <label class="flex cursor-pointer items-center gap-2">
-                            <input type="checkbox" name="freeOnly" class="checkbox checkbox-sm" checked />
+                            <input
+                                type="checkbox"
+                                name="freeOnly"
+                                class="checkbox checkbox-sm"
+                                checked={data.editing ? data.editing.free_only === 1 : true}
+                            />
                             <span class="text-sm">無料放送のみ</span>
                         </label>
                     </div>
                 </div>
             </fieldset>
 
-            <button class="btn btn-primary" formaction="?/create" data-testid="rule-submit">追加</button>
+            {#if data.editing}
+                <div class="flex gap-2">
+                    <button class="btn btn-primary" formaction="?/update" data-testid="rule-update">
+                        更新
+                    </button>
+                    <a class="btn" href="/rules" data-testid="rule-cancel-edit">やめる</a>
+                </div>
+            {:else}
+                <button class="btn btn-primary" formaction="?/create" data-testid="rule-submit">追加</button>
+            {/if}
             <p class="text-base-content/60 text-sm">
                 何が録れるか先に確かめたいときは
                 <a class="link" href="/guide" data-testid="to-guide">番組表の検索</a>
@@ -232,6 +286,7 @@
                     <td>{rule.priority}</td>
                     <td>{rule.reservations}</td>
                     <td class="flex gap-2">
+                        <a class="btn btn-sm" href="/rules?edit={rule.id}" data-testid="rule-edit">編集</a>
                         <form method="POST" action="?/toggle" use:submitting>
                             <input type="hidden" name="id" value={rule.id} />
                             <button class="btn btn-sm" data-testid="rule-toggle">

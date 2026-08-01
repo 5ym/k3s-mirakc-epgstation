@@ -24,6 +24,8 @@ test.describe('操作したときの反応', () => {
             await buttons.first().click();
             await page.waitForTimeout(80);
         }
+        // 片付け切れていないと件数の検証が意味を失うので、ここで落とす
+        await expect(page.getByTestId('reservation-row')).toHaveCount(0);
     });
 
     test('番組表で予約すると詳細が閉じ、予約済みになる', async ({ page }) => {

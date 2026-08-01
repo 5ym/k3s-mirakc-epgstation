@@ -25,6 +25,7 @@ Mirakurun から EPG と TS を受け取り、予約・録画・エンコード�
 | `src/lib/server/metadata.ts` | Jellyfin 向けの .nfo とサムネイル |
 | `src/lib/server/jellyfin.ts` | ライブラリの実体とDBの突き合わせ |
 | `src/lib/server/events.ts` | 画面へ変化を知らせる (SSE。ポーリングの代わり) |
+| `src/lib/server/webhook.ts` | 録画の節目を外部へ通知する |
 | `src/lib/server/runtime.ts` | 常駐処理の起動 (hooks.server.ts から呼ばれる) |
 
 ## 状態遷移
@@ -81,7 +82,7 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 | `/guide` | 番組表(グリッド)と番組検索。検索はルールと同じ条件で絞り込め、そのままルールにできる |
 | `/rules` | 自動予約ルールの一覧と作成 |
 | `/recordings` | ライブラリ。**エンコード中の一覧も上に出る**(ライブラリに入る途中の状態なので) |
-| `/settings` | Jellyfin の接続設定とセットアップ |
+| `/settings` | Jellyfin の接続設定とセットアップ、通知先(Webhook)の管理 |
 
 ## テスト
 

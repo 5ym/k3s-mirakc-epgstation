@@ -1,7 +1,7 @@
-import { fail } from '@sveltejs/kit';
+import { fail, redirect } from '@sveltejs/kit';
 import { isCmMode } from '$lib/server/cm';
 import { config } from '$lib/server/config';
-import { database, now, queryAll } from '$lib/server/db';
+import { database, now, queryAll, queryOne } from '$lib/server/db';
 import { isVideoCodec } from '$lib/server/encoder';
 import { applyRules } from '$lib/server/rules';
 import { resolveConflicts } from '$lib/server/scheduler';
@@ -11,7 +11,9 @@ interface Row extends Rule {
     reservations: number;
 }
 
-export function load() {
+export function load({ url }) {
+    // ?edit=<id> のときは、そのルールをフォームに読み込んで書き換えられるようにする
+    const editing = queryOne<Rule>('SELECT * FROM rules WHERE id = ?', Number(url.searchParams.get('edit')));
     const rules = database()
         .prepare(
             `SELECT r.*, (SELECT COUNT(*) FROM reservations WHERE rule_id = r.id) AS reservations
@@ -19,7 +21,7 @@ export function load() {
         )
         .all() as Row[];
     const services = database().prepare('SELECT * FROM services ORDER BY type, channel').all() as Service[];
-    return { rules, services };
+    return { rules, services, editing: editing ?? null };
 }
 
 /** 選択されたチャンネルを JSON 配列に。未選択(=全チャンネル)は NULL で表す */
@@ -102,6 +104,48 @@ export const actions = {
 
         await reapply();
         return { success: true };
+    },
+
+    update: async ({ request }) => {
+        const form = await request.formData();
+        const id = Number(form.get('id'));
+        if (!Number.isFinite(id)) return fail(400, { message: 'ルールIDが不正です' });
+
+        const keyword = String(form.get('keyword') ?? '').trim();
+        const ids = serviceIds(form);
+        const types = serviceTypes(form);
+        if (keyword === '' && ids === null && types === null) {
+            return fail(400, { message: 'キーワードかチャンネルのどちらかは指定してください' });
+        }
+
+        const services = queryAll<Service>('SELECT * FROM services');
+        const cmCut = form.get('cmCut');
+        const codec = form.get('codec');
+        database()
+            .prepare(
+                `UPDATE rules SET name = ?, keyword = ?, ignore_keyword = ?, service_ids = ?,
+                 service_types = ?, free_only = ?, priority = ?, encode = ?, keep_original = ?,
+                 cm_cut = ?, codec = ? WHERE id = ?`,
+            )
+            .run(
+                ruleName(keyword, types, ids, services),
+                keyword,
+                String(form.get('ignoreKeyword') ?? '').trim(),
+                ids,
+                types,
+                form.get('freeOnly') === 'on' ? 1 : 0,
+                Number(form.get('priority') ?? 2) || 2,
+                form.get('encode') === 'on' ? 1 : 0,
+                form.get('keepOriginal') === 'on' ? 1 : 0,
+                isCmMode(cmCut) ? cmCut : config.cmCutDefault,
+                isVideoCodec(codec) ? codec : config.encodeCodec,
+                id,
+            );
+
+        // 条件が変わったので、これから録るぶんは組み直す。
+        // 条件から外れた予約は残しておく(意図して個別に残している場合があるため)
+        await reapply();
+        redirect(303, '/rules');
     },
 
     toggle: async ({ request }) => {

@@ -15,6 +15,8 @@ const listingProviders: Record<string, unknown>[] = [];
 let nextId = 1;
 // Jellyfin のライブTV画面で録画ボタンを押すと作られるタイマー
 const timers: Record<string, unknown>[] = [];
+// denpa からの通知を受け取る先。テストで届いた内容を確かめる
+const webhookCalls: Record<string, unknown>[] = [];
 // ライブラリ(VirtualFolders)とユーザー。denpa の初期セットアップの相手
 const folders: Record<string, unknown>[] = [];
 const users = [
@@ -42,6 +44,7 @@ Bun.serve({
                 timers,
                 folders,
                 users,
+                webhookCalls,
             });
         }
         // 「録画ボタンを押した」を再現する
@@ -57,6 +60,7 @@ Bun.serve({
             tunerHosts.length = 0;
             listingProviders.length = 0;
             timers.length = 0;
+            webhookCalls.length = 0;
             folders.length = 0;
             for (const u of users) u.Policy.EnableContentDeletion = false;
             return json({ ok: true });
@@ -75,6 +79,11 @@ Bun.serve({
             return json({
                 Items: [{ AccessToken: ISSUED_KEY, AppName: url.searchParams.get('app') ?? 'denpa' }],
             });
+        }
+
+        if (url.pathname === '/__control/webhook' && request.method === 'POST') {
+            webhookCalls.push((await request.json()) as Record<string, unknown>);
+            return json({ ok: true });
         }
 
         if (url.pathname === '/Users') return json(users);

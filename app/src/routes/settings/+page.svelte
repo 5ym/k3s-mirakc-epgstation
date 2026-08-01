@@ -1,5 +1,7 @@
 <script lang="ts">
     import { submitting } from '$lib/actions';
+    import { EVENT_LABEL } from '$lib/webhook-events';
+    import { dateTime } from '$lib/format';
 
     let { data, form } = $props();
 </script>
@@ -146,3 +148,128 @@
         </div>
     </section>
 </div>
+
+<section class="card bg-base-100 mt-6 shadow">
+    <div class="card-body">
+        <h2 class="card-title">通知</h2>
+        <p class="text-base-content/70 text-sm">
+            録画の節目を外部に飛ばします。Discord や Slack の Incoming Webhook の URL をそのまま入れられます。
+            録画の失敗は画面を開くまで気づけないので、少なくとも失敗だけでも入れておくと安心です。
+        </p>
+
+        {#if form?.tested}
+            <div class="alert mb-2" data-testid="webhook-tested">テスト送信の結果: {form.tested}</div>
+        {/if}
+
+        <form method="POST" action="?/addWebhook" use:submitting class="grid gap-3 sm:grid-cols-2">
+            <label class="flex flex-col gap-1">
+                <span class="text-sm font-medium">名前</span>
+                <input
+                    name="name"
+                    class="input input-bordered w-full"
+                    placeholder="例: Discord"
+                    data-testid="webhook-name"
+                />
+            </label>
+            <label class="flex flex-col gap-1">
+                <span class="text-sm font-medium">URL</span>
+                <input
+                    name="url"
+                    class="input input-bordered w-full"
+                    placeholder="https://..."
+                    data-testid="webhook-url"
+                />
+            </label>
+            <div class="sm:col-span-2">
+                <span class="text-sm font-medium">送る通知</span>
+                <div class="mt-1 flex flex-wrap gap-4" data-testid="webhook-events">
+                    {#each data.events as event (event)}
+                        <label class="flex cursor-pointer items-center gap-2">
+                            <input type="checkbox" name="events" value={event} class="checkbox checkbox-sm" />
+                            <span class="text-sm">{EVENT_LABEL[event]}</span>
+                        </label>
+                    {/each}
+                </div>
+                <p class="text-base-content/60 mt-1 text-xs">1つも選ばなければ全部送ります</p>
+            </div>
+            <div class="sm:col-span-2">
+                <button class="btn btn-primary" data-testid="webhook-add">追加</button>
+            </div>
+        </form>
+
+        {#if data.webhooks.length > 0}
+            <div class="mt-4 overflow-x-auto">
+                <table class="table-zebra table">
+                    <thead>
+                        <tr>
+                            <th>名前</th>
+                            <th>URL</th>
+                            <th>送る通知</th>
+                            <th>直近の結果</th>
+                            <th class="w-56"></th>
+                        </tr>
+                    </thead>
+                    <tbody data-testid="webhook-list">
+                        {#each data.webhooks as webhook (webhook.id)}
+                            <tr data-testid="webhook-row" data-webhook-id={webhook.id}>
+                                <td>
+                                    <div class="font-medium">{webhook.name}</div>
+                                    <span
+                                        class="badge badge-sm {webhook.enabled
+                                            ? 'badge-success'
+                                            : 'badge-ghost'}"
+                                    >
+                                        {webhook.enabled ? '有効' : '無効'}
+                                    </span>
+                                </td>
+                                <td class="max-w-xs truncate font-mono text-xs">{webhook.url}</td>
+                                <td class="text-sm">
+                                    {JSON.parse(webhook.events).length === 0
+                                        ? 'すべて'
+                                        : JSON.parse(webhook.events)
+                                              .map((e: string) => EVENT_LABEL[e] ?? e)
+                                              .join(', ')}
+                                </td>
+                                <td class="text-sm">
+                                    {#if webhook.last_sent_at}
+                                        <span class={webhook.last_status === 'ok' ? '' : 'text-error'}>
+                                            {webhook.last_status}
+                                        </span>
+                                        <span class="text-base-content/60 block text-xs">
+                                            {dateTime(webhook.last_sent_at)}
+                                        </span>
+                                    {:else}
+                                        <span class="text-base-content/60">未送信</span>
+                                    {/if}
+                                </td>
+                                <td class="flex flex-wrap gap-2">
+                                    <form method="POST" action="?/testWebhook" use:submitting>
+                                        <input type="hidden" name="id" value={webhook.id} />
+                                        <button class="btn btn-xs" data-testid="webhook-test"
+                                            >テスト送信</button
+                                        >
+                                    </form>
+                                    <form method="POST" action="?/toggleWebhook" use:submitting>
+                                        <input type="hidden" name="id" value={webhook.id} />
+                                        <button class="btn btn-xs" data-testid="webhook-toggle">
+                                            {webhook.enabled ? '無効化' : '有効化'}
+                                        </button>
+                                    </form>
+                                    <form method="POST" action="?/deleteWebhook" use:submitting>
+                                        <input type="hidden" name="id" value={webhook.id} />
+                                        <button
+                                            class="btn btn-xs btn-error btn-outline"
+                                            data-testid="webhook-delete"
+                                        >
+                                            削除
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {/each}
+                    </tbody>
+                </table>
+            </div>
+        {/if}
+    </div>
+</section>

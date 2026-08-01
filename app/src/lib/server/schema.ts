@@ -34,6 +34,18 @@ CREATE TABLE IF NOT EXISTS settings (
     updated_at INTEGER NOT NULL
 );
 
+-- 録画の節目を外部に飛ばす先。Discord や Slack の Incoming Webhook を想定している
+CREATE TABLE IF NOT EXISTS webhooks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    url TEXT NOT NULL,
+    events TEXT NOT NULL,          -- JSON 配列。空配列は「全部」
+    enabled INTEGER NOT NULL DEFAULT 1,
+    last_status TEXT,              -- 直近の送信結果。設定画面で出す
+    last_sent_at INTEGER,
+    created_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS services (
     id INTEGER PRIMARY KEY,           -- Mirakurun の service id
     service_id INTEGER NOT NULL,

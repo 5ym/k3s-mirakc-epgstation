@@ -10,6 +10,7 @@ import { writeNfo, writeThumbnail } from './metadata';
 import { openServiceStream } from './mirakurun';
 import { chunks } from './stream';
 import { parseTitle } from './title';
+import { notify } from './webhook';
 
 /** 録画中のストリームを止めるための口。プロセス内にしか無いので再起動で失われる(起動時に失敗扱いにする) */
 const active = new Map<number, AbortController>();
@@ -22,14 +23,30 @@ export function stopRecording(recordingId: number): void {
     active.get(recordingId)?.abort();
 }
 
+/** 通知用に録画の要点をまとめる */
+function summary(recording: Recording) {
+    return {
+        id: recording.id,
+        name: recording.name,
+        service: recording.service_name,
+        startAt: recording.start_at,
+        endAt: recording.end_at,
+    };
+}
+
 function fail(recordingId: number, error: string): void {
     database()
         .prepare(`UPDATE recordings SET state = 'failed', error = ?, updated_at = ? WHERE id = ?`)
         .run(error, now(), recordingId);
-    const rec = queryOne<{ reservation_id: number | null }>(
-        'SELECT reservation_id FROM recordings WHERE id = ?',
-        recordingId,
-    );
+    const rec = queryOne<Recording>('SELECT * FROM recordings WHERE id = ?', recordingId);
+    if (rec !== undefined) {
+        notify({
+            event: 'recording.failed',
+            text: `録画に失敗しました: ${rec.name} (${rec.service_name})`,
+            recording: summary(rec),
+            error,
+        });
+    }
     if (rec?.reservation_id != null) {
         database()
             .prepare(`UPDATE reservations SET state = 'failed', updated_at = ? WHERE id = ?`)
@@ -92,6 +109,12 @@ export async function startRecording(reservation: Reservation): Promise<Recordin
     emit('recordings');
     const controller = new AbortController();
     active.set(recording.id, controller);
+
+    notify({
+        event: 'recording.started',
+        text: `録画を開始しました: ${recording.name} (${recording.service_name})`,
+        recording: summary(recording),
+    });
 
     void pump(recording, controller).catch((error) => {
         active.delete(recording.id);
@@ -165,6 +188,12 @@ export function finish(recordingId: number, size: number): void {
               );
 
     emit('recordings');
+    notify({
+        event: 'recording.finished',
+        text: `録画が終わりました: ${recording.name} (${recording.service_name})`,
+        recording: summary(recording),
+    });
+
     if (reservation === undefined || reservation.encode) {
         enqueue(recording.id);
         return;

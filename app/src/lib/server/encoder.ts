@@ -9,6 +9,7 @@ import { removeIfExists } from './fsx';
 import { libraryPath } from './library';
 import { removeSidecars, writeNfo, writeThumbnail } from './metadata';
 import { chunks } from './stream';
+import { notify } from './webhook';
 
 export function isVideoCodec(value: unknown): value is VideoCodec {
     return value === 'av1' || value === 'h264';
@@ -443,6 +444,18 @@ async function runJob(jobId: number): Promise<void> {
             .prepare(`UPDATE encode_jobs SET state = 'failed', error = ?, finished_at = ? WHERE id = ?`)
             .run(result.stderrTail, now(), jobId);
         emit('recordings');
+        notify({
+            event: 'encode.failed',
+            text: `エンコードに失敗しました: ${recording.name}`,
+            recording: {
+                id: recording.id,
+                name: recording.name,
+                service: recording.service_name,
+                startAt: recording.start_at,
+                endAt: recording.end_at,
+            },
+            error: result.stderrTail,
+        });
         database()
             .prepare(`UPDATE recordings SET state = 'failed', error = ?, updated_at = ? WHERE id = ?`)
             .run('エンコードに失敗しました', now(), recording.id);
@@ -464,6 +477,17 @@ async function runJob(jobId: number): Promise<void> {
         .prepare(`UPDATE encode_jobs SET state = 'done', percent = 1, finished_at = ? WHERE id = ?`)
         .run(now(), jobId);
     emit('recordings');
+    notify({
+        event: 'encode.finished',
+        text: `エンコードが終わりました: ${recording.name}`,
+        recording: {
+            id: recording.id,
+            name: recording.name,
+            service: recording.service_name,
+            startAt: recording.start_at,
+            endAt: recording.end_at,
+        },
+    });
 
     if (recording.keep_original) {
         database()
