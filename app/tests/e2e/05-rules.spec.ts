@@ -19,7 +19,7 @@ test.describe('自動予約ルール', () => {
         await goto(page, '/rules');
         await page.getByTestId('rule-name').fill('テストアニメ自動録画');
         await page.getByTestId('rule-keyword').fill('テストアニメ');
-        await page.getByTestId('rule-services').selectOption(String(BS11.id));
+        await page.getByTestId('rule-services').locator(`input[value="${BS11.id}"]`).check();
         await page.getByTestId('rule-cmcut').selectOption('cut');
         await page.getByTestId('rule-submit').click();
 

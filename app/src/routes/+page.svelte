@@ -8,32 +8,15 @@
 <div class="mb-4 flex items-center justify-between">
     <h1 class="text-2xl font-bold">ダッシュボード</h1>
     <div class="flex gap-2">
-        {#if data.jellyfin}
-            <form method="POST" action="?/registerLiveTv" use:enhance>
-                <button class="btn btn-sm" data-testid="register-livetv"> JellyfinにライブTVを登録 </button>
-            </form>
+        {#if !data.jellyfin}
+            <a class="btn btn-sm btn-warning" href="/settings" data-testid="jellyfin-unset">Jellyfin 未設定</a
+            >
         {/if}
         <form method="POST" action="?/sync" use:enhance>
             <button class="btn btn-sm" data-testid="sync-button">EPGを今すぐ取得</button>
         </form>
     </div>
 </div>
-
-{#if form?.message}
-    <div class="alert alert-error mb-4" data-testid="dashboard-error">{form.message}</div>
-{/if}
-{#if form?.register}
-    <div class="alert alert-success mb-4" data-testid="register-result">
-        <div>
-            <div>
-                Jellyfin に登録しました (チューナー: {form.register.tunerAdded ? '追加' : '既存のまま'} / 番組表:
-                {form.register.guideAdded ? '追加' : '既存のまま'})
-            </div>
-            <div class="font-mono text-xs">{form.register.playlist}</div>
-            <div class="font-mono text-xs">{form.register.guide}</div>
-        </div>
-    </div>
-{/if}
 
 {#if form?.sync}
     <div class="alert alert-info mb-4" data-testid="sync-result">
@@ -47,28 +30,36 @@
     </div>
 </div>
 
-<div class="stats stats-vertical md:stats-horizontal mb-6 w-full shadow" data-testid="stats">
-    <div class="stat">
-        <div class="stat-title">視聴可能</div>
-        <div class="stat-value" data-testid="stat-available">{data.stats.available}</div>
+<div class="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4" data-testid="stats">
+    <div class="card bg-base-100 shadow">
+        <div class="card-body p-4">
+            <div class="text-base-content/60 text-sm">視聴可能</div>
+            <div class="text-3xl font-bold" data-testid="stat-available">{data.stats.available}</div>
+        </div>
     </div>
-    <div class="stat">
-        <div class="stat-title">削除済み</div>
-        <div class="stat-value" data-testid="stat-deleted">{data.stats.deleted}</div>
+    <div class="card bg-base-100 shadow">
+        <div class="card-body p-4">
+            <div class="text-base-content/60 text-sm">削除済み</div>
+            <div class="text-3xl font-bold" data-testid="stat-deleted">{data.stats.deleted}</div>
+        </div>
     </div>
-    <div class="stat">
-        <div class="stat-title">番組 / 局</div>
-        <div class="stat-value text-2xl">{data.stats.programs} / {data.stats.services}</div>
+    <div class="card bg-base-100 shadow">
+        <div class="card-body p-4">
+            <div class="text-base-content/60 text-sm">番組 / 局</div>
+            <div class="text-3xl font-bold">{data.stats.programs} / {data.stats.services}</div>
+        </div>
     </div>
-    <div class="stat">
-        <div class="stat-title">競合中の予約</div>
-        <div class="stat-value {data.stats.conflicts > 0 ? 'text-error' : ''}">
-            {data.stats.conflicts}
+    <div class="card bg-base-100 shadow">
+        <div class="card-body p-4">
+            <div class="text-base-content/60 text-sm">競合中の予約</div>
+            <div class="text-3xl font-bold {data.stats.conflicts > 0 ? 'text-error' : ''}">
+                {data.stats.conflicts}
+            </div>
         </div>
     </div>
 </div>
 
-<div class="grid gap-6 lg:grid-cols-2 xl:grid-cols-4">
+<div class="grid items-start gap-4 sm:grid-cols-2 xl:grid-cols-4">
     <section class="card bg-base-100 shadow" data-testid="now-recording">
         <div class="card-body">
             <h2 class="card-title">録画中</h2>

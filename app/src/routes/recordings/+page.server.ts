@@ -1,8 +1,12 @@
 import { fail } from '@sveltejs/kit';
-import { database, queryOne } from '$lib/server/db';
-import { enqueue, pump } from '$lib/server/encoder';
+import { database, now, queryAll, queryOne } from '$lib/server/db';
+import { cancel as cancelEncode, enqueue, pump } from '$lib/server/encoder';
 import { deleteRecordingFiles, reconcile, refreshLibrary } from '$lib/server/jellyfin';
-import type { Recording } from '$lib/types';
+import type { EncodeJob, Recording } from '$lib/types';
+
+interface JobRow extends EncodeJob {
+    recording_name: string;
+}
 
 export function load({ url }) {
     const showDeleted = url.searchParams.get('deleted') === '1';
@@ -13,7 +17,21 @@ export function load({ url }) {
              ORDER BY start_at DESC LIMIT 300`,
         )
         .all() as Recording[];
-    return { recordings, showDeleted };
+    // エンコードは「ライブラリに入る途中の状態」なので同じ画面の上に出す。
+    // 終わったものは録画側の行に出るので、ここは進行中と直近の失敗だけ
+    const jobs = queryAll<JobRow>(
+        `SELECT j.*, r.name AS recording_name
+         FROM encode_jobs j JOIN recordings r ON r.id = j.recording_id
+         WHERE j.state IN ('queued','running')
+            OR (j.state IN ('failed','canceled') AND j.finished_at > ?)
+         ORDER BY
+            CASE j.state WHEN 'running' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END,
+            j.id DESC
+         LIMIT 50`,
+        Date.now() - 24 * 60 * 60 * 1000,
+    );
+
+    return { recordings, jobs, showDeleted };
 }
 
 function target(form: FormData): Recording | undefined {
@@ -39,6 +57,42 @@ export const actions = {
             return fail(400, { message: '生TSが残っていないため再エンコードできません' });
         }
         enqueue(recording.id);
+        pump();
+        return { success: true };
+    },
+
+    cancelEncode: async ({ request }) => {
+        const form = await request.formData();
+        const id = Number(form.get('id'));
+        if (!Number.isFinite(id)) return fail(400, { message: 'ジョブIDが不正です' });
+        cancelEncode(id);
+        return { success: true };
+    },
+
+    retryEncode: async ({ request }) => {
+        const form = await request.formData();
+        const id = Number(form.get('id'));
+        if (!Number.isFinite(id)) return fail(400, { message: 'ジョブIDが不正です' });
+        const job = queryOne<EncodeJob>('SELECT * FROM encode_jobs WHERE id = ?', id);
+        if (job === undefined) return fail(400, { message: 'ジョブが見つかりません' });
+
+        const source = queryOne<{ ts_path: string | null }>(
+            'SELECT ts_path FROM recordings WHERE id = ?',
+            job.recording_id,
+        );
+        if (source?.ts_path == null) {
+            return fail(400, { message: '生TSが残っていないためやり直せません' });
+        }
+
+        database()
+            .prepare(
+                `UPDATE encode_jobs SET state = 'queued', percent = 0, error = NULL,
+                 started_at = NULL, finished_at = NULL WHERE id = ?`,
+            )
+            .run(id);
+        database()
+            .prepare(`UPDATE recordings SET state = 'recorded', error = NULL, updated_at = ? WHERE id = ?`)
+            .run(now(), job.recording_id);
         pump();
         return { success: true };
     },

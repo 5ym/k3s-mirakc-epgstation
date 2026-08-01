@@ -11,6 +11,7 @@ Mirakurun から EPG と TS を受け取り、予約・録画・エンコード�
 | --- | --- |
 | `src/lib/server/mirakurun.ts` | Mirakurun の API クライアント |
 | `src/lib/server/epg.ts` | 番組表の取り込みと予約時刻の追従 |
+| `src/lib/server/settings.ts` | 画面から変えられる設定 (環境変数を初期値にDBで上書き) |
 | `src/lib/server/rules.ts` | キーワードルールから予約を作る |
 | `src/lib/server/conflict.ts` | チューナー割り当てと競合判定 (純粋関数) |
 | `src/lib/server/scheduler.ts` | 予約 → 録画の状態遷移 |
@@ -41,7 +42,7 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 | 変数 | 既定値 | 説明 |
 | --- | --- | --- |
 | `MIRAKURUN_URL` | `http://mirakurun:40772` | Mirakurun |
-| `JELLYFIN_URL` / `JELLYFIN_API_KEY` | (空) | Jellyfin連携に必須。録画タイマーの取り込み・ライブTV登録・再スキャンが動かなくなる |
+| `JELLYFIN_URL` / `JELLYFIN_API_KEY` | (空) | 初期値。設定画面で入れた値が優先される。Jellyfin連携に必須 |
 | `RECONCILE_INTERVAL` | `300000` | ライブラリの実体とDBを突き合わせる間隔(ms) |
 | `JELLYFIN_TIMER_INTERVAL` | `30000` | Jellyfin の録画タイマーを取り込む間隔(ms) |
 | `WRITE_NFO` | `1` | Jellyfin 向けの `.nfo` を書くか |

@@ -1,8 +1,6 @@
-import { fail } from '@sveltejs/kit';
-import { config } from '$lib/server/config';
 import { database, queryOne } from '$lib/server/db';
 import { sync } from '$lib/server/epg';
-import { enabled as jellyfinEnabled, registerLiveTv } from '$lib/server/jellyfin';
+import { enabled as jellyfinEnabled } from '$lib/server/jellyfin';
 import { sessions, stopSession } from '$lib/server/live';
 import { ping } from '$lib/server/mirakurun';
 import type { EncodeJob, Recording, Reservation } from '$lib/types';
@@ -54,16 +52,6 @@ export async function load() {
 export const actions = {
     sync: async () => {
         return { success: true, sync: await sync() };
-    },
-
-    registerLiveTv: async ({ url }) => {
-        // Jellyfin から見た denpa のURL。設定が無ければこのリクエストのオリジンを使う
-        const origin = config.iptvOrigin === '' ? url.origin : config.iptvOrigin;
-        try {
-            return { success: true, register: await registerLiveTv(origin, config.liveProfile) };
-        } catch (error) {
-            return fail(502, { message: `Jellyfin への登録に失敗しました: ${error}` });
-        }
     },
 
     stopLive: async ({ request }) => {

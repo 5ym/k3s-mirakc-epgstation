@@ -15,7 +15,7 @@ test.describe('ダッシュボードと画面遷移', () => {
             ['nav-guide', '番組表'],
             ['nav-reservations', '予約'],
             ['nav-rules', '自動予約ルール'],
-            ['nav-encodes', 'エンコード'],
+            ['nav-settings', '設定'],
             ['nav-recordings', 'ライブラリ'],
         ] as const) {
             await page.getByTestId(name).click();
@@ -43,5 +43,21 @@ test.describe('ダッシュボードと画面遷移', () => {
         for (const row of await rows.all()) {
             await expect(row).toContainText('テストアニメ');
         }
+    });
+
+    test('ライトとダークを切り替えられ、再読み込みしても残る', async ({ page }) => {
+        await goto(page, '/');
+        const html = page.locator('html');
+        await expect(html).toHaveAttribute('data-theme', 'dark');
+
+        await page.getByTestId('theme-toggle').click();
+        await expect(html).toHaveAttribute('data-theme', 'light');
+
+        // 再読み込み時に一瞬ダークが見えないよう、ハイドレーション前に当てている
+        await goto(page, '/guide');
+        await expect(html).toHaveAttribute('data-theme', 'light');
+
+        await page.getByTestId('theme-toggle').click();
+        await expect(html).toHaveAttribute('data-theme', 'dark');
     });
 });

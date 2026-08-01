@@ -15,6 +15,14 @@ const listingProviders: Record<string, unknown>[] = [];
 let nextId = 1;
 // Jellyfin のライブTV画面で録画ボタンを押すと作られるタイマー
 const timers: Record<string, unknown>[] = [];
+// ライブラリ(VirtualFolders)とユーザー。denpa の初期セットアップの相手
+const folders: Record<string, unknown>[] = [];
+const users = [
+    { Id: 'user-admin', Name: 'admin', Policy: { IsAdministrator: true, EnableContentDeletion: false } },
+    { Id: 'user-guest', Name: 'guest', Policy: { IsAdministrator: false, EnableContentDeletion: false } },
+];
+const ADMIN = { name: 'admin', password: 'denpa-dev' };
+const ISSUED_KEY = 'issued-by-denpa';
 
 const json = (body: unknown) =>
     new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
@@ -26,7 +34,15 @@ Bun.serve({
         const url = new URL(request.url);
 
         if (url.pathname === '/__control/state') {
-            return json({ refreshCount, guideRefreshCount, tunerHosts, listingProviders, timers });
+            return json({
+                refreshCount,
+                guideRefreshCount,
+                tunerHosts,
+                listingProviders,
+                timers,
+                folders,
+                users,
+            });
         }
         // 「録画ボタンを押した」を再現する
         if (url.pathname === '/__control/timer' && request.method === 'POST') {
@@ -41,7 +57,54 @@ Bun.serve({
             tunerHosts.length = 0;
             listingProviders.length = 0;
             timers.length = 0;
+            folders.length = 0;
+            for (const u of users) u.Policy.EnableContentDeletion = false;
             return json({ ok: true });
+        }
+
+        // APIキーの発行。実 Jellyfin と同じく、ログイン -> キー作成 -> 一覧から拾う の3手
+        if (url.pathname === '/Users/AuthenticateByName' && request.method === 'POST') {
+            const body = (await request.json()) as { Username: string; Pw: string };
+            if (body.Username !== ADMIN.name || body.Pw !== ADMIN.password) {
+                return new Response('invalid', { status: 401 });
+            }
+            return json({ AccessToken: 'session-token', User: users[0] });
+        }
+        if (url.pathname === '/Auth/Keys') {
+            if (request.method === 'POST') return new Response(null, { status: 204 });
+            return json({
+                Items: [{ AccessToken: ISSUED_KEY, AppName: url.searchParams.get('app') ?? 'denpa' }],
+            });
+        }
+
+        if (url.pathname === '/Users') return json(users);
+        const policy = url.pathname.match(/^\/Users\/([^/]+)\/Policy$/);
+        if (policy !== null && request.method === 'POST') {
+            const body = (await request.json()) as { EnableContentDeletion?: boolean };
+            const user = users.find((u) => u.Id === policy[1]);
+            if (user !== undefined) user.Policy.EnableContentDeletion = body.EnableContentDeletion === true;
+            return new Response(null, { status: 204 });
+        }
+
+        if (url.pathname === '/Library/VirtualFolders') {
+            if (request.method === 'GET') return json(folders);
+            if (request.method === 'POST') {
+                const body = (await request.json()) as { LibraryOptions: Record<string, unknown> };
+                folders.push({
+                    Name: url.searchParams.get('name'),
+                    CollectionType: url.searchParams.get('collectionType'),
+                    Locations: [url.searchParams.get('paths')],
+                    ItemId: `folder-${nextId++}`,
+                    LibraryOptions: body.LibraryOptions,
+                });
+                return new Response(null, { status: 204 });
+            }
+        }
+        if (url.pathname === '/Library/VirtualFolders/LibraryOptions' && request.method === 'POST') {
+            const body = (await request.json()) as { Id: string; LibraryOptions: Record<string, unknown> };
+            const folder = folders.find((f) => f.ItemId === body.Id);
+            if (folder !== undefined) folder.LibraryOptions = body.LibraryOptions;
+            return new Response(null, { status: 204 });
         }
 
         // ライブTVの登録まわり。実 Jellyfin 10.11 のリクエスト/レスポンス形に合わせてある

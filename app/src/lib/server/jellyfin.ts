@@ -1,10 +1,10 @@
 import { existsSync } from 'node:fs';
 import type { Program, Recording, Service } from '../types';
-import { config } from './config';
 import { database, now, queryAll, queryOne } from './db';
 import { pruneEmptyDirs, removeIfExists } from './fsx';
 import { removeSidecars } from './metadata';
 import { reserve } from './reservations';
+import { settings } from './settings';
 
 /**
  * Jellyfin との連携。
@@ -16,7 +16,8 @@ import { reserve } from './reservations';
  */
 
 export function enabled(): boolean {
-    return config.jellyfinUrl !== '' && config.jellyfinApiKey !== '';
+    const { jellyfinUrl, jellyfinApiKey } = settings();
+    return jellyfinUrl !== '' && jellyfinApiKey !== '';
 }
 
 /**
@@ -34,12 +35,13 @@ export async function refreshLibrary(): Promise<void> {
 
 /** Jellyfin の API を叩く。204 や空ボディも扱えるようにしておく */
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-    const res = await fetch(`${config.jellyfinUrl}${path}`, {
+    const { jellyfinUrl, jellyfinApiKey } = settings();
+    const res = await fetch(`${jellyfinUrl}${path}`, {
         ...init,
         headers: {
             ...(init?.headers ?? {}),
             Accept: 'application/json',
-            Authorization: `MediaBrowser Token="${config.jellyfinApiKey}"`,
+            Authorization: `MediaBrowser Token="${jellyfinApiKey}"`,
         },
     });
     if (!res.ok) throw new Error(`jellyfin ${path} -> ${res.status} ${await res.text()}`);
@@ -145,6 +147,135 @@ export async function refreshGuide(): Promise<void> {
     } catch (error) {
         console.error(`[jellyfin] 番組表の更新に失敗: ${error}`);
     }
+}
+
+/**
+ * 管理者のIDとパスワードから API キーを発行する。
+ *
+ * APIキーは Jellyfin のセットアップを終えてからでないと作れないので、
+ * 「denpa を動かす前に用意しておく」ことができない。ここで発行してDBに保存し、
+ * パスワードは保存しない(この関数の外へ出さない)。
+ */
+export async function issueApiKey(url: string, username: string, password: string): Promise<string> {
+    const base = url.replace(/\/+$/, '');
+    // 認証にはクライアント情報のヘッダが要る。無いと Jellyfin は 400 を返す
+    const auth = 'MediaBrowser Client="denpa", Device="denpa", DeviceId="denpa-setup", Version="1.0"';
+
+    const login = await fetch(`${base}/Users/AuthenticateByName`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: auth },
+        body: JSON.stringify({ Username: username, Pw: password }),
+    });
+    if (!login.ok) {
+        throw new Error(`ログインに失敗しました (${login.status})。IDとパスワードを確認してください`);
+    }
+    const { AccessToken } = (await login.json()) as { AccessToken: string };
+
+    const token = `MediaBrowser Token="${AccessToken}"`;
+    const created = await fetch(`${base}/Auth/Keys?app=denpa`, {
+        method: 'POST',
+        headers: { Authorization: token },
+    });
+    if (!created.ok) throw new Error(`APIキーの発行に失敗しました (${created.status})`);
+
+    // 発行APIは本体を返さないので、一覧から自分のぶんを拾う
+    const list = await fetch(`${base}/Auth/Keys`, {
+        headers: { Authorization: token, Accept: 'application/json' },
+    });
+    if (!list.ok) throw new Error(`APIキーの取得に失敗しました (${list.status})`);
+    const { Items } = (await list.json()) as { Items: { AccessToken: string; AppName: string }[] };
+
+    const key = Items.filter((i) => i.AppName === 'denpa').at(-1)?.AccessToken;
+    if (key === undefined) throw new Error('発行したAPIキーが見つかりませんでした');
+    return key;
+}
+
+interface VirtualFolder {
+    Name: string;
+    Locations: string[];
+    CollectionType?: string;
+    ItemId: string;
+}
+
+interface JellyfinUser {
+    Id: string;
+    Name: string;
+    Policy?: { IsAdministrator?: boolean; EnableContentDeletion?: boolean };
+}
+
+/**
+ * ライブラリの追加とメタデータ設定。
+ *
+ * 日本の放送番組は TheTVDB / TMDB にほぼ載っていないので、インターネット取得を
+ * 切って denpa が書いた .nfo を読ませる。これを有効なままにすると、空の検索結果で
+ * せっかくのメタデータが上書きされる。
+ */
+export async function setupLibrary(libraryPath: string): Promise<{ created: boolean; name: string }> {
+    const name = 'テレビ番組';
+    const folders = await api<VirtualFolder[]>('/Library/VirtualFolders');
+    const existing = folders.find((f) => f.Locations.includes(libraryPath));
+
+    const options = {
+        Enabled: true,
+        EnableRealtimeMonitor: true,
+        // denpa が書いた .nfo を読み、Jellyfin 側からも .nfo に保存させる
+        SaveLocalMetadata: true,
+        MetadataSavers: ['Nfo'],
+        // インターネットのメタデータ/画像取得は全部切る
+        EnableInternetProviders: false,
+        TypeOptions: ['Series', 'Season', 'Episode'].map((type) => ({
+            Type: type,
+            MetadataFetchers: [],
+            MetadataFetcherOrder: [],
+            ImageFetchers: [],
+            ImageFetcherOrder: [],
+        })),
+        PathInfos: [{ Path: libraryPath }],
+    };
+
+    if (existing !== undefined) {
+        // 既にあるなら作り直さず、設定だけ揃える
+        await api<void>(`/Library/VirtualFolders/LibraryOptions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ Id: existing.ItemId, LibraryOptions: options }),
+        });
+        return { created: false, name: existing.Name };
+    }
+
+    const query = new URLSearchParams({
+        name,
+        collectionType: 'tvshows',
+        paths: libraryPath,
+        refreshLibrary: 'true',
+    });
+    await api<void>(`/Library/VirtualFolders?${query}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ LibraryOptions: options }),
+    });
+    return { created: true, name };
+}
+
+/**
+ * 録画を Jellyfin の画面から消せるようにする。
+ * 誰でも消せると事故るので、既定では管理者だけに付ける。
+ */
+export async function allowDeletion(everyone = false): Promise<string[]> {
+    const users = await api<JellyfinUser[]>('/Users');
+    const targets = users.filter((u) => everyone || u.Policy?.IsAdministrator === true);
+
+    const granted: string[] = [];
+    for (const user of targets) {
+        if (user.Policy?.EnableContentDeletion === true) continue;
+        await api<void>(`/Users/${user.Id}/Policy`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...user.Policy, EnableContentDeletion: true }),
+        });
+        granted.push(user.Name);
+    }
+    return granted;
 }
 
 export interface JellyfinTimer {

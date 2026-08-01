@@ -1,5 +1,6 @@
+import type { Service } from '../types';
 import { config } from './config';
-import { database, now } from './db';
+import { database, now, queryAll } from './db';
 import * as mirakurun from './mirakurun';
 import { applyRules } from './rules';
 import { resolveConflicts } from './scheduler';
@@ -50,7 +51,20 @@ function audioType(p: mirakurun.MirakurunProgram): number | null {
     return null;
 }
 
+/**
+ * 番組の serviceId を services.id に読み替える表を作る。
+ *
+ * Mirakurun の `Program.serviceId` は **ARIB のサービスID**(例: 23608)で、
+ * `Service.id` の内部ID(例: 3239123608)とは別物。そのまま入れると番組表の
+ * JOIN が1件も当たらず、番組が丸ごと出なくなる。networkId と合わせて引き直す。
+ */
+function serviceIdIndex(): Map<string, number> {
+    const services = queryAll<Service>('SELECT id, network_id, service_id FROM services');
+    return new Map(services.map((s) => [`${s.network_id}:${s.service_id}`, s.id]));
+}
+
 export function syncPrograms(programs: mirakurun.MirakurunProgram[]): number {
+    const index = serviceIdIndex();
     const stmt = database().prepare(`
         INSERT INTO programs (id, service_id, network_id, event_id, start_at, end_at,
                               name, description, extended, genres, is_free, audio_type, updated_at)
@@ -72,9 +86,12 @@ export function syncPrograms(programs: mirakurun.MirakurunProgram[]): number {
         for (const p of programs) {
             // duration 0 は「終了時刻未定」を意味する。録画時間が決まらないので扱わない
             if (!p.duration) continue;
+            // チャンネル設定に無いサービスの番組は録れないので捨てる
+            const serviceId = index.get(`${p.networkId}:${p.serviceId}`);
+            if (serviceId === undefined) continue;
             stmt.run(
                 p.id,
-                p.serviceId,
+                serviceId,
                 p.networkId,
                 p.eventId,
                 p.startAt,

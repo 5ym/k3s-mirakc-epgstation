@@ -29,7 +29,9 @@ function programsFor(service: FakeService) {
             // 枠番号から決めるので取得のたびにIDが変わらない
             id: service.id * 100000 + (slot % 100000),
             eventId: slot % 65536,
-            serviceId: service.id,
+            // 本物の Mirakurun と同じく ARIB のサービスID を返す。
+            // ここに内部IDを返していたせいで、番組表が出ないバグを長らく見逃した
+            serviceId: service.serviceId,
             networkId: service.networkId,
             startAt,
             duration: SLOT_MS,

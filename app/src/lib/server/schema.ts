@@ -6,6 +6,14 @@ export const SCHEMA = `
 -- 列を足すときは末尾に ALTER TABLE ... ADD COLUMN を追記していく方針
 -- (単一ノード・単一プロセスの個人用途なのでマイグレーションツールは持たない)。
 
+-- 画面から変えられる設定。環境変数を初期値として、ここにあれば上書きする。
+-- Jellyfin のURLとAPIキーは「起動前に用意しておく」のが現実的でないのでここに置く。
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS services (
     id INTEGER PRIMARY KEY,           -- Mirakurun の service id
     service_id INTEGER NOT NULL,

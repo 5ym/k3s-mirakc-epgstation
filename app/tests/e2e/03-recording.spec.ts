@@ -69,9 +69,5 @@ test.describe('録画とエンコード', () => {
         expect(nfo).toContain('<episodedetails>');
         expect(nfo).toContain('<studio>BS11イレブン</studio>');
         expect(nfo).toContain('<aired>');
-
-        // エンコードジョブも完了として残る
-        await goto(page, '/encodes');
-        await expect(page.getByTestId('encode-row').first().getByTestId('encode-state')).toHaveText('完了');
     });
 });

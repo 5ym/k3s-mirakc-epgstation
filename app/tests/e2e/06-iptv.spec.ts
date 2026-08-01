@@ -1,5 +1,4 @@
 import { expect, type Page, test } from '@playwright/test';
-import { JELLYFIN_URL } from '../../playwright.config';
 import { MX } from '../fake/services';
 import { goto, syncEpg } from './helpers';
 
@@ -143,29 +142,5 @@ test.describe('Jellyfin へのライブ配信', () => {
         await session.getByTestId('live-stop').click();
         await expect(page.getByTestId('live-session')).toHaveCount(0);
         await viewer.close();
-    });
-
-    test('ダッシュボードのボタンで Jellyfin にライブTVを登録できる', async ({ page, request }) => {
-        await goto(page, '/');
-        await page.getByTestId('register-livetv').click();
-
-        const result = page.getByTestId('register-result');
-        await expect(result).toContainText('チューナー: 追加');
-        await expect(result).toContainText('番組表: 追加');
-        await expect(result).toContainText('/api/iptv/playlist.m3u?profile=h264');
-        await expect(result).toContainText('/api/iptv/xmltv.xml');
-
-        // 2回押しても重複しない
-        await page.getByTestId('register-livetv').click();
-        await expect(result).toContainText('チューナー: 既存のまま');
-
-        // 別オリジンなので、ブラウザの fetch(CORSに掛かる)ではなく request フィクスチャで読む
-        const state = await (await request.get(`${JELLYFIN_URL}/__control/state`)).json();
-        expect(state.tunerHosts).toHaveLength(1);
-        expect(state.listingProviders).toHaveLength(1);
-        expect(state.tunerHosts[0].Type).toBe('m3u');
-        expect(state.listingProviders[0].Type).toBe('xmltv');
-        // 登録しただけでは反映されないので、番組表の取り込みも促していること
-        expect(state.guideRefreshCount).toBeGreaterThan(0);
     });
 });

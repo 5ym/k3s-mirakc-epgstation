@@ -1,8 +1,27 @@
 <script lang="ts">
     import { enhance } from '$app/forms';
-    import { dateTime, duration, size, stateLabel, badgeClass, CM_LABEL, cmRanges } from '$lib/format';
+    import { invalidateAll } from '$app/navigation';
+    import { onMount } from 'svelte';
+    import {
+        badgeClass,
+        CM_LABEL,
+        cmRanges,
+        dateTime,
+        duration,
+        percent,
+        size,
+        stateLabel,
+    } from '$lib/format';
 
     let { data, form } = $props();
+
+    // エンコード中は進捗が動くので、その間だけ読み直す
+    onMount(() => {
+        const timer = setInterval(() => {
+            if (data.jobs.some((job) => job.state === 'running')) void invalidateAll();
+        }, 5000);
+        return () => clearInterval(timer);
+    });
 </script>
 
 <div class="mb-4 flex items-center justify-between">
@@ -23,6 +42,54 @@
 {#if form?.reconcile}
     <div class="alert alert-info mb-4" data-testid="reconcile-result">
         照合 {form.reconcile.checked} 件 / Jellyfin側で削除済み {form.reconcile.removed} 件
+    </div>
+{/if}
+
+{#if data.jobs.length > 0}
+    <div class="card bg-base-100 mb-4 shadow" data-testid="encode-panel">
+        <div class="card-body gap-3">
+            <h2 class="card-title text-base">エンコード</h2>
+            <ul class="space-y-3" data-testid="encode-list">
+                {#each data.jobs as job (job.id)}
+                    <li data-testid="encode-row" data-job-id={job.id}>
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <span class="font-medium">{job.recording_name}</span>
+                            <div class="flex items-center gap-2">
+                                <span class="badge {badgeClass(job.state)}" data-testid="encode-state">
+                                    {stateLabel(job.state)}
+                                </span>
+                                {#if job.state === 'queued' || job.state === 'running'}
+                                    <form method="POST" action="?/cancelEncode" use:enhance>
+                                        <input type="hidden" name="id" value={job.id} />
+                                        <button
+                                            class="btn btn-xs btn-error btn-outline"
+                                            data-testid="encode-cancel"
+                                        >
+                                            中止
+                                        </button>
+                                    </form>
+                                {:else}
+                                    <form method="POST" action="?/retryEncode" use:enhance>
+                                        <input type="hidden" name="id" value={job.id} />
+                                        <button class="btn btn-xs" data-testid="encode-retry">やり直す</button
+                                        >
+                                    </form>
+                                {/if}
+                            </div>
+                        </div>
+                        {#if job.state === 'running' || job.state === 'queued'}
+                            <progress class="progress progress-primary w-full" value={job.percent} max="1"
+                            ></progress>
+                            <div class="text-base-content/60 text-xs">
+                                {percent(job.percent)}{#if job.log}・{job.log}{/if}
+                            </div>
+                        {:else if job.error}
+                            <div class="text-error line-clamp-2 font-mono text-xs">{job.error}</div>
+                        {/if}
+                    </li>
+                {/each}
+            </ul>
+        </div>
     </div>
 {/if}
 
