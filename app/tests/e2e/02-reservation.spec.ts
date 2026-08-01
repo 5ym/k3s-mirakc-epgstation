@@ -95,6 +95,46 @@ test.describe('予約の細かい指定', () => {
         await expect(reservation).toHaveCount(0);
     });
 
+    test('予約の行を押すと番組表と同じ詳細が出る', async ({ page }) => {
+        await goto(page, '/guide?type=GR');
+        const [target] = await upcoming(page);
+
+        // まず番組表側での見え方を控える
+        await cellOf(page, target.programId).getByTestId('program-button').click();
+        const title = ((await page.getByTestId('program-detail').locator('h3').textContent()) ?? '').trim();
+        const badges = (await page.getByTestId('detail-badges').locator('.badge').allTextContents()).map(
+            (text) => text.trim(),
+        );
+        expect(badges.length).toBeGreaterThan(0);
+        await page.getByTestId('detail-reserve').click();
+
+        // 予約一覧の行からも、同じものが同じ形で出ること。
+        // 一覧は番組の中身を持っていないので、EPG から引き直して出している
+        await goto(page, '/');
+        const reservation = page.locator(
+            `[data-testid="reservation-row"][data-program-id="${target.programId}"]`,
+        );
+        await reservation.locator('td').first().click();
+
+        const detail = page.getByTestId('program-detail');
+        await expect(detail).toBeVisible();
+        await expect(detail.locator('h3')).toHaveText(title);
+        await expect(async () => {
+            const shown = (await detail.getByTestId('detail-badges').locator('.badge').allTextContents()).map(
+                (text) => text.trim(),
+            );
+            expect(shown).toEqual(badges);
+        }).toPass();
+
+        await page.getByTestId('detail-close').click();
+        await expect(detail).toHaveCount(0);
+
+        // 行の中のボタンを押したときは詳細を出さない。出すと取消の確認が隠れる
+        await reservation.getByTestId('cancel-button').click();
+        await expect(reservation).toHaveCount(0);
+        await expect(detail).toHaveCount(0);
+    });
+
     test('放送が終わった番組は予約できない', async ({ page }) => {
         // 番組表には過去の番組も並んでいる。予約できてしまうと、
         // 録れないものが予約一覧に残り続ける

@@ -1,6 +1,24 @@
 export type ChannelType = 'GR' | 'BS' | 'CS' | 'SKY';
 
 /**
+ * 番組詳細に出す分。番組表・予約一覧・録画一覧のどこから開いても同じ形で見せる。
+ * 予約や録画からは局名しか手元に無いので、局IDではなく名前で持つ。
+ */
+export interface ProgramDetail {
+    name: string;
+    service_name: string;
+    start_at: number;
+    end_at: number;
+    description: string;
+    extended: string | null;
+    genre_detail: string | null;
+    audios: string | null;
+    video_type: string | null;
+    video_resolution: string | null;
+    is_free: number;
+}
+
+/**
  * CMの扱い。
  * off     : 何もしない
  * chapter : CM区間をチャプターとして書き込むだけ(ファイルは切らない)

@@ -1,7 +1,7 @@
 <script lang="ts">
     import { dragScroll, submitting } from '$lib/actions';
-    import { type Audio, audioLabel, type Genre, genreLabel, videoLabel } from '$lib/arib';
-    import { CM_LABEL, dateTime, duration, stateLabel, time } from '$lib/format';
+    import ProgramDetail from '$lib/components/ProgramDetail.svelte';
+    import { CM_LABEL, stateLabel, time } from '$lib/format';
 
     let { data, form } = $props();
 
@@ -9,37 +9,6 @@
 
     /** クリックした番組。詳細を出してから予約するかどうか決める */
     let selected = $state<(typeof data.programs)[number] | null>(null);
-
-    /** 詳細情報。Mirakurun が拾った「出演者」などの見出し付きテキスト */
-    function extended(json: string | null): [string, string][] {
-        if (json === null || json === '') return [];
-        try {
-            return Object.entries(JSON.parse(json) as Record<string, string>);
-        } catch {
-            return [];
-        }
-    }
-
-    /** JSON で持っている列を読む。取り込みの時期によっては入っていないので空で返す */
-    function parse<T>(json: string | null): T[] {
-        if (json === null || json === '') return [];
-        try {
-            const value = JSON.parse(json);
-            return Array.isArray(value) ? (value as T[]) : [];
-        } catch {
-            return [];
-        }
-    }
-
-    const genres = (json: string | null) =>
-        parse<Genre>(json)
-            .map(genreLabel)
-            .filter((label) => label !== '');
-
-    const audios = (json: string | null) => parse<Audio>(json).map(audioLabel);
-
-    const video = (program: { video_resolution: string | null; video_type: string | null }) =>
-        videoLabel(program.video_resolution, program.video_type);
 
     const serviceName = (id: number) => data.services.find((s) => s.id === id)?.name ?? '';
 
@@ -284,47 +253,16 @@
 {/if}
 
 {#if selected}
-    <div class="modal modal-open" role="dialog" data-testid="program-detail">
-        <div class="modal-box max-w-2xl">
-            <h3 class="text-lg font-bold">{selected.name}</h3>
-            <p class="text-base-content/60 mt-1 text-sm">
-                {serviceName(selected.service_id)} ・ {dateTime(selected.start_at)} 〜 {time(selected.end_at)}
-                ({duration(selected.start_at, selected.end_at)})
-            </p>
-
-            <!-- EPG が持っている符号は、そのままでは読めないので言葉に直して出す -->
-            <div class="mt-2 flex flex-wrap gap-1" data-testid="detail-badges">
-                {#each genres(selected.genre_detail) as label (label)}
-                    <span class="badge badge-sm badge-ghost" data-testid="detail-genre">{label}</span>
-                {/each}
-                {#if video(selected)}
-                    <span class="badge badge-sm badge-ghost" data-testid="detail-video">
-                        {video(selected)}
-                    </span>
-                {/if}
-                {#each audios(selected.audios) as label, i (i)}
-                    <span class="badge badge-sm badge-ghost" data-testid="detail-audio">{label}</span>
-                {/each}
-                {#if !selected.is_free}
-                    <span class="badge badge-sm badge-warning" data-testid="detail-paid">有料</span>
-                {/if}
-            </div>
-
-            {#if selected.description}
-                <p class="mt-3 text-sm whitespace-pre-wrap">{selected.description}</p>
-            {/if}
-
-            {#each extended(selected.extended) as [heading, body] (heading)}
-                <div class="mt-3">
-                    <div class="text-sm font-medium">{heading}</div>
-                    <div class="text-base-content/70 text-sm whitespace-pre-wrap">{body}</div>
-                </div>
-            {/each}
-
-            {#if selected.reservation_state}
+    {@const program = selected}
+    <ProgramDetail
+        program={{ ...program, service_name: serviceName(program.service_id) }}
+        onclose={() => (selected = null)}
+    >
+        {#snippet actions()}
+            {#if program.reservation_state}
                 <div class="modal-action items-center">
                     <span class="badge badge-info" data-testid="detail-state">
-                        {stateLabel(selected.reservation_state)}
+                        {stateLabel(program.reservation_state)}
                     </span>
                     <button class="btn" onclick={() => (selected = null)} data-testid="detail-close">
                         閉じる
@@ -339,7 +277,7 @@
                                 selected = null;
                             }}
                     >
-                        <input type="hidden" name="programId" value={selected.id} />
+                        <input type="hidden" name="programId" value={program.id} />
                         <button class="btn btn-error btn-outline" data-testid="detail-cancel">
                             予約を取り消す
                         </button>
@@ -356,7 +294,7 @@
                             selected = null;
                         }}
                 >
-                    <input type="hidden" name="programId" value={selected.id} />
+                    <input type="hidden" name="programId" value={program.id} />
                     <input type="hidden" name="options" value="1" />
                     <!-- 既定のままでいいことがほとんどなので畳んでおく -->
                     <details class="border-base-300 rounded-box border">
@@ -403,7 +341,6 @@
                     </div>
                 </form>
             {/if}
-        </div>
-        <button class="modal-backdrop" onclick={() => (selected = null)} aria-label="閉じる"></button>
-    </div>
+        {/snippet}
+    </ProgramDetail>
 {/if}

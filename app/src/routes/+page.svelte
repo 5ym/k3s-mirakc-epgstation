@@ -1,8 +1,10 @@
 <script lang="ts">
     import { submitting } from '$lib/actions';
+    import ProgramDetail from '$lib/components/ProgramDetail.svelte';
     import { liveUpdates } from '$lib/live-updates.svelte';
     import { detectPlatform, type Platform, playLinks } from '$lib/play';
     import { badgeClass, cmRanges, dateTime, duration, percent, size, stateLabel, time } from '$lib/format';
+    import type { ProgramDetail as Detail } from '$lib/types';
 
     let { data, form } = $props();
 
@@ -24,6 +26,51 @@
 
     /** プレイヤーに渡すので絶対URLにする */
     const fileUrl = (id: number) => `${origin}/api/recordings/${id}/file`;
+
+    /** 行から開いた番組詳細。番組表と同じ見せ方をする */
+    let detail = $state<Detail | null>(null);
+
+    /** 続けて別の行を押したとき、遅れて届いた前の結果で上書きされないようにする */
+    let opened = 0;
+
+    /** 行が自分で持っている分。EPG から引けなくても、これだけは必ず出せる */
+    interface Row {
+        name: string;
+        service_name: string;
+        description: string;
+        start_at: number;
+        end_at: number;
+    }
+
+    /**
+     * 行を押したら番組詳細を出す。
+     *
+     * まず行が持っている分をすぐ出し、EPG から引けたら中身を差し替える。
+     * 古い録画は番組が EPG から消えているので、引けないことのほうが普通。
+     */
+    async function openDetail(programId: number | null, row: Row): Promise<void> {
+        const token = ++opened;
+        detail = {
+            ...row,
+            extended: null,
+            genre_detail: null,
+            audios: null,
+            video_type: null,
+            video_resolution: null,
+            is_free: 1,
+        };
+        if (programId === null) return;
+
+        const res = await fetch(`/api/programs/${programId}`);
+        if (res.ok && token === opened) detail = await res.json();
+    }
+
+    /** 行のどこを押しても開く。ただしボタンやリンクを押したときは邪魔しない */
+    function rowClick(event: MouseEvent | KeyboardEvent, programId: number | null, row: Row): void {
+        if (event instanceof KeyboardEvent && event.key !== 'Enter') return;
+        if ((event.target as HTMLElement).closest('a, button, input, label')) return;
+        void openDetail(programId, row);
+    }
 </script>
 
 <h1 class="mb-4 text-2xl font-bold">予約と録画</h1>
@@ -87,10 +134,15 @@
                 </thead>
                 <tbody data-testid="reservation-list">
                     {#each data.reservations as res (res.id)}
+                        <!-- 行を押すと番組表と同じ詳細が出る -->
                         <tr
                             data-testid="reservation-row"
                             data-reservation-id={res.id}
                             data-program-id={res.program_id}
+                            class="hover cursor-pointer"
+                            tabindex="0"
+                            onclick={(event) => rowClick(event, res.program_id, res)}
+                            onkeydown={(event) => rowClick(event, res.program_id, res)}
                         >
                             <td class="whitespace-nowrap">
                                 {dateTime(res.start_at)} 〜 {time(res.end_at)}
@@ -244,10 +296,15 @@
                 </thead>
                 <tbody data-testid="recording-list">
                     {#each data.recordings as rec (rec.id)}
+                        <!-- 行を押すと番組表と同じ詳細が出る -->
                         <tr
                             data-testid="recording-row"
                             data-recording-id={rec.id}
                             data-program-id={rec.program_id}
+                            class="hover cursor-pointer"
+                            tabindex="0"
+                            onclick={(event) => rowClick(event, rec.program_id, rec)}
+                            onkeydown={(event) => rowClick(event, rec.program_id, rec)}
                         >
                             <td class="whitespace-nowrap">
                                 {dateTime(rec.start_at)}
@@ -344,3 +401,7 @@
         </div>
     </section>
 </div>
+
+{#if detail}
+    <ProgramDetail program={detail} onclose={() => (detail = null)} />
+{/if}

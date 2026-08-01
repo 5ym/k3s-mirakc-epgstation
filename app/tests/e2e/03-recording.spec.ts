@@ -66,6 +66,14 @@ test.describe('録画とエンコード', () => {
         // 外部プレイヤーに渡す再生リンクが出ていること
         await expect(recording.getByTestId('play-link').first()).toBeVisible();
 
+        // 行を押すと番組表と同じ詳細が出る
+        await recording.locator('td').first().click();
+        const detail = page.getByTestId('program-detail');
+        await expect(detail).toBeVisible();
+        await expect(detail.getByTestId('detail-video')).toBeVisible();
+        await page.getByTestId('detail-close').click();
+        await expect(detail).toHaveCount(0);
+
         // ファイルは Range で取りに行ける。mpv も VLC もこれでシークするので、
         // 対応していないと全部落とし終わるまで早送りできない
         const id = await recording.getAttribute('data-recording-id');

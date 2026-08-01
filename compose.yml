@@ -1,7 +1,7 @@
 # 開発環境。ホストに bun を入れずに済むよう、全部コンテナの中で完結させる。
 #
-#   docker compose up            … 開発サーバ + 偽Mirakurun + Jellyfin
-#   docker compose run --rm e2e  … E2E (中で偽Mirakurun/偽Jellyfin/アプリを起動する)
+#   docker compose up            … 開発サーバ + 偽Mirakurun
+#   docker compose run --rm e2e  … E2E (中で偽Mirakurun/偽通知先/アプリを起動する)
 #   docker compose run --rm unit … 単体テスト
 #
 # 実チューナーもロゴデータも要らず、ffmpeg も偽物を使うので、
