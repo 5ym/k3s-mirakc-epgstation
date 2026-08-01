@@ -57,6 +57,8 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 | `DENPA_DB` | `/app/data/denpa.db` | SQLite の置き場 |
 | `RECORDED_DIR` | `/app/recorded` | 生TSの作業領域 |
 | `LIBRARY_DIR` | `/library` | エンコード済みの置き場。ここから配る |
+| `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` | (空) | 両方入っているときだけベーシック認証が有効 |
+| `BASIC_AUTH_SCOPE` | `files` | `files` … 配信と WebDAV だけ / `all` … 画面も含めて全部 |
 | `FFMPEG` / `FFPROBE` | `/usr/local/bin/...` | 開発時は偽物に差し替える |
 | `ENCODE_CONCURRENCY` | `1` | 録画エンコードの同時実行数。ライブ配信の本数とは無関係 |
 | `ENCODE_CODEC` | `av1` | 録画の既定コーデック (`av1` / `h264`) |
@@ -77,11 +79,13 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 
 | 画面 | 役割 |
 | --- | --- |
-| `/` | ダッシュボード兼**予約一覧**。状態・失敗の通知・録画中と、予約の取消/競合再計算 |
+| `/` | **録画一覧**。再生リンク・再エンコード・削除・実体との照合 |
+| `/reservations` | ダッシュボード兼**予約一覧**。状態・失敗の通知・録画中と、予約の取消/競合再計算 |
 | `/guide` | 番組表(グリッド)と番組検索。検索はルールと同じ条件で絞り込め、そのままルールにできる |
 | `/rules` | 自動予約ルールの一覧と作成 |
-| `/recordings` | ライブラリ。**エンコード中の一覧も上に出る**(ライブラリに入る途中の状態なので) |
 | `/settings` | 通知先(Webhook)と EPGStation からの引き継ぎ |
+| `/api/recordings/<id>/file` | 録画ファイル。Range 対応 |
+| `/dav` | WebDAV (PROPFIND / GET / HEAD)。Kodi 用。書き込みは受けない |
 
 ## テスト
 

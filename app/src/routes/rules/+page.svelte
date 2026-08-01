@@ -124,7 +124,7 @@
                 </label>
             </div>
 
-            <div class="grid gap-4 lg:grid-cols-2">
+            <div class="grid items-start gap-4 lg:grid-cols-2">
                 <details class="border-base-300 rounded-box border">
                     <summary
                         class="cursor-pointer px-4 py-3 text-sm font-medium"
@@ -349,7 +349,7 @@
                 <th>録画</th>
                 <th>優先度</th>
                 <th>予約数</th>
-                <th class="w-40"></th>
+                <th class="w-56"></th>
             </tr>
         </thead>
         <tbody data-testid="rule-list">
@@ -373,17 +373,24 @@
                     </td>
                     <td>{rule.priority}</td>
                     <td>{rule.reservations}</td>
-                    <td class="flex gap-2">
-                        <a class="btn btn-sm" href="/rules?edit={rule.id}" data-testid="rule-edit">編集</a>
+                    <td class="flex flex-nowrap gap-2">
+                        <a
+                            class="btn btn-sm whitespace-nowrap"
+                            href="/rules?edit={rule.id}"
+                            data-testid="rule-edit">編集</a
+                        >
                         <form method="POST" action="?/toggle" use:submitting>
                             <input type="hidden" name="id" value={rule.id} />
-                            <button class="btn btn-sm" data-testid="rule-toggle">
+                            <button class="btn btn-sm whitespace-nowrap" data-testid="rule-toggle">
                                 {rule.enabled ? '無効化' : '有効化'}
                             </button>
                         </form>
                         <form method="POST" action="?/delete" use:submitting>
                             <input type="hidden" name="id" value={rule.id} />
-                            <button class="btn btn-sm btn-error btn-outline" data-testid="rule-delete">
+                            <button
+                                class="btn btn-sm btn-error btn-outline whitespace-nowrap"
+                                data-testid="rule-delete"
+                            >
                                 削除
                             </button>
                         </form>

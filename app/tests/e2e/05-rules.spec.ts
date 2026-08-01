@@ -30,7 +30,7 @@ test.describe('自動予約ルール', () => {
         await expect(rule.getByTestId('rule-cmcut-badge')).toContainText('CM: カット');
 
         // 偽Mirakurunは同じ番組名を周期的に返すので、ルール作成と同時に予約が立つ
-        await goto(page, '/');
+        await goto(page, '/reservations');
         const fromRule = page.getByTestId('reservation-row').filter({ hasText: 'テストアニメ' });
         await expect(fromRule.first()).toBeVisible();
 
@@ -43,7 +43,7 @@ test.describe('自動予約ルール', () => {
         await expect(page.getByTestId('rule-row')).toHaveCount(0);
 
         // 後続に影響しないよう、このルールが作った予約は片付ける
-        await goto(page, '/');
+        await goto(page, '/reservations');
         for (;;) {
             const buttons = page.getByTestId('cancel-button');
             if ((await buttons.count()) === 0) break;
@@ -78,7 +78,7 @@ test.describe('ジャンル指定', () => {
         await expect(rule).toContainText('アニメ／特撮');
 
         // ジャンルだけで予約が立つ
-        await goto(page, '/');
+        await goto(page, '/reservations');
         await expect(page.getByTestId('reservation-row').first()).toBeVisible();
     });
 
@@ -90,7 +90,7 @@ test.describe('ジャンル指定', () => {
         await page.getByTestId('rule-submit').click();
         await expect(page.getByTestId('rule-row')).toHaveCount(1);
 
-        await goto(page, '/');
+        await goto(page, '/reservations');
         await expect(page.getByTestId('reservation-row')).toHaveCount(0);
     });
 });

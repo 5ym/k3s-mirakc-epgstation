@@ -19,7 +19,7 @@ test.describe('手動予約', () => {
         // 予約済みになると見た目が変わる
         await expect(cell).toContainText('予約済み');
 
-        await goto(page, '/');
+        await goto(page, '/reservations');
         const reservation = page.locator(
             `[data-testid="reservation-row"][data-program-id="${target.programId}"]`,
         );
@@ -31,7 +31,7 @@ test.describe('手動予約', () => {
         await expect(reservation).toHaveCount(0);
 
         // 取り消したものは「完了分も表示」でだけ見える
-        await goto(page, '/?all=1');
+        await goto(page, '/reservations?all=1');
         await expect(
             page.locator(`[data-testid="reservation-row"][data-program-id="${target.programId}"]`),
         ).toContainText('キャンセル');
@@ -54,7 +54,7 @@ test.describe('手動予約', () => {
             await expect(cell).toContainText('予約済み');
         }
 
-        await goto(page, '/');
+        await goto(page, '/reservations');
         for (const target of [first, second!]) {
             const reservation = page.locator(
                 `[data-testid="reservation-row"][data-program-id="${target.programId}"]`,
@@ -85,7 +85,7 @@ test.describe('予約の細かい指定', () => {
         await page.getByTestId('reserve-keep').check();
         await page.getByTestId('detail-reserve').click();
 
-        await goto(page, '/');
+        await goto(page, '/reservations');
         const reservation = page.locator(
             `[data-testid="reservation-row"][data-program-id="${target.programId}"]`,
         );
@@ -114,7 +114,7 @@ test.describe('予約の細かい指定', () => {
         await page.getByTestId('detail-reserve').click();
         await expect(page.getByTestId('guide-error')).toContainText('放送が終わっています');
 
-        await goto(page, '/');
+        await goto(page, '/reservations');
         await expect(
             page.locator(`[data-testid="reservation-row"][data-program-id="${past[0].id}"]`),
         ).toHaveCount(0);

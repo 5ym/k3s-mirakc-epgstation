@@ -160,15 +160,38 @@ denpa はエンコード済み mkv とメタデータを次のように置きま
 | 端末 | 渡し方 | 必要なもの |
 | --- | --- | --- |
 | Windows | `mpv://play/<base64url>/` | [mpv-handler](https://github.com/akiirui/mpv-handler) |
-| Android | `vlc://<url>` / `intent://...package=is.xyz.mpv` | VLC または mpv-android |
+| Android | `intent://...action=VIEW;type=video/*` | 動画が再生できるアプリ(端末が選択画面を出す) |
 | iOS | `vlc-x-callback://` / `infuse://` | VLC または Infuse |
 | その他 | 素のURL | 好きなプレイヤーに貼る |
+
+Android はアプリを名指ししません。入っていないときに何も起きないうえ、
+好みも人それぞれなので、どのアプリで開くかは端末に選ばせます。
+番組名を渡せるもの(Android の `S.title`、Infuse の `name`)には渡しています。
 
 配信は `/api/recordings/<id>/file` です。Range に対応しているので、
 プレイヤー側から早送りできます。エンコード済みがあればそれを、無ければ生TSを返します。
 
-`.nfo` とサムネイルは動画の隣に置いたままにしてあります。denpa の画面には要りませんが、
-Kodi のように `.nfo` を読むプレイヤーでライブラリを開く場合にそのまま使えます。
+### Kodi (WebDAV)
+
+Kodi からは `/dav` を **WebDAV サーバー**として追加すると、フォルダ構成そのままで開けます。
+`.nfo` とサムネイルも動画の隣に置いてあるので、番組名・概要・放送局・サムネイルが出ます。
+書き込み系(PUT / DELETE / MKCOL)は受けません。消すのは denpa の画面からです。
+
+### ベーシック認証
+
+mpv も Kodi も、画面の前段に置く forward-auth のようなリダイレクト型の認証を扱えません。
+そこで**ファイルを取りに来る口だけ**にベーシック認証をかけられるようにしてあります。
+
+- `BASIC_AUTH_USER` と `BASIC_AUTH_PASSWORD` の**両方**が入っているときだけ有効
+- `BASIC_AUTH_SCOPE=files`(既定)… `/api/recordings/<id>/file` と `/dav` だけ。画面は素通し
+- `BASIC_AUTH_SCOPE=all` … 画面も含めて全部
+
+再生リンクの URL には資格情報を埋め込みます(`http://user:pass@.../file`)。
+mpv も Infuse も認証ダイアログを出さないためです。
+
+> **注意**: `files` のときは録画一覧の画面自体に認証がかかりません。
+> 画面を開ければ再生リンクの中のパスワードも見えるので、
+> **画面の前段に別の認証を置いている前提**の設定です。
 
 ### 削除の流れ
 

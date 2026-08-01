@@ -11,7 +11,7 @@ import { goto } from './helpers';
  */
 test.describe('ライブラリから外で消された録画の反映', () => {
     test('外で消した録画が一覧から消え、削除済みとして残る', async ({ page }) => {
-        await goto(page, '/recordings');
+        await goto(page, '/');
         const recording = page.getByTestId('recording-row').first();
         await expect(recording).toBeVisible();
 
@@ -31,10 +31,10 @@ test.describe('ライブラリから外で消された録画の反映', () => {
         await expect(page.getByTestId('reconcile-result')).toContainText('削除済み 1 件');
 
         // 現存一覧からは消え、削除済み一覧に理由付きで残る
-        await goto(page, '/recordings');
+        await goto(page, '/');
         await expect(page.locator(`[data-recording-id="${recordingId}"]`)).toHaveCount(0);
 
-        await goto(page, '/recordings?deleted=1');
+        await goto(page, '/?deleted=1');
         await expect(page.locator(`[data-recording-id="${recordingId}"]`)).toContainText(
             'ライブラリから消えていました',
         );

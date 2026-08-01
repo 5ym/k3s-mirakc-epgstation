@@ -9,7 +9,7 @@ async function waitForRow(page: Page, selector: string, expected: string, timeou
     const deadline = Date.now() + timeoutMs;
     let last = '(なし)';
     while (Date.now() < deadline) {
-        await goto(page, '/recordings');
+        await goto(page, '/');
         const badge = page.locator(selector).first();
         if ((await badge.count()) > 0) {
             last = ((await badge.textContent()) ?? '').trim();

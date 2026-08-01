@@ -303,98 +303,101 @@
                 </div>
             {/each}
 
-            <div class="modal-action">
-                {#if selected.reservation_state}
+            {#if selected.reservation_state}
+                <div class="modal-action">
                     <span class="badge badge-info" data-testid="detail-state">
                         {stateLabel(selected.reservation_state)}
                     </span>
-                {:else}
-                    <form
-                        method="POST"
-                        action="?/reserve"
-                        class="flex w-full flex-col gap-3"
-                        use:submitting={() =>
-                            async ({ update }) => {
-                                await update();
-                                selected = null;
-                            }}
-                    >
-                        <input type="hidden" name="programId" value={selected.id} />
-                        <input type="hidden" name="options" value="1" />
-                        <!-- 既定のままでいいことがほとんどなので畳んでおく -->
-                        <details class="border-base-300 rounded-box border">
-                            <summary
-                                class="cursor-pointer px-3 py-2 text-sm font-medium"
-                                data-testid="reserve-options-summary"
-                            >
-                                この番組の録画のしかた
-                                <span class="text-base-content/60">(開かなければ既定のまま)</span>
-                            </summary>
-                            <div class="grid gap-3 px-3 pb-3 sm:grid-cols-2" data-testid="reserve-options">
-                                <label class="flex flex-col gap-1">
-                                    <span class="text-sm font-medium">映像コーデック</span>
-                                    <select
-                                        name="codec"
-                                        class="select select-bordered select-sm w-full"
-                                        data-testid="reserve-codec"
-                                    >
-                                        <option value="av1" selected={data.defaults.codec === 'av1'}>
-                                            AV1 (小さい・遅い)
-                                        </option>
-                                        <option value="h264" selected={data.defaults.codec === 'h264'}>
-                                            H.264 (速い)
-                                        </option>
-                                    </select>
-                                </label>
-                                <label class="flex flex-col gap-1">
-                                    <span class="text-sm font-medium">CM</span>
-                                    <select
-                                        name="cmCut"
-                                        class="select select-bordered select-sm w-full"
-                                        data-testid="reserve-cmcut"
-                                    >
-                                        <option value="chapter" selected={data.defaults.cmCut === 'chapter'}>
-                                            チャプターだけ
-                                        </option>
-                                        <option value="cut" selected={data.defaults.cmCut === 'cut'}>
-                                            実際に切る
-                                        </option>
-                                        <option value="off" selected={data.defaults.cmCut === 'off'}>
-                                            何もしない
-                                        </option>
-                                    </select>
-                                </label>
-                                <label class="flex cursor-pointer items-center gap-2">
-                                    <input
-                                        type="checkbox"
-                                        name="encode"
-                                        value="on"
-                                        checked
-                                        class="checkbox checkbox-sm"
-                                        data-testid="reserve-encode"
-                                    />
-                                    <span class="text-sm">エンコードする</span>
-                                </label>
-                                <label class="flex cursor-pointer items-center gap-2">
-                                    <input
-                                        type="checkbox"
-                                        name="keepOriginal"
-                                        class="checkbox checkbox-sm"
-                                        data-testid="reserve-keep"
-                                    />
-                                    <span class="text-sm">生TSも残す</span>
-                                </label>
-                            </div>
-                        </details>
-                        <button class="btn btn-primary self-end" data-testid="detail-reserve">
-                            予約する
+                    <button class="btn" onclick={() => (selected = null)} data-testid="detail-close">
+                        閉じる
+                    </button>
+                </div>
+            {:else}
+                <form
+                    method="POST"
+                    action="?/reserve"
+                    class="mt-4 flex flex-col gap-3"
+                    use:submitting={() =>
+                        async ({ update }) => {
+                            await update();
+                            selected = null;
+                        }}
+                >
+                    <input type="hidden" name="programId" value={selected.id} />
+                    <input type="hidden" name="options" value="1" />
+                    <!-- 既定のままでいいことがほとんどなので畳んでおく -->
+                    <details class="border-base-300 rounded-box border">
+                        <summary
+                            class="cursor-pointer px-3 py-2 text-sm font-medium"
+                            data-testid="reserve-options-summary"
+                        >
+                            この番組の録画のしかた
+                            <span class="text-base-content/60">(開かなければ既定のまま)</span>
+                        </summary>
+                        <div class="grid gap-3 px-3 pb-3 sm:grid-cols-2" data-testid="reserve-options">
+                            <label class="flex flex-col gap-1">
+                                <span class="text-sm font-medium">映像コーデック</span>
+                                <select
+                                    name="codec"
+                                    class="select select-bordered select-sm w-full"
+                                    data-testid="reserve-codec"
+                                >
+                                    <option value="av1" selected={data.defaults.codec === 'av1'}>
+                                        AV1 (小さい・遅い)
+                                    </option>
+                                    <option value="h264" selected={data.defaults.codec === 'h264'}>
+                                        H.264 (速い)
+                                    </option>
+                                </select>
+                            </label>
+                            <label class="flex flex-col gap-1">
+                                <span class="text-sm font-medium">CM</span>
+                                <select
+                                    name="cmCut"
+                                    class="select select-bordered select-sm w-full"
+                                    data-testid="reserve-cmcut"
+                                >
+                                    <option value="chapter" selected={data.defaults.cmCut === 'chapter'}>
+                                        チャプターだけ
+                                    </option>
+                                    <option value="cut" selected={data.defaults.cmCut === 'cut'}>
+                                        実際に切る
+                                    </option>
+                                    <option value="off" selected={data.defaults.cmCut === 'off'}>
+                                        何もしない
+                                    </option>
+                                </select>
+                            </label>
+                            <label class="flex cursor-pointer items-center gap-2">
+                                <input
+                                    type="checkbox"
+                                    name="encode"
+                                    value="on"
+                                    checked
+                                    class="checkbox checkbox-sm"
+                                    data-testid="reserve-encode"
+                                />
+                                <span class="text-sm">エンコードする</span>
+                            </label>
+                            <label class="flex cursor-pointer items-center gap-2">
+                                <input
+                                    type="checkbox"
+                                    name="keepOriginal"
+                                    class="checkbox checkbox-sm"
+                                    data-testid="reserve-keep"
+                                />
+                                <span class="text-sm">生TSも残す</span>
+                            </label>
+                        </div>
+                    </details>
+                    <div class="modal-action mt-0">
+                        <button class="btn" onclick={() => (selected = null)} data-testid="detail-close">
+                            閉じる
                         </button>
-                    </form>
-                {/if}
-                <button class="btn" onclick={() => (selected = null)} data-testid="detail-close">
-                    閉じる
-                </button>
-            </div>
+                        <button class="btn btn-primary" data-testid="detail-reserve">予約する</button>
+                    </div>
+                </form>
+            {/if}
         </div>
         <button class="modal-backdrop" onclick={() => (selected = null)} aria-label="閉じる"></button>
     </div>

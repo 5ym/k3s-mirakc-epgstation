@@ -35,41 +35,68 @@ export interface PlayLink {
 }
 
 /**
- * 再生リンク。`url` は録画ファイルの絶対URL。
+ * 再生リンク。`url` は録画ファイルの絶対URL、`title` は番組名。
  *
- * - Windows: mpv-handler (`mpv://play/<base64url>/`)。
- *   https://github.com/akiirui/mpv-handler を入れておく必要がある
- * - Android: VLC と mpv-android。mpv-android は intent:// でパッケージを名指しする
- * - iOS: VLC と Infuse。どちらも x-callback-url でURLを渡す
+ * Android は「動画を開く」インテントを投げて、どのアプリで開くかは端末に選ばせる。
+ * アプリを名指しすると入っていないときに何も起きないうえ、好みも人それぞれなので、
+ * 選択は端末の役目にする。
+ *
+ * iOS には同じ仕組みが無く、アプリごとの URL スキームを直に叩くしかない。
+ * Windows も同様で、mpv-handler (https://github.com/akiirui/mpv-handler) が要る。
  */
-export function playLinks(url: string, platform: Platform): PlayLink[] {
-    const encoded = encodeURIComponent(url);
+export function playLinks(
+    url: string,
+    title: string,
+    platform: Platform,
+    credentials?: { user: string; password: string },
+): PlayLink[] {
+    // プレイヤーはベーシック認証のダイアログを出せないものが多いので、
+    // URL に埋めて渡す。埋められないもの(Android の intent)は素のURLのまま
+    const withCredentials =
+        credentials === undefined
+            ? url
+            : url.replace(
+                  /^(https?:\/\/)/,
+                  `$1${encodeURIComponent(credentials.user)}:${encodeURIComponent(credentials.password)}@`,
+              );
+    const encodedUrl = encodeURIComponent(withCredentials);
+    const encodedTitle = encodeURIComponent(title);
 
     if (platform === 'windows') {
         return [
             {
                 label: 'mpv で再生',
-                href: `mpv://play/${base64Url(url)}/`,
+                href: `mpv://play/${base64Url(withCredentials)}/`,
                 note: 'mpv-handler が必要',
             },
         ];
     }
     if (platform === 'android') {
+        // scheme は Intent 側に持たせるので、URL からは取り除いて渡す。
+        // S.title は VLC・mpv-android とも見てくれる
+        const scheme = url.startsWith('https') ? 'https' : 'http';
+        const rest = url.replace(/^https?:\/\//, '');
         return [
-            { label: 'VLC で再生', href: `vlc://${url}` },
             {
-                label: 'mpv で再生',
-                // scheme を Intent 側に持たせるので、URL からは取り除いて渡す
-                href: `intent://${url.replace(/^https?:\/\//, '')}#Intent;scheme=${
-                    url.startsWith('https') ? 'https' : 'http'
-                };package=is.xyz.mpv;end`,
+                label: '動画アプリで再生',
+                href:
+                    `intent://${rest}#Intent;scheme=${scheme};` +
+                    `action=android.intent.action.VIEW;type=video/*;` +
+                    `S.title=${encodedTitle};end`,
+                note: 'どのアプリで開くかは端末が聞いてきます',
             },
         ];
     }
     if (platform === 'ios') {
         return [
-            { label: 'VLC で再生', href: `vlc-x-callback://x-callback-url/stream?url=${encoded}` },
-            { label: 'Infuse で再生', href: `infuse://x-callback-url/play?url=${encoded}` },
+            {
+                label: 'VLC で再生',
+                href: `vlc-x-callback://x-callback-url/stream?url=${encodedUrl}`,
+            },
+            {
+                label: 'Infuse で再生',
+                href: `infuse://x-callback-url/play?url=${encodedUrl}&name=${encodedTitle}`,
+            },
         ];
     }
     // 判定できない端末には、プレイヤーに貼れる素のURLだけ出す

@@ -49,7 +49,7 @@ test.describe('ルールの編集', () => {
 
         await page.getByTestId('rule-cancel-edit').click();
         await page.getByTestId('rule-delete').first().click();
-        await goto(page, '/');
+        await goto(page, '/reservations');
         for (let i = 0; i < 80; i++) {
             const buttons = page.getByTestId('cancel-button');
             if ((await buttons.count()) === 0) break;
@@ -80,7 +80,7 @@ test.describe('ルールの作り直し', () => {
             await page.getByTestId('rule-submit').click();
             await expect(page.getByTestId('rule-row')).toHaveCount(1);
 
-            await goto(page, '/');
+            await goto(page, '/reservations');
             await expect(
                 page.getByTestId('reservation-row').filter({ hasText: 'テストアニメ' }).first(),
                 `${round} 回目`,

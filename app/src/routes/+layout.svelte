@@ -44,10 +44,10 @@
     }
 
     const links = [
-        { href: '/', label: 'ダッシュボード' },
+        { href: '/', label: '録画' },
+        { href: '/reservations', label: '予約' },
         { href: '/guide', label: '番組表' },
         { href: '/rules', label: 'ルール' },
-        { href: '/recordings', label: 'ライブラリ' },
         { href: '/settings', label: '設定' },
     ];
 

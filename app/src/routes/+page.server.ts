@@ -1,101 +1,127 @@
 import { fail } from '@sveltejs/kit';
-import { database, queryAll, queryOne } from '$lib/server/db';
-import { sync } from '$lib/server/epg';
-import { ping } from '$lib/server/mirakurun';
-import { cancel } from '$lib/server/reservations';
-import { resolveConflicts } from '$lib/server/scheduler';
-import type { Recording, Reservation } from '$lib/types';
+import { enabled as authEnabled } from '$lib/server/auth';
+import { config } from '$lib/server/config';
+import { database, now, queryAll, queryOne } from '$lib/server/db';
+import { cancel as cancelEncode, enqueue, pump } from '$lib/server/encoder';
+import { deleteRecordingFiles, reconcile } from '$lib/server/files';
+import type { EncodeJob, Recording } from '$lib/types';
 
-interface ReservationRow extends Reservation {
-    service_name: string;
-    rule_name: string | null;
+interface JobRow extends EncodeJob {
+    recording_name: string;
 }
 
-const DAY = 24 * 60 * 60 * 1000;
-
-/**
- * ダッシュボードは予約一覧を兼ねる。
- * 「これから何が録れるか」と「いま何が起きているか」は同じ画面で見たいものなので、
- * 予約を別画面に切り出すと行き来するだけになる。
- */
-export async function load({ url }) {
-    const at = Date.now();
-    const showFinished = url.searchParams.get('all') === '1';
-
-    const recording = queryAll<Recording>(
-        `SELECT * FROM recordings WHERE state = 'recording' ORDER BY start_at`,
-    );
-
-    const states = showFinished
-        ? "('scheduled','conflict','recording','done','failed','canceled','missed')"
-        : "('scheduled','conflict','recording')";
-    const reservations = queryAll<ReservationRow>(
-        `SELECT r.*, s.name AS service_name, rules.name AS rule_name
-         FROM reservations r
-         JOIN services s ON s.id = r.service_id
-         LEFT JOIN rules ON rules.id = r.rule_id
-         WHERE r.state IN ${states}
-         ORDER BY r.start_at ${showFinished ? 'DESC' : 'ASC'} LIMIT 300`,
-    );
-
-    const stats = queryOne<Record<string, number>>(
-        `SELECT
-            (SELECT COUNT(*) FROM recordings WHERE state = 'available' AND deleted_at IS NULL) AS available,
-            (SELECT COALESCE(SUM(ts_size), 0) FROM recordings WHERE deleted_at IS NULL) AS bytes,
-            (SELECT COUNT(*) FROM reservations WHERE state = 'scheduled' AND start_at BETWEEN ? AND ?) AS today,
-            (SELECT COUNT(*) FROM reservations WHERE state = 'conflict' AND end_at > ?) AS conflicts,
-            (SELECT COUNT(*) FROM programs) AS programs,
-            (SELECT COUNT(*) FROM services) AS services,
-            (SELECT COUNT(*) FROM encode_jobs WHERE state IN ('queued','running')) AS encoding`,
-        at,
-        at + DAY,
-        at,
-    )!;
-
-    // 失敗は放っておくと気づけないので目立つところに出す。
-    // 時間で勝手に消すと見逃すので、確認するまで残して消せるようにしてある
-    const failures = queryAll<{ id: number; name: string; error: string | null; updated_at: number }>(
-        `SELECT id, name, error, updated_at FROM recordings
-         WHERE state = 'failed' AND deleted_at IS NULL AND acknowledged_at IS NULL
-         ORDER BY updated_at DESC LIMIT 10`,
+export function load({ url }) {
+    const showDeleted = url.searchParams.get('deleted') === '1';
+    const recordings = database()
+        .prepare(
+            `SELECT * FROM recordings
+             WHERE deleted_at IS ${showDeleted ? 'NOT NULL' : 'NULL'}
+             ORDER BY start_at DESC LIMIT 300`,
+        )
+        .all() as Recording[];
+    // エンコードは「ライブラリに入る途中の状態」なので同じ画面の上に出す。
+    // 終わったものは録画側の行に出るので、ここは進行中と直近の失敗だけ
+    const jobs = queryAll<JobRow>(
+        `SELECT j.*, r.name AS recording_name
+         FROM encode_jobs j JOIN recordings r ON r.id = j.recording_id
+         WHERE j.state IN ('queued','running')
+            OR (j.state IN ('failed','canceled') AND j.finished_at > ?)
+         ORDER BY
+            CASE j.state WHEN 'running' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END,
+            j.id DESC
+         LIMIT 50`,
+        Date.now() - 24 * 60 * 60 * 1000,
     );
 
     return {
-        recording,
-        reservations,
-        showFinished,
-        stats,
-        failures,
-        mirakurun: await ping(),
+        recordings,
+        jobs,
+        showDeleted,
+        /*
+         * プレイヤーに渡すURLに埋める資格情報。
+         * mpv も Infuse もベーシック認証のダイアログを出さないので、URL に入れるしかない。
+         *
+         * BASIC_AUTH_SCOPE=files だとこの画面自体は素通しなので、画面を開ければ
+         * パスワードも見える。画面の前段に別の認証を置いている前提の設定。
+         */
+        credentials: authEnabled()
+            ? { user: config.basicAuthUser, password: config.basicAuthPassword }
+            : undefined,
     };
 }
 
+function target(form: FormData): Recording | undefined {
+    const id = Number(form.get('id'));
+    if (!Number.isFinite(id)) return undefined;
+    return queryOne<Recording>('SELECT * FROM recordings WHERE id = ?', id);
+}
+
 export const actions = {
-    sync: async () => {
-        return { success: true, sync: await sync() };
+    delete: async ({ request }) => {
+        const recording = target(await request.formData());
+        if (recording === undefined) return fail(400, { message: '録画が見つかりません' });
+        deleteRecordingFiles(recording, '手動削除');
+        return { success: true };
     },
 
-    cancel: async ({ request }) => {
+    reencode: async ({ request }) => {
+        const recording = target(await request.formData());
+        if (recording === undefined) return fail(400, { message: '録画が見つかりません' });
+        if (recording.ts_path === null) {
+            return fail(400, { message: '生TSが残っていないため再エンコードできません' });
+        }
+        enqueue(recording.id);
+        pump();
+        return { success: true };
+    },
+
+    cancelEncode: async ({ request }) => {
         const form = await request.formData();
         const id = Number(form.get('id'));
-        if (!Number.isFinite(id)) return fail(400, { message: '予約IDが不正です' });
-        await cancel(id);
+        if (!Number.isFinite(id)) return fail(400, { message: 'ジョブIDが不正です' });
+        cancelEncode(id);
         return { success: true };
     },
 
-    acknowledge: async ({ request }) => {
+    retryEncode: async ({ request }) => {
         const form = await request.formData();
         const id = Number(form.get('id'));
-        const sql =
-            Number.isFinite(id) && id > 0
-                ? `UPDATE recordings SET acknowledged_at = ? WHERE id = ${id}`
-                : `UPDATE recordings SET acknowledged_at = ? WHERE state = 'failed' AND acknowledged_at IS NULL`;
-        database().prepare(sql).run(Date.now());
+        if (!Number.isFinite(id)) return fail(400, { message: 'ジョブIDが不正です' });
+        const job = queryOne<EncodeJob>('SELECT * FROM encode_jobs WHERE id = ?', id);
+        if (job === undefined) return fail(400, { message: 'ジョブが見つかりません' });
+
+        const source = queryOne<{ ts_path: string | null }>(
+            'SELECT ts_path FROM recordings WHERE id = ?',
+            job.recording_id,
+        );
+        if (source?.ts_path == null) {
+            return fail(400, { message: '生TSが残っていないためやり直せません' });
+        }
+
+        database()
+            .prepare(
+                `UPDATE encode_jobs SET state = 'queued', percent = 0, error = NULL,
+                 started_at = NULL, finished_at = NULL WHERE id = ?`,
+            )
+            .run(id);
+        database()
+            .prepare(`UPDATE recordings SET state = 'recorded', error = NULL, updated_at = ? WHERE id = ?`)
+            .run(now(), job.recording_id);
+        pump();
         return { success: true };
     },
 
-    resolve: async () => {
-        await resolveConflicts();
+    dismissEncode: async ({ request }) => {
+        const form = await request.formData();
+        const id = Number(form.get('id'));
+        if (!Number.isFinite(id)) return fail(400, { message: 'ジョブIDが不正です' });
+        // 失敗の記録は録画側の error に残るので、ジョブ行は消してしまってよい
+        database().prepare(`DELETE FROM encode_jobs WHERE id = ? AND state IN ('failed','canceled')`).run(id);
         return { success: true };
+    },
+
+    reconcile: () => {
+        // 「ライブラリを照合」ボタン。外から消した分をすぐ一覧に反映したいとき用
+        return { success: true, reconcile: reconcile() };
     },
 };

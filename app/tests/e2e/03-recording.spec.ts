@@ -37,13 +37,13 @@ test.describe('録画とエンコード', () => {
         const programId = await reserveSoon(page, request, 'BS');
 
         const reservationRow = `[data-testid="reservation-row"][data-program-id="${programId}"]`;
-        await waitForRowState(page, '/?all=1', reservationRow, 'reservation-state', '完了');
+        await waitForRowState(page, '/reservations?all=1', reservationRow, 'reservation-state', '完了');
 
         const recordingRow = `[data-testid="recording-row"][data-program-id="${programId}"]`;
-        await waitForRowState(page, '/recordings', recordingRow, 'recording-state', '視聴可能');
+        await waitForRowState(page, '/', recordingRow, 'recording-state', '視聴可能');
 
         // ライブラリ上のパスが決まっていること。実体との突き合わせにこのパスを使う
-        await goto(page, '/recordings');
+        await goto(page, '/');
         const recording = page.locator(recordingRow);
         await expect(recording).toContainText('/tmp/denpa-e2e/library/');
         await expect(recording).toContainText('.mkv');
@@ -70,7 +70,11 @@ test.describe('録画とエンコード', () => {
         const id = await recording.getAttribute('data-recording-id');
         expect(id).toBeTruthy();
         const part = await request.get(`/api/recordings/${id}/file`, {
-            headers: { Range: 'bytes=0-99' },
+            headers: {
+                Range: 'bytes=0-99',
+                // ファイルの口はベーシック認証をかけてある
+                Authorization: `Basic ${Buffer.from('denpa:ひみつ', 'utf8').toString('base64')}`,
+            },
         });
         expect(part.status()).toBe(206);
         expect(part.headers()['content-range']).toMatch(/^bytes 0-99\/\d+$/);

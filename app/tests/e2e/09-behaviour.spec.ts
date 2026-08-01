@@ -17,7 +17,7 @@ test.describe('操作したときの反応', () => {
             await buttons.first().click();
             await page.waitForTimeout(100);
         }
-        await goto(page, '/');
+        await goto(page, '/reservations');
         for (let i = 0; i < 80; i++) {
             const buttons = page.getByTestId('cancel-button');
             if ((await buttons.count()) === 0) break;
@@ -57,7 +57,7 @@ test.describe('操作したときの反応', () => {
     test('ダッシュボードで取り消すと、その場で一覧から消える', async ({ page, request }) => {
         await reserveSoon(page, request, 'GR', 6);
 
-        await goto(page, '/');
+        await goto(page, '/reservations');
         const rows = page.getByTestId('reservation-row');
         await expect(rows).toHaveCount(1);
 
@@ -73,7 +73,7 @@ test.describe('操作したときの反応', () => {
         await page.getByTestId('rule-submit').click();
         await expect(page.getByTestId('rule-row')).toHaveCount(1);
 
-        await goto(page, '/');
+        await goto(page, '/reservations');
         await expect(page.getByTestId('reservation-row').first()).toBeVisible();
         const before = await page.getByTestId('reservation-row').count();
         expect(before).toBeGreaterThan(0);
@@ -83,7 +83,7 @@ test.describe('操作したときの反応', () => {
         await expect(page.getByTestId('rule-row')).toHaveCount(0);
 
         // ルールが無くなったのに予約だけ残ると、止めたつもりが録れ続ける
-        await goto(page, '/');
+        await goto(page, '/reservations');
         await expect(page.getByTestId('reservation-row')).toHaveCount(0);
     });
 });

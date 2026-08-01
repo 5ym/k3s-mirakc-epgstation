@@ -75,6 +75,10 @@ export default defineConfig({
                 // 何も待ち受けていない先。引き継ぎが失敗したときの見え方を試す
                 EPGSTATION_DB_HOST: '127.0.0.1',
                 EPGSTATION_DB_PORT: '1',
+                // ベーシック認証は「ファイルを取りに来る口だけ」。画面は素通しのまま試す
+                BASIC_AUTH_USER: 'denpa',
+                BASIC_AUTH_PASSWORD: 'ひみつ',
+                BASIC_AUTH_SCOPE: 'files',
             },
         },
     ],

@@ -93,6 +93,22 @@ export const config = {
     /** 終了した番組情報をDBに残しておく期間。番組表の遡り表示にしか使わないので短くてよい */
     programRetention: num('PROGRAM_RETENTION', 24 * 60 * MIN),
 
+    /**
+     * ベーシック認証。ユーザー名とパスワードの両方が入っているときだけ有効になる。
+     *
+     * 画面の前段に別の認証(forward-auth など)を置いている場合、プレイヤーや Kodi は
+     * そのリダイレクトを扱えない。そこで「ファイルを取りに来る口だけ」に
+     * ベーシック認証をかけられるようにしてある。
+     */
+    basicAuthUser: str('BASIC_AUTH_USER', ''),
+    basicAuthPassword: str('BASIC_AUTH_PASSWORD', ''),
+    /**
+     * 認証をかける範囲。
+     * `files` … 録画の配信と WebDAV だけ (既定)。画面は素通し
+     * `all`   … 画面も含めて全部
+     */
+    basicAuthScope: str('BASIC_AUTH_SCOPE', 'files') as 'files' | 'all',
+
     /** 0 にすると EPG 取得・スケジューラ・エンコーダを起動しない (単体テスト用) */
     autostart: bool('DENPA_AUTOSTART', true),
 };

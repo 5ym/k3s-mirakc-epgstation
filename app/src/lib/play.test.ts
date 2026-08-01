@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { base64Url, detectPlatform, playLinks } from './play';
 
+const TITLE = 'テストアニメ 第1話';
+
 const URL = 'http://denpa.local/api/recordings/12/file';
 
 describe('detectPlatform', () => {
@@ -23,28 +25,59 @@ describe('base64Url', () => {
 
 describe('playLinks', () => {
     test('Windows は mpv-handler のスキームで開く', () => {
-        const [link] = playLinks(URL, 'windows');
+        const [link] = playLinks(URL, TITLE, 'windows');
         expect(link.href).toBe(`mpv://play/${base64Url(URL)}/`);
         // 入っていないと開けないので、それが分かるようにしておく
         expect(link.note).toContain('mpv-handler');
     });
 
-    test('Android は VLC と mpv-android の両方を出す', () => {
-        const links = playLinks(URL, 'android');
-        expect(links.map((l) => l.href)).toEqual([
-            `vlc://${URL}`,
-            'intent://denpa.local/api/recordings/12/file#Intent;scheme=http;package=is.xyz.mpv;end',
-        ]);
+    test('Android はアプリを名指しせず、端末に選ばせる', () => {
+        const [link] = playLinks(URL, TITLE, 'android');
+        // package= を付けるとそのアプリが無いときに何も起きない。
+        // ACTION_VIEW + type だけ渡して、選択は端末に任せる
+        expect(link.href).not.toContain('package=');
+        expect(link.href).toContain('action=android.intent.action.VIEW');
+        expect(link.href).toContain('type=video/*');
+        expect(link.href).toContain('scheme=http');
+        expect(link.href).toContain(`S.title=${encodeURIComponent(TITLE)}`);
     });
 
     test('iOS は x-callback-url でURLを渡す', () => {
-        const links = playLinks(URL, 'ios');
+        const links = playLinks(URL, TITLE, 'ios');
         expect(links[0].href).toContain('vlc-x-callback://x-callback-url/stream?url=');
         expect(links[1].href).toContain('infuse://x-callback-url/play?url=');
         for (const link of links) expect(link.href).toContain(encodeURIComponent(URL));
+        // 番組名を渡せるものには渡す
+        expect(links[1].href).toContain(`name=${encodeURIComponent(TITLE)}`);
     });
 
     test('判定できない端末には素のURLを出す', () => {
-        expect(playLinks(URL, 'other')).toEqual([{ label: 'ファイルを開く', href: URL }]);
+        expect(playLinks(URL, TITLE, 'other')).toEqual([{ label: 'ファイルを開く', href: URL }]);
+    });
+});
+
+describe('ベーシック認証つきのURL', () => {
+    const cred = { user: 'denpa', password: 'p@ss word' };
+
+    test('mpv には資格情報を埋めたURLを渡す', () => {
+        const [link] = playLinks(URL, TITLE, 'windows', cred);
+        const decoded = atob(
+            link.href.replace('mpv://play/', '').replace(/\/$/, '').replace(/-/g, '+').replace(/_/g, '/'),
+        );
+        expect(decoded).toBe('http://denpa:p%40ss%20word@denpa.local/api/recordings/12/file');
+    });
+
+    test('iOS のスキームにも埋める', () => {
+        const links = playLinks(URL, TITLE, 'ios', cred);
+        for (const link of links) {
+            // searchParams が一段解いてくれる。中身は資格情報つきのURLそのもの
+            const url = new globalThis.URL(link.href).searchParams.get('url') ?? '';
+            expect(url).toBe('http://denpa:p%40ss%20word@denpa.local/api/recordings/12/file');
+        }
+    });
+
+    test('資格情報が無ければ素のURLのまま', () => {
+        const [link] = playLinks(URL, TITLE, 'windows');
+        expect(atob(link.href.replace('mpv://play/', '').replace(/\/$/, ''))).toBe(URL);
     });
 });
