@@ -58,16 +58,6 @@
     <title>{title}</title>
 </svelte:head>
 
-<!--
-    画面遷移とフォーム送信の待ち時間を出す。番組表やEPG取得は数秒かかることがあり、
-    無反応に見えると二度押しされる
--->
-{#if navigating.to}
-    <div class="fixed inset-x-0 top-0 z-50" data-testid="loading-bar">
-        <progress class="progress progress-primary h-1 w-full rounded-none"></progress>
-    </div>
-{/if}
-
 <div class="min-h-screen bg-base-200" data-hydrated={hydrated ? 'true' : undefined}>
     <div class="navbar bg-base-100 shadow-sm">
         <div class="flex-1">
@@ -98,6 +88,17 @@
                 {/each}
             </ul>
         </nav>
+    </div>
+
+    <!--
+        画面遷移の待ち時間を出す。番組表やEPG取得は数秒かかることがあり、
+        無反応に見えると二度押しされる。
+        高さは常に確保しておく(出入りのたびに下の内容がずれないように)
+    -->
+    <div class="h-1" data-testid="loading-bar" data-loading={navigating.to ? 'true' : undefined}>
+        {#if navigating.to}
+            <progress class="progress progress-primary h-1 w-full rounded-none"></progress>
+        {/if}
     </div>
 
     <main class="p-4 md:p-6">
