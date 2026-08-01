@@ -33,8 +33,7 @@ export default defineConfig({
             stderr: 'pipe',
             env: {
                 FAKE_MIRAKURUN_PORT: String(MIRAKURUN_PORT),
-                // 10秒番組にして、E2Eの中で録画完了まで待てるようにする
-                FAKE_SLOT_MS: '10000',
+                // 尺は tests/fake/services.ts で局ごとに決めている
                 FAKE_SLOTS: '30',
             },
         },

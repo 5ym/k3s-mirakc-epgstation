@@ -8,6 +8,7 @@ export interface MirakurunService {
     name: string;
     type: number;
     remoteControlKeyId?: number;
+    hasLogoData?: boolean;
     channel?: { type: ChannelType; channel: string };
 }
 
@@ -79,6 +80,16 @@ export async function openServiceStream(
         throw new Error(`mirakurun stream ${serviceId} -> ${res.status}`);
     }
     return res.body;
+}
+
+/**
+ * 局ロゴ。Mirakurun が放送波から拾ったものをそのまま中継する。
+ * ロゴを持たない局もあるので、無いときは null を返して呼び出し側で出し分ける。
+ */
+export async function fetchLogo(serviceId: number): Promise<Response | null> {
+    const res = await fetch(`${config.mirakurunUrl}/api/services/${serviceId}/logo`);
+    if (!res.ok || res.body === null) return null;
+    return res;
 }
 
 /** Mirakurun が生きているか。ダッシュボードの表示用 */

@@ -8,8 +8,9 @@
 import { type FakeService, SERVICES } from './services';
 
 const PORT = Number(process.env.FAKE_MIRAKURUN_PORT ?? 40772);
-const SLOT_MS = Number(process.env.FAKE_SLOT_MS ?? 10_000);
 const SLOTS = Number(process.env.FAKE_SLOTS ?? 60);
+/** 番組表を丸1日ぶん埋めるための追加分。局ごとの尺に応じて増やす */
+const DAY = 30 * 60 * 60 * 1000;
 
 const TITLES = [
     'テスト番組A',
@@ -20,11 +21,17 @@ const TITLES = [
 ];
 
 function programsFor(service: FakeService) {
-    const base = Math.floor(Date.now() / SLOT_MS) * SLOT_MS;
+    const slotMs = service.slotMs;
+    // 番組表(4時〜翌4時)が埋まるだけの本数を出す。短い尺の局は本数で稼ぐと多すぎるので上限を切る
+    const count = Math.max(SLOTS, Math.min(600, Math.ceil(DAY / slotMs)));
+    // 作れる本数で覆える幅。尺が短い局は本数の上限で頭打ちになる
+    const span = Math.min(DAY, count * slotMs);
+    // 少し過去から始める。全部を過去にすると予約できる番組が1つも無くなる
+    const base = Math.floor((Date.now() - span / 3) / slotMs) * slotMs;
     const programs = [];
-    for (let i = 0; i < SLOTS; i++) {
-        const startAt = base + i * SLOT_MS;
-        const slot = startAt / SLOT_MS;
+    for (let i = 0; i < count; i++) {
+        const startAt = base + i * slotMs;
+        const slot = startAt / slotMs;
         programs.push({
             // 枠番号から決めるので取得のたびにIDが変わらない
             id: service.id * 100000 + (slot % 100000),
@@ -34,7 +41,7 @@ function programsFor(service: FakeService) {
             serviceId: service.serviceId,
             networkId: service.networkId,
             startAt,
-            duration: SLOT_MS,
+            duration: slotMs,
             isFree: true,
             name: `${TITLES[(slot + service.serviceId) % TITLES.length]}`,
             description: `${service.name} のテスト番組 (slot ${slot})`,
@@ -89,6 +96,7 @@ Bun.serve({
                     name: s.name,
                     type: 1,
                     channel: { type: s.type, channel: s.channel },
+                    hasLogoData: true,
                 })),
             );
         }
@@ -100,6 +108,21 @@ Bun.serve({
                 { index: 2, name: 'adapter2', types: ['BS', 'CS'], isAvailable: true, isFault: false },
                 { index: 3, name: 'adapter3', types: ['GR'], isAvailable: true, isFault: false },
             ]);
+        }
+
+        // 局ロゴ。中身は問われないので1x1のPNGを返す
+        const logo = url.pathname.match(/^\/api\/services\/(\d+)\/logo$/);
+        if (logo !== null) {
+            if (!SERVICES.some((s) => s.id === Number(logo[1]))) {
+                return new Response('no logo', { status: 404 });
+            }
+            const png = Uint8Array.from(
+                atob(
+                    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+                ),
+                (c) => c.charCodeAt(0),
+            );
+            return new Response(png, { headers: { 'Content-Type': 'image/png' } });
         }
 
         const stream = url.pathname.match(/^\/api\/services\/(\d+)\/stream$/);
@@ -116,4 +139,4 @@ Bun.serve({
     },
 });
 
-console.log(`fake mirakurun listening on :${PORT} (slot ${SLOT_MS}ms)`);
+console.log(`fake mirakurun listening on :${PORT}`);

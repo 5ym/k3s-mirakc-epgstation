@@ -23,6 +23,7 @@ export interface Service {
     type: ChannelType;
     channel: string;
     remote_control_key: number | null;
+    has_logo: number;
     updated_at: number;
 }
 
@@ -108,6 +109,7 @@ export interface Recording {
     codec: VideoCodec;
     cm_ranges: string | null;
     deleted_at: number | null;
+    acknowledged_at: number | null;
     created_at: number;
     updated_at: number;
 }

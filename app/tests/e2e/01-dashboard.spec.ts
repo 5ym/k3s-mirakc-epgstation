@@ -37,7 +37,16 @@ test.describe('ダッシュボードと画面遷移', () => {
 
         // 種別で切り替えられる
         await page.getByTestId('type-BS').click();
-        await expect(page.getByTestId('grid-program').first()).toContainText('BS11イレブン のテスト番組');
+        await expect(page.getByTestId('grid-program').first()).toBeVisible();
+        await page.getByTestId('type-GR').click();
+
+        // 番組をクリックすると詳細が出る。ここで予約するかどうか決める
+        await page.getByTestId('program-button').first().click();
+        const detail = page.getByTestId('program-detail');
+        await expect(detail).toBeVisible();
+        await expect(detail).toContainText('のテスト番組');
+        await page.getByTestId('detail-close').click();
+        await expect(detail).toHaveCount(0);
 
         await goto(page, '/guide');
         await page.getByTestId('filter-keyword').fill('テストアニメ');

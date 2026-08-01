@@ -97,6 +97,15 @@ export const actions = {
         return { success: true };
     },
 
+    dismissEncode: async ({ request }) => {
+        const form = await request.formData();
+        const id = Number(form.get('id'));
+        if (!Number.isFinite(id)) return fail(400, { message: 'ジョブIDが不正です' });
+        // 失敗の記録は録画側の error に残るので、ジョブ行は消してしまってよい
+        database().prepare(`DELETE FROM encode_jobs WHERE id = ? AND state IN ('failed','canceled')`).run(id);
+        return { success: true };
+    },
+
     reconcile: () => {
         // 「ライブラリを照合」ボタン。Jellyfin で消した分をすぐ一覧に反映したいとき用
         return { success: true, reconcile: reconcile() };

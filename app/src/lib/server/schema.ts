@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS services (
     type TEXT NOT NULL,               -- GR / BS / CS
     channel TEXT NOT NULL,            -- 物理チャンネル。同一チャンネルの同時録画はチューナーを共有できる
     remote_control_key INTEGER,
+    has_logo INTEGER NOT NULL DEFAULT 0,
     updated_at INTEGER NOT NULL
 );
 
@@ -114,6 +115,8 @@ CREATE TABLE IF NOT EXISTS recordings (
     cm_ranges TEXT,   -- 検出したCM区間の JSON。UIでの確認用
     -- Jellyfin 側で消された、または denpa から消した時刻。行は履歴として残す
     deleted_at INTEGER,
+    -- 失敗をユーザーが確認した時刻。以降ダッシュボードの通知に出さない
+    acknowledged_at INTEGER,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );

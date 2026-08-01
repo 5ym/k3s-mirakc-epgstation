@@ -10,6 +10,7 @@ const service = (over: Partial<Service> = {}): Service => ({
     type: 'GR',
     channel: 'T16',
     remote_control_key: 9,
+    has_logo: 1,
     updated_at: 0,
     ...over,
 });

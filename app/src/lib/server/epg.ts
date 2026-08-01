@@ -10,8 +10,9 @@ const CHANNEL_TYPES = new Set(['GR', 'BS', 'CS', 'SKY']);
 
 export function syncServices(services: mirakurun.MirakurunService[]): number {
     const stmt = database().prepare(`
-        INSERT INTO services (id, service_id, network_id, name, type, channel, remote_control_key, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO services (id, service_id, network_id, name, type, channel, remote_control_key,
+                              has_logo, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             service_id = excluded.service_id,
             network_id = excluded.network_id,
@@ -19,6 +20,7 @@ export function syncServices(services: mirakurun.MirakurunService[]): number {
             type = excluded.type,
             channel = excluded.channel,
             remote_control_key = excluded.remote_control_key,
+            has_logo = excluded.has_logo,
             updated_at = excluded.updated_at
     `);
     const at = now();
@@ -35,6 +37,7 @@ export function syncServices(services: mirakurun.MirakurunService[]): number {
                 s.channel.type,
                 s.channel.channel,
                 s.remoteControlKeyId ?? null,
+                s.hasLogoData === true ? 1 : 0,
                 at,
             );
             count++;

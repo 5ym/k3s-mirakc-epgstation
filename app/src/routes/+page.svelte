@@ -54,11 +54,25 @@
 
 {#if data.failures.length > 0}
     <div class="alert alert-error mb-4 items-start" data-testid="failures">
-        <div>
-            <div class="font-bold">直近24時間で失敗した録画が {data.failures.length} 件あります</div>
-            <ul class="mt-1 space-y-0.5 text-sm">
+        <div class="w-full">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <span class="font-bold">失敗した録画が {data.failures.length} 件あります</span>
+                <form method="POST" action="?/acknowledge" use:submitting>
+                    <button class="btn btn-xs" data-testid="ack-all">すべて確認済みにする</button>
+                </form>
+            </div>
+            <ul class="mt-1 space-y-1 text-sm">
                 {#each data.failures as failure (failure.id)}
-                    <li>{dateTime(failure.updated_at)} {failure.name} — {failure.error ?? '理由不明'}</li>
+                    <li class="flex items-start justify-between gap-2" data-testid="failure-row">
+                        <span>
+                            {dateTime(failure.updated_at)}
+                            {failure.name} — {failure.error ?? '理由不明'}
+                        </span>
+                        <form method="POST" action="?/acknowledge" use:submitting>
+                            <input type="hidden" name="id" value={failure.id} />
+                            <button class="btn btn-xs" data-testid="ack-one">確認</button>
+                        </form>
+                    </li>
                 {/each}
             </ul>
         </div>

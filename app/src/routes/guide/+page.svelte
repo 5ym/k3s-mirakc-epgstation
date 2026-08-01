@@ -1,8 +1,21 @@
 <script lang="ts">
-    import { submitting } from '$lib/actions';
+    import { dragScroll, submitting } from '$lib/actions';
     import { dateTime, duration, stateLabel, time } from '$lib/format';
 
     let { data, form } = $props();
+
+    /** クリックした番組。詳細を出してから予約するかどうか決める */
+    let selected = $state<(typeof data.programs)[number] | null>(null);
+
+    /** 詳細情報。Mirakurun が拾った「出演者」などの見出し付きテキスト */
+    function extended(json: string | null): [string, string][] {
+        if (json === null || json === '') return [];
+        try {
+            return Object.entries(JSON.parse(json) as Record<string, string>);
+        } catch {
+            return [];
+        }
+    }
 
     const TYPE_LABEL: Record<string, string> = { GR: '地上波', BS: 'BS', CS: 'CS' };
     const HOUR = 60 * 60 * 1000;
@@ -28,6 +41,12 @@
             span: HOUR / SLOT,
         })),
     );
+
+    const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
+    function dayLabel(at: number): string {
+        const d = new Date(at);
+        return `${d.getMonth() + 1}/${d.getDate()}(${WEEKDAYS[d.getDay()]})`;
+    }
 
     function href(params: Record<string, string>): string {
         const query = new URLSearchParams({ type: data.type, ...params });
@@ -75,12 +94,13 @@
             {/each}
         </div>
         <div class="flex items-center gap-2">
-            <a class="btn btn-sm" href={href({ start: String(data.start - data.hours * HOUR) })}>← 前</a>
+            <a class="btn btn-sm" href={href({ start: String(data.start - data.hours * HOUR) })}>← 前日</a>
             <span class="text-sm" data-testid="window-label">
-                {dateTime(data.start)} 〜 {time(end)}
+                <!-- 日本の番組表の慣習で、1日は4時から翌4時まで -->
+                {dayLabel(data.start)} <span class="text-base-content/60">(4:00〜翌4:00)</span>
             </span>
-            <a class="btn btn-sm" href={href({ start: String(data.start + data.hours * HOUR) })}>次 →</a>
-            <a class="btn btn-sm" href={href({})}>いま</a>
+            <a class="btn btn-sm" href={href({ start: String(data.start + data.hours * HOUR) })}>翌日 →</a>
+            <a class="btn btn-sm" href={href({})}>今日</a>
         </div>
     </div>
 
@@ -93,7 +113,11 @@
             </p>
         </div>
     {:else}
-        <div class="rounded-box bg-base-100 max-h-[75vh] overflow-auto shadow" data-testid="guide-grid">
+        <div
+            class="rounded-box bg-base-100 max-h-[75vh] cursor-grab overflow-auto shadow active:cursor-grabbing"
+            use:dragScroll
+            data-testid="guide-grid"
+        >
             <div
                 class="grid"
                 style="grid-template-columns: 3.5rem repeat({data.services
@@ -103,11 +127,20 @@
                 <div class="bg-base-100 sticky top-0 left-0 z-30" style="grid-column: 1; grid-row: 1;"></div>
                 {#each data.services as service, i (service.id)}
                     <div
-                        class="bg-base-100 border-base-300 sticky top-0 z-20 truncate border-b px-2 py-2 text-sm font-medium"
+                        class="bg-base-100 border-base-300 sticky top-0 z-20 flex items-center gap-1.5 truncate border-b px-2 py-2 text-sm font-medium"
                         style="grid-column: {i + 2}; grid-row: 1;"
                         title={service.name}
                     >
-                        {service.name}
+                        {#if service.has_logo}
+                            <!-- ロゴを持たない局もあるので、有るものだけ出す -->
+                            <img
+                                src="/api/services/{service.id}/logo"
+                                alt=""
+                                class="h-5 w-8 shrink-0 object-contain"
+                                loading="lazy"
+                            />
+                        {/if}
+                        <span class="truncate">{service.name}</span>
                     </div>
                 {/each}
 
@@ -116,7 +149,7 @@
                         class="bg-base-100 border-base-300 sticky left-0 z-10 border-t px-1 text-xs"
                         style="grid-column: 1; grid-row: {mark.row} / span {mark.span};"
                     >
-                        {time(mark.at)}
+                        {new Date(mark.at).getHours()}
                     </div>
                 {/each}
 
@@ -130,37 +163,27 @@
                         data-testid="grid-program"
                         data-program-id={program.id}
                     >
-                        {#if program.reservation_state}
-                            <div
-                                class="bg-primary/20 border-primary h-full overflow-hidden rounded border-l-2 px-1 py-0.5 text-left"
-                                title={program.description}
-                            >
-                                <div class="text-xs leading-tight font-medium">
-                                    {time(program.start_at)}
-                                    {program.name}
-                                </div>
-                                <div class="text-primary text-xs">
+                        <button
+                            class="h-full w-full overflow-hidden rounded px-1 py-0.5 text-left {program.reservation_state
+                                ? 'bg-primary/20 border-primary border-l-2'
+                                : 'bg-base-200 hover:bg-base-300'}"
+                            onclick={() => (selected = program)}
+                            data-testid="program-button"
+                        >
+                            <span class="block text-xs leading-tight font-medium">
+                                {time(program.start_at)}
+                                {program.name}
+                            </span>
+                            {#if program.reservation_state}
+                                <span class="text-primary block text-xs">
                                     {stateLabel(program.reservation_state)}
-                                </div>
-                            </div>
-                        {:else}
-                            <form method="POST" action="?/reserve" use:submitting class="h-full">
-                                <input type="hidden" name="programId" value={program.id} />
-                                <button
-                                    class="bg-base-200 hover:bg-base-300 h-full w-full overflow-hidden rounded px-1 py-0.5 text-left"
-                                    title="{program.name}&#10;{program.description}&#10;&#10;クリックで予約"
-                                    data-testid="reserve-button"
-                                >
-                                    <span class="block text-xs leading-tight font-medium">
-                                        {time(program.start_at)}
-                                        {program.name}
-                                    </span>
-                                    <span class="text-base-content/60 block text-xs leading-tight">
-                                        {program.description}
-                                    </span>
-                                </button>
-                            </form>
-                        {/if}
+                                </span>
+                            {:else}
+                                <span class="text-base-content/60 block text-xs leading-tight">
+                                    {program.description}
+                                </span>
+                            {/if}
+                        </button>
                     </div>
                 {/each}
             </div>
@@ -186,7 +209,17 @@
                                 ({duration(program.start_at, program.end_at)})
                             </span>
                         </td>
-                        <td class="whitespace-nowrap">{program.service_name}</td>
+                        <td class="whitespace-nowrap">
+                            <span class="flex items-center gap-1.5">
+                                <img
+                                    src="/api/services/{program.service_id}/logo"
+                                    alt=""
+                                    class="h-5 w-8 shrink-0 object-contain"
+                                    loading="lazy"
+                                />
+                                {program.service_name}
+                            </span>
+                        </td>
                         <td>
                             <div class="font-medium">{program.name}</div>
                             <div class="text-base-content/60 line-clamp-1 text-sm">{program.description}</div>
@@ -211,5 +244,45 @@
                 {/each}
             </tbody>
         </table>
+    </div>
+{/if}
+
+{#if selected}
+    <div class="modal modal-open" role="dialog" data-testid="program-detail">
+        <div class="modal-box max-w-2xl">
+            <h3 class="text-lg font-bold">{selected.name}</h3>
+            <p class="text-base-content/60 mt-1 text-sm">
+                {dateTime(selected.start_at)} 〜 {time(selected.end_at)}
+                ({duration(selected.start_at, selected.end_at)})
+            </p>
+
+            {#if selected.description}
+                <p class="mt-3 text-sm whitespace-pre-wrap">{selected.description}</p>
+            {/if}
+
+            {#each extended(selected.extended) as [heading, body] (heading)}
+                <div class="mt-3">
+                    <div class="text-sm font-medium">{heading}</div>
+                    <div class="text-base-content/70 text-sm whitespace-pre-wrap">{body}</div>
+                </div>
+            {/each}
+
+            <div class="modal-action">
+                {#if selected.reservation_state}
+                    <span class="badge badge-info" data-testid="detail-state">
+                        {stateLabel(selected.reservation_state)}
+                    </span>
+                {:else}
+                    <form method="POST" action="?/reserve" use:submitting>
+                        <input type="hidden" name="programId" value={selected.id} />
+                        <button class="btn btn-primary" data-testid="detail-reserve">予約する</button>
+                    </form>
+                {/if}
+                <button class="btn" onclick={() => (selected = null)} data-testid="detail-close">
+                    閉じる
+                </button>
+            </div>
+        </div>
+        <button class="modal-backdrop" onclick={() => (selected = null)} aria-label="閉じる"></button>
     </div>
 {/if}

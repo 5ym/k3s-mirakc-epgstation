@@ -6,6 +6,12 @@ export interface FakeService {
     name: string;
     type: 'GR' | 'BS';
     channel: string;
+    /**
+     * 1番組の長さ。
+     * 地上波は本物らしい30分にして番組表のグリッドが成立するようにし、
+     * BSだけ10秒にして「録画が終わるまで待つ」テストを現実的な時間で回す。
+     */
+    slotMs: number;
 }
 
 export const SERVICES: FakeService[] = [
@@ -16,9 +22,26 @@ export const SERVICES: FakeService[] = [
         name: 'ＴＯＫＹＯ　ＭＸ',
         type: 'GR',
         channel: 'T16',
+        slotMs: 30 * 60_000,
     },
-    { id: 3274301064, serviceId: 1064, networkId: 32743, name: 'フジテレビ', type: 'GR', channel: 'T21' },
-    { id: 400211, serviceId: 211, networkId: 4, name: 'ＢＳ１１イレブン', type: 'BS', channel: 'BS11_0' },
+    {
+        id: 3274301064,
+        serviceId: 1064,
+        networkId: 32743,
+        name: 'フジテレビ',
+        type: 'GR',
+        channel: 'T21',
+        slotMs: 30 * 60_000,
+    },
+    {
+        id: 400211,
+        serviceId: 211,
+        networkId: 4,
+        name: 'ＢＳ１１イレブン',
+        type: 'BS',
+        channel: 'BS11_0',
+        slotMs: 10_000,
+    },
 ];
 
 export const MX = SERVICES[0];

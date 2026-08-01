@@ -4,9 +4,21 @@ import { reserve } from '$lib/server/reservations';
 import type { ChannelType, Program, Service } from '$lib/types';
 
 const HOUR = 60 * 60 * 1000;
-/** 一度に出す時間幅。長くすると縦に伸びるだけなので、めくって見る前提にする */
-const WINDOW_HOURS = 6;
+/**
+ * 日本の番組表の慣習に合わせ、1日は 4:00 から翌 4:00 まで。
+ * 深夜番組が翌日側に送られると探しにくいため。
+ */
+const DAY_START_HOUR = 4;
+const WINDOW_HOURS = 24;
 const TYPES: ChannelType[] = ['GR', 'BS', 'CS'];
+
+/** その時刻が属する放送日の 4:00 (ローカル時刻) */
+function broadcastDayStart(at: number): number {
+    const d = new Date(at);
+    if (d.getHours() < DAY_START_HOUR) d.setDate(d.getDate() - 1);
+    d.setHours(DAY_START_HOUR, 0, 0, 0);
+    return d.getTime();
+}
 
 interface GridProgram extends Program {
     reservation_state: string | null;
@@ -25,12 +37,9 @@ export function load({ url }) {
     const keyword = (url.searchParams.get('q') ?? '').trim();
     const type = (TYPES.find((t) => t === url.searchParams.get('type')) ?? 'GR') as ChannelType;
 
+    // 既定は今日の放送日。めくるときだけ start が付く
     const requested = Number(url.searchParams.get('start'));
-    // 既定は「いまの時間の頭から」。めくるときだけ start が付く
-    const start =
-        Number.isFinite(requested) && requested > 0
-            ? Math.floor(requested / HOUR) * HOUR
-            : Math.floor(Date.now() / HOUR) * HOUR;
+    const start = broadcastDayStart(Number.isFinite(requested) && requested > 0 ? requested : Date.now());
     const end = start + WINDOW_HOURS * HOUR;
 
     if (keyword !== '') {
