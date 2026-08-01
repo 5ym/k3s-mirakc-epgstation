@@ -13,9 +13,9 @@ spec:
       kind: Rule
       priority: 50
       middlewares:
-        - name: forward-auth
-          namespace: auth
         - name: forward-auth-errors
+          namespace: auth
+        - name: forward-auth
           namespace: auth
       services:
         - name: mirakurun
@@ -45,9 +45,9 @@ spec:
       kind: Rule
       priority: 50
       middlewares:
-        - name: forward-auth
-          namespace: auth
         - name: forward-auth-errors
+          namespace: auth
+        - name: forward-auth
           namespace: auth
       services:
         - name: epgstation
