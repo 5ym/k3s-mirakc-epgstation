@@ -40,7 +40,7 @@ export const SERVICES: FakeService[] = [
         name: 'ＢＳ１１イレブン',
         type: 'BS',
         channel: 'BS11_0',
-        slotMs: 10_000,
+        slotMs: 5_000,
     },
 ];
 

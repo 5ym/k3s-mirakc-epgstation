@@ -36,8 +36,8 @@ export function matches(rule: Rule, program: Program, serviceType?: string): boo
     const services = parseList(rule.service_ids);
     const types = parseStrings(rule.service_types);
     if (services !== null || types !== null) {
-        const byService = services !== null && services.includes(program.service_id);
-        const byType = types !== null && serviceType !== undefined && types.includes(serviceType);
+        const byService = services?.includes(program.service_id) ?? false;
+        const byType = serviceType !== undefined && (types?.includes(serviceType) ?? false);
         if (!byService && !byType) return false;
     }
 

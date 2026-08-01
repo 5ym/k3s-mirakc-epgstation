@@ -3,17 +3,89 @@ import { isCmMode } from '$lib/server/cm';
 import { config } from '$lib/server/config';
 import { database, now, queryAll, queryOne } from '$lib/server/db';
 import { isVideoCodec } from '$lib/server/encoder';
-import { applyRules } from '$lib/server/rules';
+import { applyRules, matches } from '$lib/server/rules';
 import { resolveConflicts } from '$lib/server/scheduler';
-import type { Rule, Service } from '$lib/types';
+import type { Program, Rule, Service } from '$lib/types';
 
 interface Row extends Rule {
     reservations: number;
 }
 
+/**
+ * 入力中の条件を、保存していないルールとして組み立てる。
+ *
+ * 条件を編集する場所はこの画面1つに寄せてある。番組表にも検索欄を置いていた頃は
+ * 判定が二重にあってズレたので、フォームの値がそのまま「何が録れるか」になるようにした。
+ */
+function conditionsFrom(params: URLSearchParams): Rule | null {
+    const get = (key: string) => String(params.get(key) ?? '').trim();
+    const numbers = params.getAll('serviceIds').map(Number).filter(Number.isFinite);
+    const types = params.getAll('serviceTypes').map(String).filter(Boolean);
+    const keyword = get('keyword');
+    if (keyword === '' && numbers.length === 0 && types.length === 0) return null;
+
+    return {
+        id: 0,
+        name: '',
+        keyword,
+        ignore_keyword: get('ignoreKeyword'),
+        service_ids: numbers.length === 0 ? null : JSON.stringify(numbers),
+        service_types: types.length === 0 ? null : JSON.stringify(types),
+        genres: null,
+        // ルール画面のフォームから来たときだけ、チェックが無い=外したと解釈する
+        free_only: params.get('form') === 'rules' ? (params.get('freeOnly') === 'on' ? 1 : 0) : 1,
+        enabled: 1,
+        priority: 2,
+        encode: 1,
+        keep_original: 0,
+        cm_cut: config.cmCutDefault,
+        codec: config.encodeCodec,
+        created_at: 0,
+    };
+}
+
+export interface PreviewRow {
+    id: number;
+    name: string;
+    description: string;
+    service_name: string;
+    start_at: number;
+    end_at: number;
+    reservation_state: string | null;
+}
+
 export function load({ url }) {
     // ?edit=<id> のときは、そのルールをフォームに読み込んで書き換えられるようにする
     const editing = queryOne<Rule>('SELECT * FROM rules WHERE id = ?', Number(url.searchParams.get('edit')));
+
+    // 条件が入っていれば、その条件で録れる番組を出す
+    const conditions = editing ?? conditionsFrom(url.searchParams);
+    let preview: { total: number; programs: PreviewRow[] } | null = null;
+    if (conditions !== null && url.searchParams.size > 0) {
+        const all = queryAll<
+            Program & { service_type: string; service_name: string; reservation_state: string | null }
+        >(
+            `SELECT p.*, s.type AS service_type, s.name AS service_name, r.state AS reservation_state
+             FROM programs p
+             JOIN services s ON s.id = p.service_id
+             LEFT JOIN reservations r ON r.program_id = p.id AND r.state != 'canceled'
+             WHERE p.start_at > ? ORDER BY p.start_at`,
+            now(),
+        );
+        const hits = all.filter((program) => matches(conditions, program, program.service_type));
+        preview = {
+            total: hits.length,
+            programs: hits.slice(0, 100).map((p) => ({
+                id: p.id,
+                name: p.name,
+                description: p.description,
+                service_name: p.service_name,
+                start_at: p.start_at,
+                end_at: p.end_at,
+                reservation_state: p.reservation_state,
+            })),
+        };
+    }
     const rules = database()
         .prepare(
             `SELECT r.*, (SELECT COUNT(*) FROM reservations WHERE rule_id = r.id) AS reservations
@@ -21,7 +93,9 @@ export function load({ url }) {
         )
         .all() as Row[];
     const services = database().prepare('SELECT * FROM services ORDER BY type, channel').all() as Service[];
-    return { rules, services, editing: editing ?? null };
+    // フォームの初期値は「編集中のルール」か「URLに載った条件」。
+    // preview と別々に組み立てると、画面に出ている結果と保存されるものがズレる
+    return { rules, services, editing: editing ?? null, seed: conditions, preview };
 }
 
 /** 選択されたチャンネルを JSON 配列に。未選択(=全チャンネル)は NULL で表す */

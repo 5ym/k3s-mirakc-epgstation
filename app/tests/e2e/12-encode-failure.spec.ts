@@ -1,7 +1,7 @@
 import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { expect, type Page, test } from '@playwright/test';
 import { TEST_ROOT } from '../../playwright.config';
-import { goto, syncEpg } from './helpers';
+import { goto, reserveSoon, syncEpg } from './helpers';
 
 const FAIL_MARKER = `${TEST_ROOT}/fail-encode`;
 
@@ -15,7 +15,7 @@ async function waitForRow(page: Page, selector: string, expected: string, timeou
             last = ((await badge.textContent()) ?? '').trim();
             if (last.includes(expected)) return;
         }
-        await page.waitForTimeout(1000);
+        await page.waitForTimeout(250);
     }
     throw new Error(`${selector} が「${expected}」にならなかった (最後: ${last})`);
 }
@@ -36,12 +36,7 @@ test.describe('エンコードの失敗', () => {
         // ここから先のエンコードを失敗させる
         writeFileSync(FAIL_MARKER, '1');
 
-        await goto(page, '/guide?q=BS11イレブン');
-        const programId = await page.getByTestId('program-row').nth(2).getAttribute('data-program-id');
-        await page
-            .locator(`[data-testid="program-row"][data-program-id="${programId}"]`)
-            .getByTestId('reserve-button')
-            .click();
+        await reserveSoon(page, request, 'BS');
 
         await waitForRow(page, '[data-testid="encode-row"] [data-testid="encode-state"]', '失敗');
 

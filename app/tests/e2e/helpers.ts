@@ -18,3 +18,50 @@ export async function syncEpg(request: APIRequestContext): Promise<void> {
     expect(body.services).toBeGreaterThan(0);
     expect(body.programs).toBeGreaterThan(0);
 }
+
+export interface Cell {
+    programId: string;
+    serviceId: string;
+    startAt: number;
+}
+
+/**
+ * 番組表に出ているうち、これから始まるものを放送順に返す。
+ *
+ * グリッドは日本の慣習どおり4時から24時間ぶんを出すので、先頭は「もう終わった番組」。
+ * 位置で選ぶと過去の番組を予約してしまい、いつまでも録画が始まらない。
+ */
+export async function upcoming(page: Page): Promise<Cell[]> {
+    const cells = await page.getByTestId('grid-program').evaluateAll((nodes) =>
+        nodes.map((node) => ({
+            programId: node.getAttribute('data-program-id') ?? '',
+            serviceId: node.getAttribute('data-service-id') ?? '',
+            startAt: Number(node.getAttribute('data-start-at')),
+        })),
+    );
+    const soon = cells
+        .filter((c) => c.startAt > Date.now())
+        .sort((a, b) => a.startAt - b.startAt || Number(a.serviceId) - Number(b.serviceId));
+    expect(soon.length).toBeGreaterThan(0);
+    return soon;
+}
+
+/** 番組表のマスをIDで掴む。番組が終わると並びがずれるので位置では追わない */
+export function cellOf(page: Page, programId: string) {
+    return page.locator(`[data-testid="grid-program"][data-program-id="${programId}"]`);
+}
+
+/**
+ * 指定した局の「少し先の番組」を予約する。
+ *
+ * BSの偽番組は10秒しかなく、番組表のグリッドではマスが潰れて押せない。
+ * ここで見たいのは録画そのものなので、予約は画面ではなくアクションに直接投げる。
+ */
+export async function reserveSoon(page: Page, request: APIRequestContext, type: string, skip = 0) {
+    await goto(page, `/guide?type=${type}`);
+    const cells = await upcoming(page);
+    const target = cells[Math.min(skip, cells.length - 1)];
+    const res = await request.post('/guide?/reserve', { form: { programId: target.programId } });
+    expect(res.ok()).toBeTruthy();
+    return target.programId;
+}

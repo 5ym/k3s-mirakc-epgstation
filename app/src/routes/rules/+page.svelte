@@ -1,10 +1,10 @@
 <script lang="ts">
     import { submitting } from '$lib/actions';
-    import { CM_LABEL } from '$lib/format';
+    import { CM_LABEL, dateTime } from '$lib/format';
 
     let { data, form } = $props();
 
-    /** 編集中のルールで選ばれているチャンネルと種別 */
+    /** フォームの初期値として選んでおくチャンネルと種別 */
     function parse(json: string | null): (string | number)[] {
         if (json === null) return [];
         try {
@@ -13,8 +13,8 @@
             return [];
         }
     }
-    const editingTypes = $derived(parse(data.editing?.service_types ?? null).map(String));
-    const editingServices = $derived(parse(data.editing?.service_ids ?? null).map(Number));
+    const seedTypes = $derived(parse(data.seed?.service_types ?? null).map(String));
+    const seedServices = $derived(parse(data.seed?.service_ids ?? null).map(Number));
 
     const TYPE_LABEL: Record<string, string> = { GR: '地上波', BS: 'BS', CS: 'CS', SKY: 'SKY' };
 
@@ -62,6 +62,12 @@
             {#if data.editing}
                 <input type="hidden" name="id" value={data.editing.id} />
             {/if}
+            <!--
+                チェックを外した状態は GET だと「キー自体が無い」になって、
+                番組表から keyword だけ渡されたときと見分けが付かない。
+                この印があるときはチェックボックスの状態をそのまま信じる
+            -->
+            <input type="hidden" name="form" value="rules" />
             <div class="grid gap-4 sm:grid-cols-2">
                 <label class="flex flex-col gap-1">
                     <span class="text-sm font-medium">キーワード</span>
@@ -69,7 +75,7 @@
                         name="keyword"
                         class="input input-bordered w-full"
                         placeholder="例: 名探偵"
-                        value={data.editing?.keyword ?? ''}
+                        value={data.seed?.keyword ?? ''}
                         data-testid="rule-keyword"
                     />
                     <span class="text-base-content/60 text-xs">
@@ -82,7 +88,7 @@
                         name="ignoreKeyword"
                         class="input input-bordered w-full"
                         placeholder="例: 再放送 総集編"
-                        value={data.editing?.ignore_keyword ?? ''}
+                        value={data.seed?.ignore_keyword ?? ''}
                         data-testid="rule-ignore"
                     />
                     <span class="text-base-content/60 text-xs">
@@ -105,7 +111,7 @@
                                         type="checkbox"
                                         name="serviceTypes"
                                         value={group.type}
-                                        checked={editingTypes.includes(group.type)}
+                                        checked={seedTypes.includes(group.type)}
                                         class="checkbox checkbox-sm"
                                     />
                                     <span class="text-sm">
@@ -131,7 +137,7 @@
                                                     type="checkbox"
                                                     name="serviceIds"
                                                     value={service.id}
-                                                    checked={editingServices.includes(service.id)}
+                                                    checked={seedServices.includes(service.id)}
                                                     class="checkbox checkbox-sm"
                                                 />
                                                 <span class="truncate text-sm">{service.name}</span>
@@ -155,10 +161,10 @@
                     <label class="flex flex-col gap-1">
                         <span class="text-sm font-medium">映像コーデック</span>
                         <select name="codec" class="select select-bordered w-full" data-testid="rule-codec">
-                            <option value="av1" selected={(data.editing?.codec ?? 'av1') === 'av1'}>
+                            <option value="av1" selected={(data.seed?.codec ?? 'av1') === 'av1'}>
                                 AV1 (小さい・エンコードが遅い)
                             </option>
-                            <option value="h264" selected={data.editing?.codec === 'h264'}>
+                            <option value="h264" selected={data.seed?.codec === 'h264'}>
                                 H.264 (速い・非力なマシン向け)
                             </option>
                         </select>
@@ -166,16 +172,13 @@
                     <label class="flex flex-col gap-1">
                         <span class="text-sm font-medium">CM</span>
                         <select name="cmCut" class="select select-bordered w-full" data-testid="rule-cmcut">
-                            <option
-                                value="chapter"
-                                selected={(data.editing?.cm_cut ?? 'chapter') === 'chapter'}
-                            >
+                            <option value="chapter" selected={(data.seed?.cm_cut ?? 'chapter') === 'chapter'}>
                                 チャプターを付けるだけ (安全)
                             </option>
-                            <option value="cut" selected={data.editing?.cm_cut === 'cut'}>
+                            <option value="cut" selected={data.seed?.cm_cut === 'cut'}>
                                 実際に切る (字幕は落ちる)
                             </option>
-                            <option value="off" selected={data.editing?.cm_cut === 'off'}>何もしない</option>
+                            <option value="off" selected={data.seed?.cm_cut === 'off'}>何もしない</option>
                         </select>
                     </label>
                     <label class="flex flex-col gap-1">
@@ -200,7 +203,7 @@
                                 type="checkbox"
                                 name="encode"
                                 class="checkbox checkbox-sm"
-                                checked={data.editing ? data.editing.encode === 1 : true}
+                                checked={data.seed ? data.seed.encode === 1 : true}
                             />
                             <span class="text-sm">エンコードする</span>
                         </label>
@@ -209,7 +212,7 @@
                                 type="checkbox"
                                 name="keepOriginal"
                                 class="checkbox checkbox-sm"
-                                checked={data.editing ? data.editing.keep_original === 1 : false}
+                                checked={data.seed ? data.seed.keep_original === 1 : false}
                             />
                             <span class="text-sm">生TSも残す</span>
                         </label>
@@ -218,7 +221,7 @@
                                 type="checkbox"
                                 name="freeOnly"
                                 class="checkbox checkbox-sm"
-                                checked={data.editing ? data.editing.free_only === 1 : true}
+                                checked={data.seed ? data.seed.free_only === 1 : true}
                             />
                             <span class="text-sm">無料放送のみ</span>
                         </label>
@@ -226,24 +229,57 @@
                 </div>
             </fieldset>
 
-            {#if data.editing}
-                <div class="flex gap-2">
+            <div class="flex flex-wrap gap-2">
+                <button class="btn" formmethod="GET" formaction="/rules" data-testid="rule-preview">
+                    この条件で何が録れるか見る
+                </button>
+                {#if data.editing}
                     <button class="btn btn-primary" formaction="?/update" data-testid="rule-update">
                         更新
                     </button>
                     <a class="btn" href="/rules" data-testid="rule-cancel-edit">やめる</a>
-                </div>
-            {:else}
-                <button class="btn btn-primary" formaction="?/create" data-testid="rule-submit">追加</button>
-            {/if}
-            <p class="text-base-content/60 text-sm">
-                何が録れるか先に確かめたいときは
-                <a class="link" href="/guide" data-testid="to-guide">番組表の検索</a>
-                を使ってください。同じ条件で絞り込めて、そのままルールにできます
-            </p>
+                {:else}
+                    <button class="btn btn-primary" formaction="?/create" data-testid="rule-submit">
+                        追加
+                    </button>
+                {/if}
+            </div>
         </form>
     </div>
 </div>
+
+{#if data.preview}
+    <div class="card bg-base-100 mb-6 shadow" data-testid="preview">
+        <div class="card-body">
+            <h2 class="card-title text-base">
+                この条件で録れる番組は {data.preview.total} 件
+                {#if data.preview.total > data.preview.programs.length}
+                    <span class="text-base-content/60 text-sm font-normal">
+                        (先頭 {data.preview.programs.length} 件)
+                    </span>
+                {/if}
+            </h2>
+            {#if data.preview.total === 0}
+                <p class="text-base-content/60 text-sm">
+                    いまの番組表では1件も当たりません。条件を緩めてください。
+                </p>
+            {:else}
+                <ul class="space-y-1" data-testid="preview-list">
+                    {#each data.preview.programs as program (program.id)}
+                        <li class="text-sm" data-testid="preview-row">
+                            <span class="text-base-content/60">{dateTime(program.start_at)}</span>
+                            <span class="text-base-content/60">{program.service_name}</span>
+                            {program.name}
+                            {#if program.reservation_state}
+                                <span class="badge badge-sm badge-info">予約済み</span>
+                            {/if}
+                        </li>
+                    {/each}
+                </ul>
+            {/if}
+        </div>
+    </div>
+{/if}
 
 <div class="mb-2 flex justify-end">
     <form method="POST" action="?/apply" use:submitting>

@@ -52,17 +52,6 @@ test.describe('ダッシュボードと画面遷移', () => {
         await expect(detail).toContainText('のテスト番組');
         await page.getByTestId('detail-close').click();
         await expect(detail).toHaveCount(0);
-
-        await goto(page, '/guide');
-        await page.getByTestId('filter-keyword').fill('テストアニメ');
-        await page.getByRole('button', { name: '検索' }).click();
-        await page.waitForURL(/[?&]q=/);
-
-        const rows = page.getByTestId('program-row');
-        await expect(rows.first()).toBeVisible();
-        for (const row of await rows.all()) {
-            await expect(row).toContainText('テストアニメ');
-        }
     });
 
     test('テーマは端末に合わせる/ライト/ダークを切り替えられ、再読み込みしても残る', async ({ page }) => {
@@ -113,7 +102,7 @@ test.describe('ダッシュボードと画面遷移', () => {
         await expect(page.getByTestId('loading-bar')).not.toHaveAttribute('data-loading', 'true');
     });
 
-    test('サーバ側の変化が通知で届く', async ({ page, request }) => {
+    test('サーバ側の変化が通知で届く', async ({ page }) => {
         await goto(page, '/');
 
         // 受け取ったイベントを溜める。ポーリングではなく push で届くことを確かめる
@@ -134,39 +123,43 @@ test.describe('ダッシュボードと画面遷移', () => {
             .toContain('reservations');
     });
 
-    test('番組表の検索はルールと同じ条件で、そのままルールにできる', async ({ page, request }) => {
+    test('番組表の検索窓はルール画面で結果を出し、そのままルールにできる', async ({ page, request }) => {
         await syncEpg(request);
-        await goto(page, '/guide?q=テストアニメ');
+        await goto(page, '/guide');
 
-        await expect(page.getByTestId('search-total')).toContainText('件');
-        const rows = page.getByTestId('program-row');
+        // 条件を書く場所は1箇所。番組表からはキーワードを渡すだけ
+        await page.getByTestId('filter-keyword').fill('テストアニメ');
+        await page.getByRole('button', { name: '検索' }).click();
+        await page.waitForURL(/\/rules\?/);
+
+        await expect(page.getByTestId('preview')).toContainText('録れる番組は');
+        const rows = page.getByTestId('preview-row');
         await expect(rows.first()).toBeVisible();
         for (const row of await rows.all()) {
             await expect(row).toContainText('テストアニメ');
         }
 
-        // 種別で絞り込める(ルールの条件と同じもの)
-        await page.getByTestId('filter-types').locator('input[value="BS"]').check();
-        await page.getByRole('button', { name: '絞り込む' }).click();
-        await page.waitForURL(/types=BS/);
-        for (const row of await page.getByTestId('program-row').all()) {
+        // 種別で絞り込める(ルールの条件そのもの)
+        await page.getByTestId('channel-summary').click();
+        await page.getByTestId('rule-types').locator('input[value="BS"]').check();
+        await page.getByTestId('rule-preview').click();
+        await page.waitForURL(/serviceTypes=BS/);
+        for (const row of await page.getByTestId('preview-row').all()) {
             await expect(row).toContainText('BS11イレブン');
         }
 
-        // その条件をそのままルールにできる
-        await page.getByTestId('create-rule').click();
-        await page.waitForURL('**/rules');
+        // そのまま保存できる
+        await page.getByTestId('rule-submit').click();
         await expect(page.getByTestId('rule-row').first()).toContainText('テストアニメ');
 
-        // 作ったルールは大量に予約を作るので、後続に影響しないよう片付ける
         await page.getByTestId('rule-row').first().getByTestId('rule-delete').click();
         await expect(page.getByTestId('rule-row')).toHaveCount(0);
         await goto(page, '/');
-        for (let i = 0; i < 60; i++) {
+        for (let i = 0; i < 80; i++) {
             const buttons = page.getByTestId('cancel-button');
             if ((await buttons.count()) === 0) break;
             await buttons.first().click();
-            await page.waitForTimeout(100);
+            await page.waitForTimeout(80);
         }
     });
 });

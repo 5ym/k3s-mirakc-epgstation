@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { goto, syncEpg } from './helpers';
+import { cellOf, goto, reserveSoon, syncEpg, upcoming } from './helpers';
 
 /**
  * 画面の反応の確かめ。
@@ -31,8 +31,8 @@ test.describe('操作したときの反応', () => {
     test('番組表で予約すると詳細が閉じ、予約済みになる', async ({ page }) => {
         await goto(page, '/guide?type=GR');
 
-        const block = page.getByTestId('grid-program').nth(4);
-        const programId = await block.getAttribute('data-program-id');
+        const [target] = await upcoming(page);
+        const block = cellOf(page, target.programId);
         await block.getByTestId('program-button').click();
 
         const detail = page.getByTestId('program-detail');
@@ -42,13 +42,11 @@ test.describe('操作したときの反応', () => {
         // 押したら閉じる。開いたままだと予約できたのか分からない
         await expect(detail).toHaveCount(0);
 
-        const row = page.locator(`[data-testid="grid-program"][data-program-id="${programId}"]`);
-        await expect(row).toContainText('予約済み');
+        await expect(block).toContainText('予約済み');
     });
 
-    test('ダッシュボードで取り消すと、その場で一覧から消える', async ({ page }) => {
-        await goto(page, '/guide?q=TOKYO+MX');
-        await page.getByTestId('program-row').nth(6).getByTestId('reserve-button').click();
+    test('ダッシュボードで取り消すと、その場で一覧から消える', async ({ page, request }) => {
+        await reserveSoon(page, request, 'GR', 6);
 
         await goto(page, '/');
         const rows = page.getByTestId('reservation-row');
@@ -60,9 +58,11 @@ test.describe('操作したときの反応', () => {
     });
 
     test('ルールを消すと、そのルールが作った予約も消える', async ({ page }) => {
-        await goto(page, '/guide?q=テストアニメ');
-        await page.getByTestId('create-rule').click();
-        await page.waitForURL('**/rules');
+        // ルールを作ると、条件に合う番組の予約がその場で立つ
+        await goto(page, '/rules');
+        await page.getByTestId('rule-keyword').fill('テストアニメ');
+        await page.getByTestId('rule-submit').click();
+        await expect(page.getByTestId('rule-row')).toHaveCount(1);
 
         await goto(page, '/');
         await expect(page.getByTestId('reservation-row').first()).toBeVisible();

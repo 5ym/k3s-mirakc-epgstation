@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { expect, type Page, test } from '@playwright/test';
-import { goto, syncEpg } from './helpers';
+import { goto, reserveSoon, syncEpg } from './helpers';
 
 /**
  * 録画→エンコード→ライブラリ入りまでを通しで確認する。
@@ -23,7 +23,7 @@ async function waitForRowState(
             last = ((await badge.textContent()) ?? '').trim();
             if (last === expected) return;
         }
-        await page.waitForTimeout(1000);
+        await page.waitForTimeout(250);
     }
     throw new Error(`${selector} が「${expected}」にならなかった (最後の状態: ${last})`);
 }
@@ -34,14 +34,7 @@ test.describe('録画とエンコード', () => {
         await syncEpg(request);
 
         // BSは他のテストが触らないので、チューナー競合の心配なく録れる
-        await goto(page, '/guide?q=BS11イレブン');
-
-        // 少し先の枠(10秒番組)を予約する。番組が終わると並びがずれるのでIDで固定する
-        const programId = await page.getByTestId('program-row').nth(2).getAttribute('data-program-id');
-        expect(programId).toBeTruthy();
-        const row = page.locator(`[data-testid="program-row"][data-program-id="${programId}"]`);
-        await row.getByTestId('reserve-button').click();
-        await expect(row.getByTestId('reserve-button')).toHaveCount(0);
+        const programId = await reserveSoon(page, request, 'BS');
 
         const reservationRow = `[data-testid="reservation-row"][data-program-id="${programId}"]`;
         await waitForRowState(page, '/?all=1', reservationRow, 'reservation-state', '完了');
