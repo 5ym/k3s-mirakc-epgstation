@@ -222,8 +222,9 @@ spec:
               value: http://mirakurun:40772
             - name: JELLYFIN_URL
               value: http://jellyfin:8096
-            # 任意。設定すると新しい録画を置いたときに Jellyfin へ再スキャンを促す。
-            # 未設定でも Jellyfin 自身の監視で拾われるので、無くても支障はない
+            # Jellyfin 連携の要。無いと Jellyfin の録画ボタンで作られたタイマーの
+            # 取り込み・ライブTVの登録・新規録画の即時反映がすべて止まる
+            # (録画とエンコード自体は動く)
             - name: JELLYFIN_API_KEY
               valueFrom:
                 secretKeyRef:

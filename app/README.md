@@ -41,7 +41,7 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 | 変数 | 既定値 | 説明 |
 | --- | --- | --- |
 | `MIRAKURUN_URL` | `http://mirakurun:40772` | Mirakurun |
-| `JELLYFIN_URL` / `JELLYFIN_API_KEY` | (空) | 任意。設定すると新規録画時に再スキャンを促す |
+| `JELLYFIN_URL` / `JELLYFIN_API_KEY` | (空) | Jellyfin連携に必須。録画タイマーの取り込み・ライブTV登録・再スキャンが動かなくなる |
 | `RECONCILE_INTERVAL` | `300000` | ライブラリの実体とDBを突き合わせる間隔(ms) |
 | `JELLYFIN_TIMER_INTERVAL` | `30000` | Jellyfin の録画タイマーを取り込む間隔(ms) |
 | `WRITE_NFO` | `1` | Jellyfin 向けの `.nfo` を書くか |

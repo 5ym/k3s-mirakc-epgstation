@@ -279,10 +279,13 @@ k3sホストの初期構築やクラスタ共通のアドオン類は別の(プ�
 - **GHCRイメージの公開設定**: `ghcr.io/danything/mirakurun` /
   `ghcr.io/danything/epgstation` / `ghcr.io/danything/denpa` をpullできること
   (imagePullSecrets未設定のため publicパッケージである前提)。
-- **Jellyfin APIキー (任意)**: denpa の視聴済み自動削除にだけ必要。Jellyfin の
-  管理画面でAPIキーを発行し、`denpa-secrets` という Secret の `jellyfin-api-key`
-  として SealedSecret を作って `k3s/` に追加する。未設定でも Pod は起動し、
-  録画とエンコードは動く(自動削除だけが無効になる)。
+- **Jellyfin APIキー**: Jellyfin 連携の要。Jellyfin の管理画面でAPIキーを発行し、
+  `denpa-secrets` という Secret の `jellyfin-api-key` として SealedSecret を作って
+  `k3s/` に追加する。未設定でも Pod は起動し**録画とエンコードは動く**が、
+  以下が全部止まる:
+  - Jellyfin の録画ボタンで作られたタイマーの取り込み
+  - 「JellyfinにライブTVを登録」ボタン
+  - 新しい録画を置いたときの再スキャン要求(Jellyfin 自身の定期スキャン待ちになる)
 - **同一ノード配置**: `denpa-library` PVC は ReadWriteOnce のため、denpa と
   Jellyfin は同じノードに載る必要がある。local-path の PV はノードアフィニティを
   持つので、単一ノード構成なら特に指定は要らない。

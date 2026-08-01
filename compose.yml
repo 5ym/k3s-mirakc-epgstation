@@ -24,8 +24,8 @@ services:
             FFMPEG: /app/tests/fake/ffmpeg.sh
             MIRAKURUN_URL: http://mirakurun:40772
             JELLYFIN_URL: http://jellyfin:8096
-            # 任意。Jellyfin の初期設定後に発行した API キーを .env に書くと、
-            # 新しい録画をすぐ Jellyfin に反映できる
+            # Jellyfin の初期設定後に発行した API キーを .env に書く。
+            # 無いと録画タイマーの取り込みもライブTV登録も動かない
             JELLYFIN_API_KEY: ${JELLYFIN_API_KEY:-}
             # Jellyfin コンテナから見た開発サーバのURL。M3U に書き込まれる
             IPTV_ORIGIN: http://app:5173
