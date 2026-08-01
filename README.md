@@ -52,8 +52,18 @@ denpa 自体の詳細(状態遷移・環境変数・テスト)は [app/README.md
 
 ## EPGStation からの引き継ぎ
 
-`app/scripts/migrate-epgstation.ts` が EPGStation の MariaDB を読んで、録画ファイルを
-denpa のライブラリの並びに置き直し、`.nfo` とサムネイルまで作ります。
+EPGStation の MariaDB を読んで、録画ファイルを denpa のライブラリの並びに置き直し、
+`.nfo` とサムネイルまで作ります。
+
+**設定画面の「EPGStation からの引き継ぎ」から実行できます。** まず何も選ばずに実行すると
+下見(書き込みなし)になり、何が取り込まれるかだけが出ます。中身を確かめてから
+「実際に取り込む」を入れて実行してください。数百GBのコピーになるので裏で進み、
+進み具合はそのまま画面に出ます。
+
+denpa の Pod に `epgstation-recorded` PVC がマウントされている必要があります
+(`k3s/deployment.yaml` に入れてあります)。見えていないときは実行できず、その旨が出ます。
+
+Pod にマウントできない事情があるときは、同じ処理を使い捨てJobでも回せます。
 
 ```sh
 # まず何が起きるか見る (書き込みはしない)
@@ -68,7 +78,9 @@ kubectl -n epg logs -f job/denpa-migrate
 - **何度実行しても同じ結果**になります。取り込み済みは EPGStation 側のIDで判別して飛ばします
 - エンコード済みと生TSが両方ある録画は**エンコード済みを取ります**
 - 番組表と紐付かない録画(局が消えているなど)も、チャンネル名を残して取り込みます
-- 終わったら Job は手で消してください (`kubectl -n epg delete job denpa-migrate`)
+- Job を使った場合は、終わったら手で消してください (`kubectl -n epg delete job denpa-migrate`)
+- 引き継ぎが済んで EPGStation を畳んだら、`k3s/deployment.yaml` の denpa から
+  `EPGSTATION_*` と `epgstation-recorded` のマウントを消せます
 
 ## 通知
 

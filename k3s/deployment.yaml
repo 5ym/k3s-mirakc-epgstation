@@ -253,6 +253,15 @@ spec:
               value: av1
             - name: ENCODE_CONCURRENCY
               value: '2'
+            # EPGStation からの引き継ぎ。設定画面から実行する。
+            # 引き継ぎが済んで EPGStation を畳んだら、この3つと
+            # epgstation-recorded のマウントごと消してよい
+            - name: EPGSTATION_DB_HOST
+              value: db
+            - name: EPGSTATION_DB_PASSWORD
+              value: epgstation
+            - name: EPGSTATION_RECORDED_DIR
+              value: /epgstation-recorded
           ports:
             - containerPort: 3000
           livenessProbe:
@@ -268,6 +277,10 @@ spec:
               mountPath: /app/recorded
             - name: library
               mountPath: /library
+            # 引き継ぎ元。「移動」を選べる必要があるので読み書きで渡す。
+            # epgstation Pod も同じPVCを掴むが、RWO なので同じノードに載っていれば通る
+            - name: epgstation-recorded
+              mountPath: /epgstation-recorded
       volumes:
         - name: denpa-data
           persistentVolumeClaim:
@@ -278,3 +291,6 @@ spec:
         - name: library
           persistentVolumeClaim:
             claimName: denpa-library
+        - name: epgstation-recorded
+          persistentVolumeClaim:
+            claimName: epgstation-recorded
