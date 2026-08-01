@@ -1,6 +1,6 @@
 <script lang="ts">
     import { submitting } from '$lib/actions';
-    import { GENRE_OPTIONS, genreName } from '$lib/arib';
+    import { GENRE_TREE, genreName } from '$lib/arib';
     import { CM_LABEL, dateTime } from '$lib/format';
 
     let { data, form } = $props();
@@ -16,7 +16,7 @@
     }
     const seedTypes = $derived(parse(data.seed?.service_types ?? null).map(String));
     const seedServices = $derived(parse(data.seed?.service_ids ?? null).map(Number));
-    const seedGenres = $derived(parse(data.seed?.genres ?? null).map(Number));
+    const seedGenres = $derived(parse(data.seed?.genres ?? null).map(String));
 
     const TYPE_LABEL: Record<string, string> = { GR: '地上波', BS: 'BS', CS: 'CS', SKY: 'SKY' };
 
@@ -38,7 +38,7 @@
                 );
             }
             if (rule.genres !== null) {
-                parts.push(...(JSON.parse(rule.genres) as number[]).map(genreName));
+                parts.push(...(JSON.parse(rule.genres) as (string | number)[]).map(genreName));
             }
         } catch {
             return 'すべて';
@@ -201,20 +201,39 @@
                         </span>
                     </summary>
                     <div class="px-4 pb-4">
-                        <!-- EPG のジャンルは大分類だけで判定する。中分類まで求めると
-                             局によって付け方がまちまちで取りこぼす -->
-                        <div class="grid gap-x-4 gap-y-1 sm:grid-cols-2" data-testid="rule-genres">
-                            {#each GENRE_OPTIONS as option (option.value)}
-                                <label class="flex cursor-pointer items-center gap-2">
-                                    <input
-                                        type="checkbox"
-                                        name="genres"
-                                        value={option.value}
-                                        checked={seedGenres.includes(option.value)}
-                                        class="checkbox checkbox-sm"
-                                    />
-                                    <span class="truncate text-sm">{option.label}</span>
-                                </label>
+                        <!-- 大分類だけ選べば中分類は問わない。細かく絞りたいときだけ
+                             中分類にチェックを入れる -->
+                        <div class="max-h-64 space-y-2 overflow-y-auto" data-testid="rule-genres">
+                            {#each GENRE_TREE as group (group.value)}
+                                <div>
+                                    <label class="flex cursor-pointer items-center gap-2">
+                                        <input
+                                            type="checkbox"
+                                            name="genres"
+                                            value={group.value}
+                                            checked={seedGenres.includes(group.value)}
+                                            class="checkbox checkbox-sm"
+                                        />
+                                        <span class="text-sm font-medium">{group.label}</span>
+                                        <span class="text-base-content/60 text-xs">(すべて)</span>
+                                    </label>
+                                    {#if group.children.length > 0}
+                                        <div class="mt-1 ml-6 grid gap-x-4 gap-y-1 sm:grid-cols-2">
+                                            {#each group.children as child (child.value)}
+                                                <label class="flex cursor-pointer items-center gap-2">
+                                                    <input
+                                                        type="checkbox"
+                                                        name="genres"
+                                                        value={child.value}
+                                                        checked={seedGenres.includes(child.value)}
+                                                        class="checkbox checkbox-xs"
+                                                    />
+                                                    <span class="truncate text-xs">{child.label}</span>
+                                                </label>
+                                            {/each}
+                                        </div>
+                                    {/if}
+                                </div>
                             {/each}
                         </div>
                     </div>

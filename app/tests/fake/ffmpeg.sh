@@ -22,6 +22,14 @@ if printf '%s\n' "$@" | grep -q silencedetect; then
     exit 0
 fi
 
+# CMを切るパス (-c copy で区間を切り出す / concat で繋ぐ)。
+# 進捗も Duration も出さず、出力ファイルだけ作って終わる本物と同じ振る舞いにする
+if printf '%s\n' "$@" | grep -qx -- '-c' && printf '%s\n' "$@" | grep -qx -- 'copy'; then
+    mkdir -p "$(dirname "$output")"
+    head -c 4096 /dev/zero > "$output"
+    exit 0
+fi
+
 # ライブ配信(TS): stdin をそのまま stdout に流し続ける。
 # 中身は本物のTSではないが、「切るまで流れ続ける」という性質だけは同じ
 if [ "$output" = "pipe:1" ]; then

@@ -1,5 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import { buildArgs, failureReason, isVideoCodec, parseProgressBlock } from './encoder';
+import {
+    buildArgs,
+    buildConcatArgs,
+    buildSegmentArgs,
+    concatList,
+    failureReason,
+    isVideoCodec,
+    parseProgressBlock,
+} from './encoder';
 
 function argValue(args: string[], key: string): string | undefined {
     const i = args.indexOf(key);
@@ -41,13 +49,13 @@ describe('録画エンコードの引数', () => {
         expect(argValue(buildArgs('/in.m2ts', '/out.mkv', 1, 0.2), '-ss')).toBe('0.2');
     });
 
-    test('CM実カット時は select を挟み、字幕は落とす', () => {
+    test('CMを切っても字幕は落とさない', () => {
+        // CMはエンコードの前にTSの段階で切るので、エンコード側は素直に字幕を通すだけ
         const args = buildArgs('/in.m2ts', '/out.mkv', 1, null, 'av1', {
             keep: [{ start: 0, end: 300 }],
         });
-        expect(argValue(args, '-filter_complex')).toContain("select='between(t,0.000,300.000)'");
-        expect(args).toContain('-sn');
-        expect(args).not.toContain('dvbsub');
+        expect(args).not.toContain('-sn');
+        expect(argValue(args, '-c:s')).toBe('dvbsub');
     });
 
     test('チャプターを渡すと2つ目の入力として読み込む', () => {
@@ -109,5 +117,29 @@ describe('failureReason', () => {
 
     test('エラー行が無ければ末尾をそのまま出す', () => {
         expect(failureReason('a\nb\nc')).toBe('a\nb\nc');
+    });
+});
+
+describe('CMを切ったTSを作る', () => {
+    test('区間ごとに -c copy で切り出す', () => {
+        const args = buildSegmentArgs('/in.m2ts', '/in.m2ts.part0.ts', { start: 12.5, end: 300 });
+        // 再エンコードしないので速く、字幕もデータも落ちない
+        expect(args).toContain('-c');
+        expect(args).toContain('copy');
+        expect(argValue(args, '-ss')).toBe('12.5');
+        expect(argValue(args, '-to')).toBe('300');
+        expect(argValue(args, '-f')).toBe('mpegts');
+    });
+
+    test('繋ぎ直しは concat デマクサで、時刻を振り直す', () => {
+        const args = buildConcatArgs('/tmp/list.txt', '/out.ts');
+        expect(argValue(args, '-f')).toBe('concat');
+        expect(args).toContain('-safe');
+        // 切れ目で時刻が飛ぶので振り直す
+        expect(argValue(args, '-fflags')).toBe('+genpts');
+    });
+
+    test('一覧のパスは ' + "'" + ' をエスケープする', () => {
+        expect(concatList(['/tmp/a.ts', "/tmp/b's.ts"])).toBe("file '/tmp/a.ts'\nfile '/tmp/b'\\''s.ts'");
     });
 });

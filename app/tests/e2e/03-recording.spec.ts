@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { expect, type Page, test } from '@playwright/test';
-import { goto, reserveSoon, syncEpg } from './helpers';
+import { goto, reserveSoon, syncEpg, upcoming } from './helpers';
 
 /**
  * 録画→エンコード→ライブラリ入りまでを通しで確認する。
@@ -79,5 +79,35 @@ test.describe('録画とエンコード', () => {
         expect(part.status()).toBe(206);
         expect(part.headers()['content-range']).toMatch(/^bytes 0-99\/\d+$/);
         expect((await part.body()).byteLength).toBe(100);
+    });
+});
+
+test.describe('CMの実カット', () => {
+    test('CMを切っても字幕は残る', async ({ page, request }) => {
+        test.setTimeout(180_000);
+        await syncEpg(request);
+
+        // 番組ごとに CM の扱いを選べる。ここでは実際に切らせる
+        await goto(page, '/guide?type=BS');
+        const cells = await upcoming(page);
+        const target = cells[0];
+        const res = await request.post('/guide?/reserve', {
+            form: { programId: target.programId, options: '1', encode: 'on', cmCut: 'cut' },
+        });
+        expect(res.ok()).toBeTruthy();
+
+        const recordingRow = `[data-testid="recording-row"][data-program-id="${target.programId}"]`;
+        await waitForRowState(page, '/', recordingRow, 'recording-state', '視聴可能');
+
+        await goto(page, '/');
+        const recording = page.locator(recordingRow);
+        await expect(recording.getByTestId('cm-info')).toContainText('CM カット');
+
+        // 字幕はエンコードの前にTSを切ることで残している。
+        // フィルタで切っていた頃は -sn で落とすしかなかった
+        const videoPath = ((await recording.locator('span.font-mono').first().textContent()) ?? '').trim();
+        expect(videoPath).toContain('.mkv');
+        // 切るための作業ファイルは片付いていること
+        expect(existsSync(`${videoPath.replace(/\.mkv$/, '')}.cut.ts`)).toBe(false);
     });
 });

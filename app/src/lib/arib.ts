@@ -147,14 +147,37 @@ export interface Genre {
     lv2: number;
 }
 
-/** ルールの条件に出す大分類の一覧。予備(0xC/0xD)は放送に出てこないので載せない */
-export const GENRE_OPTIONS: { value: number; label: string }[] = Object.entries(GENRE_LV1).map(
-    ([value, label]) => ({ value: Number(value), label }),
-);
+/**
+ * ルールの条件に出すジャンルの一覧。予備(0xC/0xD)は放送に出てこないので載せない。
+ *
+ * 条件は文字列で持つ。`"7"` なら大分類だけ(アニメ／特撮すべて)、
+ * `"7-0"` なら中分類まで(国内アニメだけ)。
+ */
+export const GENRE_TREE: {
+    value: string;
+    label: string;
+    children: { value: string; label: string }[];
+}[] = Object.entries(GENRE_LV1).map(([lv1, label]) => ({
+    value: lv1,
+    label,
+    children: Object.entries(GENRE_LV2[Number(lv1)] ?? {}).map(([lv2, name]) => ({
+        value: `${lv1}-${lv2}`,
+        label: name,
+    })),
+}));
 
-/** 大分類だけの名前。ルールの一覧など、番組ではなく条件を出すとき用 */
-export function genreName(lv1: number): string {
-    return GENRE_LV1[lv1] ?? String(lv1);
+/** ルールの条件の値を人が読める名前に。`"7-0"` → 「アニメ／特撮 > 国内アニメ」 */
+export function genreName(value: string | number): string {
+    const [lv1, lv2] = String(value).split('-').map(Number);
+    const head = GENRE_LV1[lv1];
+    if (head === undefined) return String(value);
+    if (Number.isNaN(lv2)) return head;
+    return `${head} > ${GENRE_LV2[lv1]?.[lv2] ?? lv2}`;
+}
+
+/** ルールの条件に番組が当てはまるか。大分類だけの条件は中分類を問わない */
+export function genreMatches(conditions: string[], genres: Genre[]): boolean {
+    return genres.some((g) => conditions.includes(String(g.lv1)) || conditions.includes(`${g.lv1}-${g.lv2}`));
 }
 
 /** 「アニメ／特撮 > 国内アニメ」。中分類が引けなければ大分類だけ返す */

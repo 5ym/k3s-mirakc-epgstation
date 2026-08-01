@@ -1,7 +1,7 @@
-import { mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { EncodeJob, Recording, VideoCodec } from '../types';
-import { type CmDetection, chapterMetadata, detectCm, keepRanges, type Range, selectExpression } from './cm';
+import { type CmDetection, chapterMetadata, detectCm, keepRanges, type Range } from './cm';
 import { config } from './config';
 import { database, now, queryOne } from './db';
 import { emit } from './events';
@@ -62,10 +62,6 @@ export function buildArgs(
     codec: VideoCodec = 'av1',
     options: EncodeOptions = {},
 ): string[] {
-    const keep = options.keep ?? null;
-    if (keep !== null && keep.length > 0) {
-        return buildCutArgs(input, output, audioType, seek, codec, keep);
-    }
     const video = videoArgs(codec);
 
     const args = ['-y'];
@@ -135,57 +131,65 @@ export function buildArgs(
  * 字幕は別ストリームのままだと切った後の時刻に追従できずズレるため落とす
  * (焼き込みに変える手もあるが、字幕を消せなくなるほうが不便という判断)。
  */
-function buildCutArgs(
-    input: string,
-    output: string,
-    audioType: number | null,
-    seek: number | null,
-    codec: VideoCodec,
-    keep: Range[],
-): string[] {
-    const expr = selectExpression(keep);
-    const video = videoArgs(codec);
-    const args = ['-y'];
-    if (seek !== null) args.push('-ss', String(seek));
-    args.push('-analyzeduration', '15000000', '-probesize', '30000000');
-    args.push('-i', input);
-    args.push('-ignore_unknown');
+/**
+ * CM を切り落としたTSを作る。
+ *
+ * エンコードのフィルタで切っていた頃は、字幕(ARIB字幕)のタイミングを
+ * 追従させられず落とすしかなかった。先にTSの段階で切ってしまえば、
+ * あとは普通にエンコードするだけで字幕もそのまま残る(消せる字幕のまま)。
+ *
+ * 残す区間を1つずつ `-c copy` で切り出し、concat デマクサで繋ぐ。
+ * 再エンコードしないので速く、字幕もデータ放送も落ちない。
+ * キーフレーム単位の切り出しになるが、日本の地上波の MPEG-2 は GOP が
+ * 0.5 秒程度なので CM検出の許容誤差 (CM_TOLERANCE) に収まる。
+ */
+export function buildSegmentArgs(input: string, output: string, range: Range): string[] {
+    return [
+        '-y',
+        '-analyzeduration',
+        '15000000',
+        '-probesize',
+        '30000000',
+        // -ss を -i の前に置くと、キーフレームまで飛んでから読み始めるので速い
+        '-ss',
+        String(range.start),
+        '-to',
+        String(range.end),
+        '-i',
+        input,
+        '-ignore_unknown',
+        '-c',
+        'copy',
+        '-f',
+        'mpegts',
+        output,
+    ];
+}
 
-    const graph = [`[0:v]${video.filter},select='${expr}',setpts=N/FRAME_RATE/TB[v]`];
-    if (audioType === DUAL_MONO) {
-        graph.push(
-            `[0:a:0]channelsplit[FL][FR]`,
-            `[FL]aformat=channel_layouts=mono,aselect='${expr}',asetpts=N/SR/TB[FLm]`,
-            `[FR]aformat=channel_layouts=mono,aselect='${expr}',asetpts=N/SR/TB[FRm]`,
-        );
-    } else {
-        graph.push(`[0:a:0]aselect='${expr}',asetpts=N/SR/TB[a]`);
-    }
-    args.push('-filter_complex', graph.join(';'));
+export function buildConcatArgs(listFile: string, output: string): string[] {
+    return [
+        '-y',
+        '-f',
+        'concat',
+        '-safe',
+        '0',
+        '-i',
+        listFile,
+        '-ignore_unknown',
+        '-c',
+        'copy',
+        // 切れ目で時刻が飛ぶので振り直す。振り直さないとエンコード側が長さを誤る
+        '-fflags',
+        '+genpts',
+        '-f',
+        'mpegts',
+        output,
+    ];
+}
 
-    args.push('-map', '[v]', '-c:v', ...video.encoder);
-    if (audioType === DUAL_MONO) {
-        args.push(
-            '-map',
-            '[FLm]',
-            '-map',
-            '[FRm]',
-            '-metadata:s:a:0',
-            'language=jpn',
-            '-metadata:s:a:1',
-            'language=und',
-        );
-    } else {
-        args.push('-map', '[a]');
-    }
-    args.push('-c:a', 'libopus', '-b:a', '256k');
-    // 切った後の時刻に追従できないため字幕は落とす
-    args.push('-sn');
-    args.push('-disposition:v:0', 'default', '-disposition:a:0', 'default');
-    args.push('-progress', 'pipe:1');
-    args.push(output);
-
-    return args;
+/** concat デマクサに渡す一覧。パスの ' はエスケープが要る */
+export function concatList(parts: string[]): string {
+    return parts.map((part) => `file '${part.replace(/'/g, "'\\''")}'`).join('\n');
 }
 
 export function enqueue(recordingId: number): number {
@@ -379,6 +383,44 @@ async function prepareCm(
     return { keep: null, chaptersFile };
 }
 
+/** ffmpeg を1回動かす。戻り値は終了コード */
+async function runOnce(args: string[]): Promise<number> {
+    const proc = Bun.spawn([config.ffmpeg, ...args], { stdout: 'ignore', stderr: 'pipe' });
+    return await proc.exited;
+}
+
+/**
+ * CM を切り落としたTSを作って、そのパスを返す。作れなければ null。
+ * 元のTSはそのまま残す(切り方を間違えても録画は失われない)。
+ */
+async function trimCm(jobId: number, input: string, keep: Range[]): Promise<string | null> {
+    database().prepare('UPDATE encode_jobs SET log = ? WHERE id = ?').run('CMを切っています...', jobId);
+
+    const parts: string[] = [];
+    try {
+        for (const [i, range] of keep.entries()) {
+            const part = `${input}.part${i}.ts`;
+            const code = await runOnce(buildSegmentArgs(input, part, range));
+            if (code !== 0 || !existsSync(part)) throw new Error(`区間 ${i} の切り出しに失敗しました`);
+            parts.push(part);
+        }
+
+        const listFile = `${input}.concat.txt`;
+        const trimmed = `${input}.cut.ts`;
+        writeFileSync(listFile, concatList(parts));
+        const code = await runOnce(buildConcatArgs(listFile, trimmed));
+        rmSync(listFile, { force: true });
+        if (code !== 0 || !existsSync(trimmed)) throw new Error('繋ぎ直しに失敗しました');
+        return trimmed;
+    } catch (error) {
+        // 切れなかったらCMを残したままエンコードする。録れているものを捨てない
+        console.error(`[cm] ${error}。CMを残したままエンコードします`);
+        return null;
+    } finally {
+        for (const part of parts) rmSync(part, { force: true });
+    }
+}
+
 async function runJob(jobId: number): Promise<void> {
     const job = queryOne<EncodeJob>('SELECT * FROM encode_jobs WHERE id = ?', jobId)!;
     const recording = queryOne<Recording>('SELECT * FROM recordings WHERE id = ?', job.recording_id);
@@ -399,9 +441,19 @@ async function runJob(jobId: number): Promise<void> {
 
     const encodeOptions = await prepareCm(jobId, recording);
 
+    // CMを実際に切る場合は、エンコードの前にTSの段階で切っておく。
+    // エンコードのフィルタで切ると字幕のタイミングを追従させられず落とすことになる
+    let source = recording.ts_path;
+    let trimmed: string | null = null;
+    const keep = encodeOptions.keep ?? null;
+    if (keep !== null && keep.length > 0) {
+        trimmed = await trimCm(jobId, recording.ts_path, keep);
+        if (trimmed !== null) source = trimmed;
+    }
+
     let result = await runFfmpeg(
         job,
-        recording.ts_path,
+        source,
         output,
         recording.audio_type,
         null,
@@ -414,7 +466,7 @@ async function runJob(jobId: number): Promise<void> {
         database().prepare('UPDATE encode_jobs SET attempts = attempts + 1 WHERE id = ?').run(jobId);
         result = await runFfmpeg(
             job,
-            recording.ts_path,
+            source,
             output,
             recording.audio_type,
             config.encodeRetrySeek,
@@ -424,6 +476,8 @@ async function runJob(jobId: number): Promise<void> {
     }
 
     removeIfExists(encodeOptions.chaptersFile);
+    // CMを切ったTSは作業用。元のTSは残したままなので、切り直したくなればやり直せる
+    removeIfExists(trimmed);
 
     if (canceled.has(jobId)) {
         removeIfExists(output);

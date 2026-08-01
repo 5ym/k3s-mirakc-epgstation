@@ -1,3 +1,4 @@
+import { type Genre, genreMatches } from '$lib/arib';
 import type { Program, Rule } from '../types';
 import { database, now, queryAll } from './db';
 import { toHalfWidth } from './title';
@@ -18,6 +19,22 @@ function haystack(program: Pick<Program, 'name' | 'description'>): string {
 }
 
 /** JSON配列の文字列版。種別(GR/BS/CS)の絞り込みに使う */
+/**
+ * 番組のジャンル。中分類まで持っている genre_detail を使い、
+ * 取り込みが古くて入っていないものは大分類だけの genres で代用する
+ */
+function parseGenreDetail(program: Program): Genre[] {
+    const detail = parseStrings(program.genre_detail);
+    if (detail !== null) {
+        try {
+            return JSON.parse(program.genre_detail!) as Genre[];
+        } catch {
+            // 壊れていれば下の大分類で見る
+        }
+    }
+    return (parseList(program.genres) ?? []).map((lv1) => ({ lv1, lv2: -1 }));
+}
+
 function parseStrings(json: string | null): string[] | null {
     if (json === null || json === '') return null;
     try {
@@ -41,11 +58,13 @@ export function matches(rule: Rule, program: Program, serviceType?: string): boo
         if (!byService && !byType) return false;
     }
 
-    const genres = parseList(rule.genres);
+    // ジャンルは "7"(大分類だけ)と "7-0"(中分類まで)の2通りで持つ。
+    // 昔のルールは数値の配列だが、String() を通せばそのまま大分類として読める
+    const genres = parseStrings(rule.genres);
     if (genres !== null) {
-        const programGenres = parseList(program.genres);
-        if (programGenres === null) return false;
-        if (!programGenres.some((g) => genres.includes(g))) return false;
+        const detail = parseGenreDetail(program);
+        if (detail.length === 0) return false;
+        if (!genreMatches(genres, detail)) return false;
     }
 
     const text = haystack(program);

@@ -22,7 +22,7 @@ function conditionsFrom(params: URLSearchParams): Rule | null {
     const get = (key: string) => String(params.get(key) ?? '').trim();
     const numbers = params.getAll('serviceIds').map(Number).filter(Number.isFinite);
     const types = params.getAll('serviceTypes').map(String).filter(Boolean);
-    const genres = params.getAll('genres').map(Number).filter(Number.isFinite);
+    const genres = params.getAll('genres').map(String).filter(Boolean);
     const keyword = get('keyword');
     if (keyword === '' && numbers.length === 0 && types.length === 0 && genres.length === 0) return null;
 
@@ -112,10 +112,8 @@ function serviceIds(form: FormData): string | null {
 
 /** ジャンル大分類の指定。未選択(=全ジャンル)は NULL で表す */
 function genres(form: FormData): string | null {
-    const values = form
-        .getAll('genres')
-        .map((v) => Number(v))
-        .filter((n) => Number.isFinite(n));
+    // "7" は大分類だけ、"7-0" は中分類まで
+    const values = form.getAll('genres').map(String).filter(Boolean);
     return values.length === 0 ? null : JSON.stringify(values);
 }
 
@@ -140,7 +138,7 @@ function ruleName(
 ): string {
     if (keyword !== '') return keyword;
     const parts: string[] = [];
-    if (genreIds !== null) parts.push(...(JSON.parse(genreIds) as number[]).map(genreName));
+    if (genreIds !== null) parts.push(...(JSON.parse(genreIds) as string[]).map(genreName));
     if (types !== null) parts.push(...(JSON.parse(types) as string[]).map((t) => TYPE_LABEL[t] ?? t));
     if (ids !== null) {
         parts.push(
