@@ -58,3 +58,37 @@ test.describe('ルールの編集', () => {
         }
     });
 });
+
+test.describe('ルールの作り直し', () => {
+    test.beforeEach(async ({ page, request }) => {
+        await syncEpg(request);
+        await goto(page, '/rules');
+        for (let i = 0; i < 20; i++) {
+            const buttons = page.getByTestId('rule-delete');
+            if ((await buttons.count()) === 0) break;
+            await buttons.first().click();
+            await page.waitForTimeout(100);
+        }
+    });
+
+    test('同じルールを消して作り直すと、また予約が立つ', async ({ page }) => {
+        // 消した予約を「取り消し」で残していた頃は、applyRules が
+        // 「予約行が既にある」と見て飛ばすため、二度と予約が立たなかった
+        for (const round of [1, 2]) {
+            await goto(page, '/rules');
+            await page.getByTestId('rule-keyword').fill('テストアニメ');
+            await page.getByTestId('rule-submit').click();
+            await expect(page.getByTestId('rule-row')).toHaveCount(1);
+
+            await goto(page, '/');
+            await expect(
+                page.getByTestId('reservation-row').filter({ hasText: 'テストアニメ' }).first(),
+                `${round} 回目`,
+            ).toBeVisible();
+
+            await goto(page, '/rules');
+            await page.getByTestId('rule-row').first().getByTestId('rule-delete').click();
+            await expect(page.getByTestId('rule-row')).toHaveCount(0);
+        }
+    });
+});

@@ -262,14 +262,14 @@ export const actions = {
         const form = await request.formData();
         const id = Number(form.get('id'));
         if (!Number.isFinite(id)) return fail(400, { message: 'ルールIDが不正です' });
-        // まだ始まっていない予約は一緒に取り消す。
-        // 残すと、ルールを消したのに録画だけ続くことになる
+        // まだ始まっていない予約は行ごと消す。残すと、ルールを消したのに録画だけ続く。
+        //
+        // 「取り消し」にはしない。applyRules は予約行が既にあると INSERT OR IGNORE で
+        // 飛ばすので(手で取り消したものをルールが復活させないため)、取り消しで残すと
+        // 同じルールを作り直しても二度と予約が立たなくなる
         const canceled = database()
-            .prepare(
-                `UPDATE reservations SET state = 'canceled', updated_at = ?
-                 WHERE rule_id = ? AND state IN ('scheduled', 'conflict')`,
-            )
-            .run(now(), id);
+            .prepare(`DELETE FROM reservations WHERE rule_id = ? AND state IN ('scheduled', 'conflict')`)
+            .run(id);
         // 録画中・録画済みのぶんは履歴として残すので、ルールとの紐付けだけ外す
         database().prepare('UPDATE reservations SET rule_id = NULL WHERE rule_id = ?').run(id);
         database().prepare('DELETE FROM rules WHERE id = ?').run(id);
