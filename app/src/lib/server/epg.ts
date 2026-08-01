@@ -70,8 +70,9 @@ export function syncPrograms(programs: mirakurun.MirakurunProgram[]): number {
     const index = serviceIdIndex();
     const stmt = database().prepare(`
         INSERT INTO programs (id, service_id, network_id, event_id, start_at, end_at,
-                              name, description, extended, genres, is_free, audio_type, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                              name, description, extended, genres, genre_detail,
+                              is_free, audio_type, audios, video_type, video_resolution, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             -- service_id も上書きする。ここを更新しないと、一度おかしな値で入った行が
             -- 取り込み直しても直らない(番組表が空のままになる)
@@ -83,8 +84,12 @@ export function syncPrograms(programs: mirakurun.MirakurunProgram[]): number {
             description = excluded.description,
             extended = excluded.extended,
             genres = excluded.genres,
+            genre_detail = excluded.genre_detail,
             is_free = excluded.is_free,
             audio_type = excluded.audio_type,
+            audios = excluded.audios,
+            video_type = excluded.video_type,
+            video_resolution = excluded.video_resolution,
             updated_at = excluded.updated_at
     `);
     const at = now();
@@ -107,8 +112,18 @@ export function syncPrograms(programs: mirakurun.MirakurunProgram[]): number {
                 toHalfWidth(p.description ?? ''),
                 p.extended === undefined ? null : JSON.stringify(p.extended),
                 p.genres === undefined ? null : JSON.stringify(p.genres.map((g) => g.lv1)),
+                p.genres === undefined
+                    ? null
+                    : JSON.stringify(p.genres.map((g) => ({ lv1: g.lv1, lv2: g.lv2 }))),
                 p.isFree ? 1 : 0,
                 audioType(p),
+                p.audios === undefined
+                    ? null
+                    : JSON.stringify(
+                          p.audios.map((a) => ({ componentType: a.componentType, langs: a.langs })),
+                      ),
+                p.video?.type ?? null,
+                p.video?.resolution ?? null,
                 at,
             );
             count++;

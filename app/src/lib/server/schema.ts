@@ -19,6 +19,11 @@ export const ADDED_COLUMNS: { table: string; column: string; definition: string 
     { table: 'recordings', column: 'codec', definition: "TEXT NOT NULL DEFAULT 'av1'" },
     { table: 'recordings', column: 'cm_ranges', definition: 'TEXT' },
     { table: 'recordings', column: 'acknowledged_at', definition: 'INTEGER' },
+    // 番組詳細に出すためだけの情報。録画の判断には使わない
+    { table: 'programs', column: 'video_type', definition: 'TEXT' },
+    { table: 'programs', column: 'video_resolution', definition: 'TEXT' },
+    { table: 'programs', column: 'audios', definition: 'TEXT' },
+    { table: 'programs', column: 'genre_detail', definition: 'TEXT' },
 ];
 
 export const SCHEMA = `
@@ -68,9 +73,13 @@ CREATE TABLE IF NOT EXISTS programs (
     name TEXT NOT NULL DEFAULT '',
     description TEXT NOT NULL DEFAULT '',
     extended TEXT,                    -- JSON
-    genres TEXT,                      -- JSON: lv1 の配列
+    genres TEXT,                      -- JSON: lv1 の配列。ルールの判定に使う
+    genre_detail TEXT,                -- JSON: [{lv1, lv2}]。表示用
     is_free INTEGER NOT NULL DEFAULT 1,
     audio_type INTEGER,               -- ARIB の componentType。2 がデュアルモノ
+    audios TEXT,                      -- JSON: [{componentType, langs}]。表示用
+    video_type TEXT,                  -- mpeg2 / h.264 など
+    video_resolution TEXT,            -- 1080i / 480i など
     updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS programs_time ON programs (start_at, end_at);

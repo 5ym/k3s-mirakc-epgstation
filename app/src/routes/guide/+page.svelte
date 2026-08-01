@@ -1,5 +1,6 @@
 <script lang="ts">
     import { dragScroll, submitting } from '$lib/actions';
+    import { type Audio, audioLabel, type Genre, genreLabel, videoLabel } from '$lib/arib';
     import { dateTime, duration, stateLabel, time } from '$lib/format';
 
     let { data, form } = $props();
@@ -18,6 +19,29 @@
             return [];
         }
     }
+
+    /** JSON で持っている列を読む。取り込みの時期によっては入っていないので空で返す */
+    function parse<T>(json: string | null): T[] {
+        if (json === null || json === '') return [];
+        try {
+            const value = JSON.parse(json);
+            return Array.isArray(value) ? (value as T[]) : [];
+        } catch {
+            return [];
+        }
+    }
+
+    const genres = (json: string | null) =>
+        parse<Genre>(json)
+            .map(genreLabel)
+            .filter((label) => label !== '');
+
+    const audios = (json: string | null) => parse<Audio>(json).map(audioLabel);
+
+    const video = (program: { video_resolution: string | null; video_type: string | null }) =>
+        videoLabel(program.video_resolution, program.video_type);
+
+    const serviceName = (id: number) => data.services.find((s) => s.id === id)?.name ?? '';
 
     const TYPE_LABEL: Record<string, string> = { GR: '地上波', BS: 'BS', CS: 'CS' };
     const HOUR = 60 * 60 * 1000;
@@ -245,9 +269,27 @@
         <div class="modal-box max-w-2xl">
             <h3 class="text-lg font-bold">{selected.name}</h3>
             <p class="text-base-content/60 mt-1 text-sm">
-                {dateTime(selected.start_at)} 〜 {time(selected.end_at)}
+                {serviceName(selected.service_id)} ・ {dateTime(selected.start_at)} 〜 {time(selected.end_at)}
                 ({duration(selected.start_at, selected.end_at)})
             </p>
+
+            <!-- EPG が持っている符号は、そのままでは読めないので言葉に直して出す -->
+            <div class="mt-2 flex flex-wrap gap-1" data-testid="detail-badges">
+                {#each genres(selected.genre_detail) as label (label)}
+                    <span class="badge badge-sm badge-ghost" data-testid="detail-genre">{label}</span>
+                {/each}
+                {#if video(selected)}
+                    <span class="badge badge-sm badge-ghost" data-testid="detail-video">
+                        {video(selected)}
+                    </span>
+                {/if}
+                {#each audios(selected.audios) as label, i (i)}
+                    <span class="badge badge-sm badge-ghost" data-testid="detail-audio">{label}</span>
+                {/each}
+                {#if !selected.is_free}
+                    <span class="badge badge-sm badge-warning" data-testid="detail-paid">有料</span>
+                {/if}
+            </div>
 
             {#if selected.description}
                 <p class="mt-3 text-sm whitespace-pre-wrap">{selected.description}</p>

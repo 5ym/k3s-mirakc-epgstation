@@ -38,8 +38,12 @@ export interface Program {
     description: string;
     extended: string | null;
     genres: string | null;
+    genre_detail: string | null;
     is_free: number;
     audio_type: number | null;
+    audios: string | null;
+    video_type: string | null;
+    video_resolution: string | null;
     updated_at: number;
 }
 

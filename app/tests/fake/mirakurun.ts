@@ -48,6 +48,9 @@ function programsFor(service: FakeService) {
             extended: {},
             genres: [{ lv1: 7, lv2: 0 }],
             audio: { componentType: 1 },
+            // 本物と同じ形で返す。番組詳細はこれを読んで「ステレオ (日本語)」等に直す
+            audios: [{ componentType: 3, isMain: true, samplingRate: 48000, langs: ['jpn'] }],
+            video: { type: 'mpeg2', resolution: '1080i', streamContent: 1, componentType: 179 },
         });
     }
     return programs;

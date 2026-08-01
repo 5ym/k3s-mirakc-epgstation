@@ -37,6 +37,15 @@ test.describe('操作したときの反応', () => {
 
         const detail = page.getByTestId('program-detail');
         await expect(detail).toBeVisible();
+
+        // EPG の符号はそのままでは読めないので、言葉に直して出す
+        await expect(detail.getByTestId('detail-genre')).toHaveText('アニメ／特撮 > 国内アニメ');
+        await expect(detail.getByTestId('detail-video')).toHaveText('1080i MPEG-2');
+        await expect(detail.getByTestId('detail-audio')).toHaveText('ステレオ (日本語)');
+        // どの局のものかは詳細だけ見ても分かるようにする。
+        // 先頭に来るのがどちらの局かは時刻次第なので、地上波のどちらかであればよい
+        await expect(detail).toContainText(/TOKYO MX|フジテレビ/);
+
         await detail.getByTestId('detail-reserve').click();
 
         // 押したら閉じる。開いたままだと予約できたのか分からない

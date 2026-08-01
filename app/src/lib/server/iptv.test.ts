@@ -26,8 +26,12 @@ const program = (over: Partial<Program> = {}): Program => ({
     description: '<概要>',
     extended: null,
     genres: null,
+    genre_detail: null,
     is_free: 1,
     audio_type: 1,
+    audios: null,
+    video_type: null,
+    video_resolution: null,
     updated_at: 0,
     ...over,
 });

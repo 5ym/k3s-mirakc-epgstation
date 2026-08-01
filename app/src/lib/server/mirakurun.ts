@@ -25,7 +25,8 @@ export interface MirakurunProgram {
     extended?: Record<string, string>;
     genres?: { lv1: number; lv2: number }[];
     audio?: { componentType: number };
-    audios?: { componentType: number }[];
+    audios?: { componentType: number; langs?: string[]; samplingRate?: number }[];
+    video?: { type?: string; resolution?: string };
 }
 
 export interface MirakurunTuner {
