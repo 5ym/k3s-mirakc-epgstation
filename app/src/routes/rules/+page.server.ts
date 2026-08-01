@@ -1,4 +1,5 @@
 import { fail, redirect } from '@sveltejs/kit';
+import { genreName } from '$lib/arib';
 import { isCmMode } from '$lib/server/cm';
 import { config } from '$lib/server/config';
 import { database, now, queryAll, queryOne } from '$lib/server/db';
@@ -21,8 +22,9 @@ function conditionsFrom(params: URLSearchParams): Rule | null {
     const get = (key: string) => String(params.get(key) ?? '').trim();
     const numbers = params.getAll('serviceIds').map(Number).filter(Number.isFinite);
     const types = params.getAll('serviceTypes').map(String).filter(Boolean);
+    const genres = params.getAll('genres').map(Number).filter(Number.isFinite);
     const keyword = get('keyword');
-    if (keyword === '' && numbers.length === 0 && types.length === 0) return null;
+    if (keyword === '' && numbers.length === 0 && types.length === 0 && genres.length === 0) return null;
 
     return {
         id: 0,
@@ -31,7 +33,7 @@ function conditionsFrom(params: URLSearchParams): Rule | null {
         ignore_keyword: get('ignoreKeyword'),
         service_ids: numbers.length === 0 ? null : JSON.stringify(numbers),
         service_types: types.length === 0 ? null : JSON.stringify(types),
-        genres: null,
+        genres: genres.length === 0 ? null : JSON.stringify(genres),
         // ルール画面のフォームから来たときだけ、チェックが無い=外したと解釈する
         free_only: params.get('form') === 'rules' ? (params.get('freeOnly') === 'on' ? 1 : 0) : 1,
         enabled: 1,
@@ -40,6 +42,7 @@ function conditionsFrom(params: URLSearchParams): Rule | null {
         keep_original: 0,
         cm_cut: config.cmCutDefault,
         codec: config.encodeCodec,
+        source: null,
         created_at: 0,
     };
 }
@@ -107,6 +110,15 @@ function serviceIds(form: FormData): string | null {
     return ids.length === 0 ? null : JSON.stringify(ids);
 }
 
+/** ジャンル大分類の指定。未選択(=全ジャンル)は NULL で表す */
+function genres(form: FormData): string | null {
+    const values = form
+        .getAll('genres')
+        .map((v) => Number(v))
+        .filter((n) => Number.isFinite(n));
+    return values.length === 0 ? null : JSON.stringify(values);
+}
+
 /** 地上波/BS/CS 単位の指定 */
 function serviceTypes(form: FormData): string | null {
     const types = form.getAll('serviceTypes').map(String).filter(Boolean);
@@ -119,9 +131,16 @@ const TYPE_LABEL: Record<string, string> = { GR: '地上波', BS: 'BS', CS: 'CS'
  * ルール名はキーワードから決める。別で名前を付けさせても、結局キーワードと
  * 同じものを打ち込むだけになるため。キーワードが無いときは対象の局で表す。
  */
-function ruleName(keyword: string, types: string | null, ids: string | null, services: Service[]): string {
+function ruleName(
+    keyword: string,
+    types: string | null,
+    ids: string | null,
+    genreIds: string | null,
+    services: Service[],
+): string {
     if (keyword !== '') return keyword;
     const parts: string[] = [];
+    if (genreIds !== null) parts.push(...(JSON.parse(genreIds) as number[]).map(genreName));
     if (types !== null) parts.push(...(JSON.parse(types) as string[]).map((t) => TYPE_LABEL[t] ?? t));
     if (ids !== null) {
         parts.push(
@@ -146,12 +165,15 @@ export const actions = {
         const keyword = String(form.get('keyword') ?? '').trim();
         const ids = serviceIds(form);
         const types = serviceTypes(form);
-        if (keyword === '' && ids === null && types === null) {
+        const genreIds = genres(form);
+        if (keyword === '' && ids === null && types === null && genreIds === null) {
             // 条件が空だと全番組にマッチしてディスクを埋めるので作らせない
-            return fail(400, { message: 'キーワードかチャンネルのどちらかは指定してください' });
+            return fail(400, {
+                message: 'キーワード・チャンネル・ジャンルのどれかは指定してください',
+            });
         }
         const services = queryAll<Service>('SELECT * FROM services');
-        const name = ruleName(keyword, types, ids, services);
+        const name = ruleName(keyword, types, ids, genreIds, services);
 
         const cmCut = form.get('cmCut');
         const codec = form.get('codec');
@@ -159,7 +181,7 @@ export const actions = {
             .prepare(
                 `INSERT INTO rules (name, keyword, ignore_keyword, service_ids, service_types, genres,
                                 free_only, enabled, priority, encode, keep_original, cm_cut, codec, created_at)
-             VALUES (?, ?, ?, ?, ?, NULL, ?, 1, ?, ?, ?, ?, ?, ?)`,
+             VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
             )
             .run(
                 name,
@@ -167,6 +189,7 @@ export const actions = {
                 String(form.get('ignoreKeyword') ?? '').trim(),
                 ids,
                 types,
+                genreIds,
                 form.get('freeOnly') === 'on' ? 1 : 0,
                 Number(form.get('priority') ?? 2) || 2,
                 form.get('encode') === 'on' ? 1 : 0,
@@ -188,8 +211,11 @@ export const actions = {
         const keyword = String(form.get('keyword') ?? '').trim();
         const ids = serviceIds(form);
         const types = serviceTypes(form);
-        if (keyword === '' && ids === null && types === null) {
-            return fail(400, { message: 'キーワードかチャンネルのどちらかは指定してください' });
+        const genreIds = genres(form);
+        if (keyword === '' && ids === null && types === null && genreIds === null) {
+            return fail(400, {
+                message: 'キーワード・チャンネル・ジャンルのどれかは指定してください',
+            });
         }
 
         const services = queryAll<Service>('SELECT * FROM services');
@@ -198,15 +224,16 @@ export const actions = {
         database()
             .prepare(
                 `UPDATE rules SET name = ?, keyword = ?, ignore_keyword = ?, service_ids = ?,
-                 service_types = ?, free_only = ?, priority = ?, encode = ?, keep_original = ?,
-                 cm_cut = ?, codec = ? WHERE id = ?`,
+                 service_types = ?, genres = ?, free_only = ?, priority = ?, encode = ?,
+                 keep_original = ?, cm_cut = ?, codec = ? WHERE id = ?`,
             )
             .run(
-                ruleName(keyword, types, ids, services),
+                ruleName(keyword, types, ids, genreIds, services),
                 keyword,
                 String(form.get('ignoreKeyword') ?? '').trim(),
                 ids,
                 types,
+                genreIds,
                 form.get('freeOnly') === 'on' ? 1 : 0,
                 Number(form.get('priority') ?? 2) || 2,
                 form.get('encode') === 'on' ? 1 : 0,

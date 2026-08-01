@@ -1,4 +1,5 @@
 import type { SubmitFunction } from '@sveltejs/kit';
+import { tick } from 'svelte';
 import { enhance } from '$app/forms';
 import { begin, finish } from './busy.svelte';
 
@@ -19,12 +20,17 @@ export function submitting(node: HTMLFormElement, submit?: SubmitFunction) {
         const after = submit?.(input);
 
         return async (options) => {
-            finish();
-            node.removeAttribute('aria-busy');
-            for (const button of buttons) button.disabled = false;
-
-            if (typeof after === 'function') await after(options);
-            else await options.update();
+            try {
+                // 先にバーを消すと、消えてから一拍おいて画面が変わる。
+                // 新しい内容が描き終わるまで出したままにする
+                if (typeof after === 'function') await after(options);
+                else await options.update();
+                await tick();
+            } finally {
+                finish();
+                node.removeAttribute('aria-busy');
+                for (const button of buttons) button.disabled = false;
+            }
         };
     });
 }

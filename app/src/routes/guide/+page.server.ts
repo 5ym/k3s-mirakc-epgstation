@@ -1,5 +1,8 @@
 import { fail } from '@sveltejs/kit';
+import { isCmMode } from '$lib/server/cm';
+import { config } from '$lib/server/config';
 import { queryAll } from '$lib/server/db';
+import { isVideoCodec } from '$lib/server/encoder';
 import { reserve } from '$lib/server/reservations';
 import type { ChannelType, Program, Service } from '$lib/types';
 
@@ -56,7 +59,15 @@ export function load({ url }) {
         start,
     );
 
-    return { type, start, hours: WINDOW_HOURS, programs, services };
+    return {
+        type,
+        start,
+        hours: WINDOW_HOURS,
+        programs,
+        services,
+        // 予約の詳細で初期値として出す
+        defaults: { cmCut: config.cmCutDefault, codec: config.encodeCodec },
+    };
 }
 
 export const actions = {
@@ -64,8 +75,20 @@ export const actions = {
         const form = await request.formData();
         const programId = Number(form.get('programId'));
         if (!Number.isFinite(programId)) return fail(400, { message: '番組IDが不正です' });
+
+        // 詳細の画面からはこの番組だけの録画のしかたを決められる。
+        // チェックを外した状態はキーごと消えるので、画面から来たことを印で見分ける。
+        // 印が無い(APIから番組IDだけ投げた)ときは既定のまま
+        const fromForm = form.get('options') === '1';
+        const cmCut = form.get('cmCut');
+        const codec = form.get('codec');
         try {
-            await reserve(programId);
+            await reserve(programId, {
+                encode: fromForm ? form.get('encode') === 'on' : undefined,
+                keepOriginal: fromForm && form.get('keepOriginal') === 'on',
+                cmCut: isCmMode(cmCut) ? cmCut : undefined,
+                codec: isVideoCodec(codec) ? codec : undefined,
+            });
         } catch (error) {
             return fail(400, { message: String(error) });
         }

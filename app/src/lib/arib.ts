@@ -147,6 +147,16 @@ export interface Genre {
     lv2: number;
 }
 
+/** ルールの条件に出す大分類の一覧。予備(0xC/0xD)は放送に出てこないので載せない */
+export const GENRE_OPTIONS: { value: number; label: string }[] = Object.entries(GENRE_LV1).map(
+    ([value, label]) => ({ value: Number(value), label }),
+);
+
+/** 大分類だけの名前。ルールの一覧など、番組ではなく条件を出すとき用 */
+export function genreName(lv1: number): string {
+    return GENRE_LV1[lv1] ?? String(lv1);
+}
+
 /** 「アニメ／特撮 > 国内アニメ」。中分類が引けなければ大分類だけ返す */
 export function genreLabel(genre: Genre): string {
     const lv1 = GENRE_LV1[genre.lv1];

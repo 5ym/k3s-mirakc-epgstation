@@ -7,7 +7,7 @@ test.describe('自動予約ルール', () => {
         await goto(page, '/rules');
         await page.getByTestId('rule-submit').click();
         await expect(page.getByTestId('rule-error')).toContainText(
-            'キーワードかチャンネルのどちらかは指定してください',
+            'キーワード・チャンネル・ジャンルのどれかは指定してください',
         );
         await expect(page.getByTestId('rule-row')).toHaveCount(0);
     });
@@ -50,5 +50,47 @@ test.describe('自動予約ルール', () => {
             await buttons.first().click();
             await page.waitForTimeout(200);
         }
+    });
+});
+
+test.describe('ジャンル指定', () => {
+    test.beforeEach(async ({ page, request }) => {
+        await syncEpg(request);
+        await goto(page, '/rules');
+        for (let i = 0; i < 20; i++) {
+            const buttons = page.getByTestId('rule-delete');
+            if ((await buttons.count()) === 0) break;
+            await buttons.first().click();
+            await page.waitForTimeout(100);
+        }
+        await expect(page.getByTestId('rule-row')).toHaveCount(0);
+    });
+
+    test('ジャンルだけでもルールを作れる', async ({ page }) => {
+        await goto(page, '/rules');
+        await page.getByTestId('genre-summary').click();
+        // 偽Mirakurunの番組は全部「アニメ／特撮」(lv1=7)
+        await page.getByTestId('rule-genres').locator('input[value="7"]').check();
+        await page.getByTestId('rule-submit').click();
+
+        // キーワードが無いときはジャンル名がルール名になる
+        const rule = page.getByTestId('rule-row').first();
+        await expect(rule).toContainText('アニメ／特撮');
+
+        // ジャンルだけで予約が立つ
+        await goto(page, '/');
+        await expect(page.getByTestId('reservation-row').first()).toBeVisible();
+    });
+
+    test('合わないジャンルなら何も録らない', async ({ page }) => {
+        await goto(page, '/rules');
+        await page.getByTestId('genre-summary').click();
+        // スポーツ(lv1=1)。偽Mirakurunはアニメしか流さない
+        await page.getByTestId('rule-genres').locator('input[value="1"]').check();
+        await page.getByTestId('rule-submit').click();
+        await expect(page.getByTestId('rule-row')).toHaveCount(1);
+
+        await goto(page, '/');
+        await expect(page.getByTestId('reservation-row')).toHaveCount(0);
     });
 });

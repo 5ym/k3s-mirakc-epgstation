@@ -24,6 +24,8 @@ export const ADDED_COLUMNS: { table: string; column: string; definition: string 
     { table: 'programs', column: 'video_resolution', definition: 'TEXT' },
     { table: 'programs', column: 'audios', definition: 'TEXT' },
     { table: 'programs', column: 'genre_detail', definition: 'TEXT' },
+    // 引き継ぎ元での識別子。二重に取り込まないための印
+    { table: 'rules', column: 'source', definition: 'TEXT' },
 ];
 
 export const SCHEMA = `
@@ -42,7 +44,9 @@ CREATE TABLE IF NOT EXISTS settings (
 -- 録画の節目を外部に飛ばす先。Discord や Slack の Incoming Webhook を想定している
 CREATE TABLE IF NOT EXISTS webhooks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
+    -- 名前は廃止。1人で使うものに名札を付けても URL を見れば分かる。
+    -- 既存の行を消さないので列だけ残してある
+    name TEXT NOT NULL DEFAULT '',
     url TEXT NOT NULL,
     events TEXT NOT NULL,          -- JSON 配列。空配列は「全部」
     enabled INTEGER NOT NULL DEFAULT 1,

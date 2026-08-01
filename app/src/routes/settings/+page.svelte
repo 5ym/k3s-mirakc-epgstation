@@ -160,16 +160,7 @@
         {/if}
 
         <form method="POST" action="?/addWebhook" use:submitting class="grid gap-3 sm:grid-cols-2">
-            <label class="flex flex-col gap-1">
-                <span class="text-sm font-medium">名前</span>
-                <input
-                    name="name"
-                    class="input input-bordered w-full"
-                    placeholder="例: Discord"
-                    data-testid="webhook-name"
-                />
-            </label>
-            <label class="flex flex-col gap-1">
+            <label class="flex flex-col gap-1 sm:col-span-2">
                 <span class="text-sm font-medium">URL</span>
                 <input
                     name="url"
@@ -200,7 +191,6 @@
                 <table class="table-zebra table">
                     <thead>
                         <tr>
-                            <th>名前</th>
                             <th>URL</th>
                             <th>送る通知</th>
                             <th>直近の結果</th>
@@ -210,8 +200,8 @@
                     <tbody data-testid="webhook-list">
                         {#each data.webhooks as webhook (webhook.id)}
                             <tr data-testid="webhook-row" data-webhook-id={webhook.id}>
-                                <td>
-                                    <div class="font-medium">{webhook.name}</div>
+                                <td class="max-w-md">
+                                    <div class="truncate font-mono text-xs">{webhook.url}</div>
                                     <span
                                         class="badge badge-sm {webhook.enabled
                                             ? 'badge-success'
@@ -220,7 +210,6 @@
                                         {webhook.enabled ? '有効' : '無効'}
                                     </span>
                                 </td>
-                                <td class="max-w-xs truncate font-mono text-xs">{webhook.url}</td>
                                 <td class="text-sm">
                                     {JSON.parse(webhook.events).length === 0
                                         ? 'すべて'
@@ -272,13 +261,14 @@
     </div>
 </section>
 
-<section class="card bg-base-100 mb-6 shadow" data-testid="migrate-card">
+<section class="card bg-base-100 mt-6 shadow" data-testid="migrate-card">
     <div class="card-body">
         <h2 class="card-title">EPGStation からの引き継ぎ</h2>
         <p class="text-base-content/70 text-sm">
-            EPGStation のデータベースを読み、録画をライブラリの並びに置き直して取り込みます。
-            番組情報とサムネイルもここで作るので、Jellyfin からそのまま見られます。
-            何度実行しても取り込み済みのものは飛ばします。
+            EPGStation のデータベースを読み、<strong>自動予約ルール・手で入れた予約・録画</strong>を
+            取り込みます。録画はライブラリの並びに置き直し、番組情報とサムネイルもここで作るので Jellyfin
+            からそのまま見られます。何度実行しても取り込み済みのものは飛ばします。
+            ルール由来の予約は、ルールを取り込んだあと denpa が自分で立て直します。
         </p>
 
         {#if !data.migrate.available}
@@ -337,8 +327,14 @@
                         <span class="badge badge-ghost">移動</span>
                     {/if}
                     <span data-testid="migrate-counts">
-                        取り込み {migrate.imported} 件 / 取り込み済み {migrate.skipped} 件 / ファイル無し {migrate.missing}
+                        録画 {migrate.imported} 件 / 取り込み済み {migrate.skipped} 件 / ファイル無し {migrate.missing}
                         件
+                    </span>
+                    <span data-testid="migrate-rule-counts">
+                        ルール {migrate.rules.imported} 件 / 対象外 {migrate.rules.skipped} 件
+                    </span>
+                    <span data-testid="migrate-reservation-counts">
+                        予約 {migrate.reservations.imported} 件 / 対象外 {migrate.reservations.skipped} 件
                     </span>
                 </div>
 

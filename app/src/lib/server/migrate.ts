@@ -14,16 +14,18 @@ import { copyFileSync, existsSync, mkdirSync, renameSync, statSync, unlinkSync }
 import { dirname, join } from 'node:path';
 import mysql from 'mysql2/promise';
 import type { Recording } from '$lib/types';
+import { config } from './config';
 import { database, now, queryOne } from './db';
 import { emit } from './events';
 import { libraryPath } from './library';
 import { writeNfo, writeThumbnail } from './metadata';
+import { reserve } from './reservations';
 import { parseTitle, toHalfWidth } from './title';
 
 const env = (key: string, fallback: string) => process.env[key] ?? fallback;
 
 /** EPGStation の MariaDB。mysql2 は知らないキーを渡すと文句を言うので他と混ぜない */
-const connection = {
+const connectionConfig = {
     host: env('EPGSTATION_DB_HOST', 'db'),
     port: Number(env('EPGSTATION_DB_PORT', '3306')),
     user: env('EPGSTATION_DB_USER', 'root'),
@@ -32,7 +34,7 @@ const connection = {
 };
 
 export const source = {
-    host: connection.host,
+    host: connectionConfig.host,
     /** EPGStation のPVCを denpa 側にマウントした場所 */
     recordedDir: env('EPGSTATION_RECORDED_DIR', '/epgstation-recorded'),
 };
@@ -51,11 +53,14 @@ export interface MigrateOptions {
 
 export interface MigrateStatus extends MigrateOptions {
     state: 'idle' | 'running' | 'done' | 'failed';
-    /** 対象の総数。走り出すまでは 0 */
+    /** 録画の対象の総数。走り出すまでは 0 */
     total: number;
     imported: number;
     skipped: number;
     missing: number;
+    /** ルールと手動予約。録画と違ってファイルを触らないので、下見でも件数だけ数える */
+    rules: { imported: number; skipped: number };
+    reservations: { imported: number; skipped: number };
     /** いま扱っている録画の名前 */
     current: string | null;
     /** 直近の記録。全部残すと際限が無いので後ろから 200 件だけ持つ */
@@ -75,6 +80,8 @@ let status_: MigrateStatus = {
     imported: 0,
     skipped: 0,
     missing: 0,
+    rules: { imported: 0, skipped: 0 },
+    reservations: { imported: 0, skipped: 0 },
     current: null,
     log: [],
     error: null,
@@ -83,7 +90,12 @@ let status_: MigrateStatus = {
 };
 
 export function status(): MigrateStatus {
-    return { ...status_, log: [...status_.log] };
+    return {
+        ...status_,
+        log: [...status_.log],
+        rules: { ...status_.rules },
+        reservations: { ...status_.reservations },
+    };
 }
 
 function record(message: string): void {
@@ -120,7 +132,7 @@ function sourcePath(filePath: string): string | null {
 }
 
 async function fetchRows(): Promise<Row[]> {
-    const db = await mysql.createConnection(connection);
+    const db = await mysql.createConnection(connectionConfig);
     try {
         // EPGStation v2 のテーブル構成。エンコード済みがあればそちらを優先して取る
         const [rows] = await db.query<(Row & mysql.RowDataPacket)[]>(
@@ -229,6 +241,163 @@ async function importOne(row: Row, options: MigrateOptions): Promise<'imported' 
     return 'imported';
 }
 
+interface RuleRow {
+    id: number;
+    keyword: string | null;
+    ignoreKeyword: string | null;
+    GR: number;
+    BS: number;
+    CS: number;
+    SKY: number;
+    channelIds: string | null;
+    genres: string | null;
+    isFree: number;
+    enable: number;
+    isTimeSpecification: number;
+}
+
+interface ReserveRow {
+    programId: number | null;
+    ruleId: number | null;
+    startAt: number;
+    endAt: number;
+    name: string | null;
+}
+
+/** EPGStation のチャンネルIDは networkId * 100000 + serviceId */
+function serviceIdFor(channelId: number): number | undefined {
+    const service = queryOne<{ id: number }>(
+        'SELECT id FROM services WHERE network_id = ? AND service_id = ?',
+        Math.floor(channelId / 100000),
+        channelId % 100000,
+    );
+    return service?.id;
+}
+
+/** `[{"genre":6},{"genre":7}]` -> `[6, 7]` */
+function parseGenres(json: string | null): number[] {
+    if (json === null) return [];
+    try {
+        const list = JSON.parse(json) as { genre?: number }[];
+        return list.map((g) => g.genre).filter((g): g is number => typeof g === 'number');
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * 自動予約ルールを引き継ぐ。
+ *
+ * EPGStation のルールには denpa に無い項目(正規表現、時刻指定、録画先の指定、
+ * 重複回避など)がある。落ちるものは落ちると分かるように記録に残す。
+ * 時刻指定のルールは番組を探すのではなく時計で録るもので、denpa に対応がないので飛ばす。
+ */
+async function importRules(connection: mysql.Connection, options: MigrateOptions): Promise<void> {
+    const [rows] = await connection.query<(RuleRow & mysql.RowDataPacket)[]>(
+        `SELECT id, keyword, ignoreKeyword, GR, BS, CS, SKY, channelIds, genres,
+                isFree, enable, isTimeSpecification
+         FROM rule ORDER BY id`,
+    );
+
+    for (const row of rows) {
+        const source = `epgstation:${row.id}`;
+        if (queryOne<{ id: number }>('SELECT id FROM rules WHERE source = ?', source) !== undefined) {
+            status_.rules.skipped++;
+            continue;
+        }
+        if (row.isTimeSpecification) {
+            record(`時刻指定のルールは取り込めません: #${row.id}`);
+            status_.rules.skipped++;
+            continue;
+        }
+
+        const keyword = toHalfWidth(row.keyword ?? '').trim();
+        const types = (['GR', 'BS', 'CS', 'SKY'] as const).filter((t) => row[t] === 1);
+        const genreIds = parseGenres(row.genres);
+
+        let channels: number[] = [];
+        if (row.channelIds !== null) {
+            try {
+                channels = (JSON.parse(row.channelIds) as number[])
+                    .map(serviceIdFor)
+                    .filter((id): id is number => id !== undefined);
+            } catch {
+                channels = [];
+            }
+        }
+
+        if (keyword === '' && types.length === 0 && genreIds.length === 0 && channels.length === 0) {
+            // 条件が空だと全番組にマッチしてしまう。EPGStation 側で他の条件
+            // (正規表現や時間帯)だけで絞っていたものがここに来る
+            record(`条件が空になるので取り込めません: #${row.id}`);
+            status_.rules.skipped++;
+            continue;
+        }
+
+        const name = keyword !== '' ? keyword : `EPGStation #${row.id}`;
+        record(`${options.apply ? 'ルール' : 'ルール(予定)'}: ${name}`);
+        if (!options.apply) {
+            status_.rules.imported++;
+            continue;
+        }
+
+        database()
+            .prepare(
+                `INSERT INTO rules (name, keyword, ignore_keyword, service_ids, service_types, genres,
+                                    free_only, enabled, priority, encode, keep_original,
+                                    cm_cut, codec, source, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 2, 1, 0, ?, ?, ?, ?)`,
+            )
+            .run(
+                name,
+                keyword,
+                toHalfWidth(row.ignoreKeyword ?? '').trim(),
+                channels.length === 0 ? null : JSON.stringify(channels),
+                types.length === 0 ? null : JSON.stringify(types),
+                genreIds.length === 0 ? null : JSON.stringify(genreIds),
+                row.isFree ? 1 : 0,
+                row.enable ? 1 : 0,
+                config.cmCutDefault,
+                config.encodeCodec,
+                source,
+                now(),
+            );
+        status_.rules.imported++;
+    }
+}
+
+/**
+ * 手で入れた予約だけ引き継ぐ。
+ *
+ * ルール由来の予約は、ルールを取り込んだあとに denpa が自分で立て直すので触らない。
+ * EPGStation の programId は Mirakurun の番組IDそのままなので、こちらの番組表と直に照合できる。
+ */
+async function importReservations(connection: mysql.Connection, options: MigrateOptions): Promise<void> {
+    const [rows] = await connection.query<(ReserveRow & mysql.RowDataPacket)[]>(
+        `SELECT programId, ruleId, startAt, endAt, name
+         FROM reserve WHERE ruleId IS NULL AND isSkip = 0 ORDER BY startAt`,
+    );
+
+    const at = now();
+    for (const row of rows) {
+        if (row.programId === null || row.endAt <= at) {
+            status_.reservations.skipped++;
+            continue;
+        }
+        const program = queryOne<{ id: number }>('SELECT id FROM programs WHERE id = ?', row.programId);
+        if (program === undefined) {
+            // 番組表を取り込む前だと出る。EPG を取り直してからもう一度実行すれば入る
+            record(`番組表に無いので取り込めません: ${toHalfWidth(row.name ?? String(row.programId))}`);
+            status_.reservations.skipped++;
+            continue;
+        }
+
+        record(`${options.apply ? '予約' : '予約(予定)'}: ${toHalfWidth(row.name ?? '')}`);
+        if (options.apply) await reserve(program.id);
+        status_.reservations.imported++;
+    }
+}
+
 /**
  * 取り込みを走らせる。進捗は {@link status} に入る。
  *
@@ -243,6 +412,8 @@ export async function run(options: MigrateOptions): Promise<MigrateStatus> {
         imported: 0,
         skipped: 0,
         missing: 0,
+        rules: { imported: 0, skipped: 0 },
+        reservations: { imported: 0, skipped: 0 },
         current: null,
         log: [],
         error: null,
@@ -252,6 +423,21 @@ export async function run(options: MigrateOptions): Promise<MigrateStatus> {
     emit('migrate');
 
     try {
+        // ルールと手動予約を先に入れる。録画のコピーは時間がかかるので、
+        // 先にこちらを済ませておけば途中で止めても予約は動き出す
+        const connection = await mysql.createConnection(connectionConfig);
+        try {
+            await importRules(connection, options);
+            await importReservations(connection, options);
+        } finally {
+            await connection.end();
+        }
+        record(
+            `ルール 取り込み ${status_.rules.imported} 件 / 対象外 ${status_.rules.skipped} 件、` +
+                `予約 取り込み ${status_.reservations.imported} 件 / 対象外 ${status_.reservations.skipped} 件`,
+        );
+        emit('migrate');
+
         const rows = await fetchRows();
         status_.total = rows.length;
         record(`対象 ${rows.length} 件`);

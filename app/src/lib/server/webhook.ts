@@ -63,7 +63,7 @@ async function post(webhook: Webhook, payload: Payload): Promise<void> {
     database()
         .prepare('UPDATE webhooks SET last_status = ?, last_sent_at = ? WHERE id = ?')
         .run(status, at, webhook.id);
-    if (status !== 'ok') console.error(`[webhook] ${webhook.name} への送信に失敗: ${status}`);
+    if (status !== 'ok') console.error(`[webhook] ${webhook.url} への送信に失敗: ${status}`);
 }
 
 /** 投げっぱなしにする。呼び出し側は待たない */

@@ -22,12 +22,11 @@ test.describe('通知', () => {
 
     test('通知先を追加してテスト送信すると、相手に届く', async ({ page, request }) => {
         await goto(page, '/settings');
-        await page.getByTestId('webhook-name').fill('テスト先');
         await page.getByTestId('webhook-url').fill(`${JELLYFIN_URL}/__control/webhook`);
         await page.getByTestId('webhook-add').click();
 
         const row = page.getByTestId('webhook-row').first();
-        await expect(row).toContainText('テスト先');
+        await expect(row).toContainText('/__control/webhook');
         // 何も選ばなければ全部送る
         await expect(row).toContainText('すべて');
         await expect(row).toContainText('未送信');
@@ -46,7 +45,6 @@ test.describe('通知', () => {
 
     test('送る通知を選べる', async ({ page }) => {
         await goto(page, '/settings');
-        await page.getByTestId('webhook-name').fill('失敗だけ');
         await page.getByTestId('webhook-url').fill(`${JELLYFIN_URL}/__control/webhook`);
         await page.getByTestId('webhook-events').locator('input[value="recording.failed"]').check();
         await page.getByTestId('webhook-add').click();
@@ -58,7 +56,6 @@ test.describe('通知', () => {
 
     test('URLが不正なら断る', async ({ page }) => {
         await goto(page, '/settings');
-        await page.getByTestId('webhook-name').fill('だめな先');
         await page.getByTestId('webhook-url').fill('not-a-url');
         await page.getByTestId('webhook-add').click();
         await expect(page.getByTestId('settings-error')).toContainText('http(s) で始まるURL');
@@ -67,7 +64,6 @@ test.describe('通知', () => {
 
     test('無効にした通知先には送らない', async ({ page, request }) => {
         await goto(page, '/settings');
-        await page.getByTestId('webhook-name').fill('止める先');
         await page.getByTestId('webhook-url').fill(`${JELLYFIN_URL}/__control/webhook`);
         await page.getByTestId('webhook-add').click();
         await page.getByTestId('webhook-toggle').first().click();

@@ -65,3 +65,58 @@ test.describe('手動予約', () => {
         }
     });
 });
+
+test.describe('予約の細かい指定', () => {
+    test.beforeEach(async ({ request }) => {
+        await syncEpg(request);
+    });
+
+    test('この番組だけ録画のしかたを変えられる', async ({ page }) => {
+        await goto(page, '/guide?type=GR');
+        const [target] = await upcoming(page);
+
+        await cellOf(page, target.programId).getByTestId('program-button').click();
+        // 既定のままでいいことがほとんどなので畳んである
+        await expect(page.getByTestId('reserve-options')).not.toBeVisible();
+        await page.getByTestId('reserve-options-summary').click();
+
+        await page.getByTestId('reserve-codec').selectOption('h264');
+        await page.getByTestId('reserve-cmcut').selectOption('cut');
+        await page.getByTestId('reserve-keep').check();
+        await page.getByTestId('detail-reserve').click();
+
+        await goto(page, '/');
+        const reservation = page.locator(
+            `[data-testid="reservation-row"][data-program-id="${target.programId}"]`,
+        );
+        await expect(reservation).toContainText('H264');
+        await expect(reservation).toContainText('カット');
+
+        await reservation.getByTestId('cancel-button').click();
+        await expect(reservation).toHaveCount(0);
+    });
+
+    test('放送が終わった番組は予約できない', async ({ page }) => {
+        // 番組表には過去の番組も並んでいる。予約できてしまうと、
+        // 録れないものが予約一覧に残り続ける
+        await goto(page, '/guide?type=GR');
+        const past = await page.getByTestId('grid-program').evaluateAll((nodes) =>
+            nodes
+                .map((node) => ({
+                    id: node.getAttribute('data-program-id') ?? '',
+                    at: Number(node.getAttribute('data-start-at')),
+                }))
+                .filter((c) => c.at < Date.now() - 60 * 60 * 1000),
+        );
+        expect(past.length).toBeGreaterThan(0);
+
+        await cellOf(page, past[0].id).getByTestId('program-button').click();
+        await page.getByTestId('detail-reserve').click();
+        await expect(page.getByTestId('guide-error')).toContainText('放送が終わっています');
+
+        await goto(page, '/');
+        await expect(
+            page.locator(`[data-testid="reservation-row"][data-program-id="${past[0].id}"]`),
+        ).toHaveCount(0);
+    });
+});

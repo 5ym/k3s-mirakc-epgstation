@@ -147,7 +147,8 @@
                     </td>
                     <td class="flex flex-wrap gap-2">
                         {#if rec.deleted_at === null}
-                            {#if rec.ts_path}
+                            <!-- 録画中・エンコード中は生TSがまだ書かれている最中なので触らせない -->
+                            {#if rec.ts_path && rec.state !== 'recording' && rec.state !== 'encoding'}
                                 <form method="POST" action="?/reencode" use:submitting>
                                     <input type="hidden" name="id" value={rec.id} />
                                     <button class="btn btn-sm" data-testid="reencode-button"

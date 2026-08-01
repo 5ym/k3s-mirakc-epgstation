@@ -62,6 +62,8 @@ export interface Rule {
     keep_original: number;
     cm_cut: CmMode;
     codec: VideoCodec;
+    /** 引き継ぎ元での識別子 (例: epgstation:12)。自分で作ったものは NULL */
+    source: string | null;
     created_at: number;
 }
 

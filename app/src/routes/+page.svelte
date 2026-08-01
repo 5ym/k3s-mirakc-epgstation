@@ -1,7 +1,7 @@
 <script lang="ts">
     import { submitting } from '$lib/actions';
     import { liveUpdates } from '$lib/live-updates.svelte';
-    import { badgeClass, dateTime, duration, size, stateLabel } from '$lib/format';
+    import { badgeClass, CM_LABEL, dateTime, duration, size, stateLabel } from '$lib/format';
 
     let { data, form } = $props();
 
@@ -174,9 +174,26 @@
                             <div class="text-error text-sm">{res.conflict_reason}</div>
                         {/if}
                     </td>
-                    <td class="whitespace-nowrap text-sm">
-                        {res.manual ? '手動' : (res.rule_name ?? 'ルール')}
-                        {#if !res.encode}<span class="badge badge-ghost badge-sm">TSのみ</span>{/if}
+                    <td class="text-sm">
+                        <div class="whitespace-nowrap">
+                            {res.manual ? '手動' : (res.rule_name ?? 'ルール')}
+                        </div>
+                        <!-- 番組ごとに変えられるので、何で録るのかは一覧から分かるようにする -->
+                        <div class="mt-0.5 flex flex-wrap gap-1">
+                            {#if res.encode}
+                                <span class="badge badge-ghost badge-sm" data-testid="reservation-codec">
+                                    {res.codec.toUpperCase()}
+                                </span>
+                                <span class="badge badge-ghost badge-sm" data-testid="reservation-cmcut">
+                                    CM: {CM_LABEL[res.cm_cut] ?? res.cm_cut}
+                                </span>
+                            {:else}
+                                <span class="badge badge-ghost badge-sm">TSのみ</span>
+                            {/if}
+                            {#if res.keep_original}
+                                <span class="badge badge-ghost badge-sm">生TSも残す</span>
+                            {/if}
+                        </div>
                     </td>
                     <td>
                         <span class="badge {badgeClass(res.state)}" data-testid="reservation-state">

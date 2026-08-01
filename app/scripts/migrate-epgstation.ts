@@ -24,8 +24,10 @@ if (result.state === 'failed') {
 }
 
 console.log(
-    `\n${apply ? '完了' : '(--apply を付けると実行します)'}: ` +
-        `取り込み ${result.imported} 件 / 取り込み済み ${result.skipped} 件 / ファイル無し ${result.missing} 件`,
+    `\n${apply ? '完了' : '(--apply を付けると実行します)'}:\n` +
+        `  ルール 取り込み ${result.rules.imported} 件 / 対象外 ${result.rules.skipped} 件\n` +
+        `  予約   取り込み ${result.reservations.imported} 件 / 対象外 ${result.reservations.skipped} 件\n` +
+        `  録画   取り込み ${result.imported} 件 / 取り込み済み ${result.skipped} 件 / ファイル無し ${result.missing} 件`,
 );
 console.log(`引き継ぎ元: ${source.recordedDir}`);
 console.log(`ライブラリ: ${config.libraryDir}`);

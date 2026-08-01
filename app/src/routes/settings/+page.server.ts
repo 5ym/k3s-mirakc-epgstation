@@ -67,17 +67,16 @@ export const actions = {
 
     addWebhook: async ({ request }) => {
         const form = await request.formData();
-        const name = String(form.get('name') ?? '').trim();
         const url = String(form.get('url') ?? '').trim();
-        if (name === '' || !/^https?:\/\//.test(url)) {
-            return fail(400, { message: '名前と http(s) で始まるURLを入力してください' });
+        if (!/^https?:\/\//.test(url)) {
+            return fail(400, { message: 'http(s) で始まるURLを入力してください' });
         }
         // 何も選ばなければ全部の通知を受け取る
         const events = form.getAll('events').map(String).filter(Boolean);
 
         database()
-            .prepare('INSERT INTO webhooks (name, url, events, enabled, created_at) VALUES (?, ?, ?, 1, ?)')
-            .run(name, url, JSON.stringify(events), now());
+            .prepare('INSERT INTO webhooks (url, events, enabled, created_at) VALUES (?, ?, 1, ?)')
+            .run(url, JSON.stringify(events), now());
         return { success: true, webhookAdded: true };
     },
 
