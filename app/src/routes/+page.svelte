@@ -59,8 +59,8 @@
     </div>
 {/if}
 
-<div class="grid gap-6 xl:grid-cols-2">
-    <section>
+<div class="grid gap-6 xl:grid-cols-5">
+    <section class="xl:col-span-2">
         <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
             <h2 class="text-lg font-bold">予約</h2>
             <div class="flex gap-2">
@@ -145,7 +145,7 @@
         </div>
     </section>
 
-    <section>
+    <section class="xl:col-span-3">
         <div class="mb-4 flex items-center justify-between">
             <h2 class="text-lg font-bold">録画</h2>
             <div class="flex gap-2">
@@ -290,7 +290,7 @@
                             <td>
                                 <div class="flex flex-wrap items-center gap-2">
                                     {#if rec.deleted_at === null}
-                                        {#if rec.state === 'available' && platform !== null}
+                                        {#if rec.library_path !== null && platform !== null}
                                             <!--
                                     ブラウザは MPEG-2 も AV1+Opus の mkv も素直には再生できない。
                                     端末に入っているプレイヤーに URL を渡して開かせる
@@ -311,7 +311,7 @@
                                                 download
                                                 data-testid="download-link"
                                             >
-                                                保存
+                                                ダウンロード
                                             </a>
                                         {/if}
                                         <!-- 録画中・エンコード中は生TSがまだ書かれている最中なので触らせない -->

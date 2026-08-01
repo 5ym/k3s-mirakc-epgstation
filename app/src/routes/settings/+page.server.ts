@@ -77,8 +77,10 @@ export const actions = {
         const events = form.getAll('events').map(String).filter(Boolean);
 
         database()
-            .prepare('INSERT INTO webhooks (url, events, enabled, created_at) VALUES (?, ?, 1, ?)')
-            .run(url, JSON.stringify(events), now());
+            // name は廃止したが、既存DBの列が NOT NULL のままなので空文字を入れる。
+            // CREATE TABLE IF NOT EXISTS では列定義が変わらないため
+            .prepare('INSERT INTO webhooks (name, url, events, enabled, created_at) VALUES (?, ?, ?, 1, ?)')
+            .run('', url, JSON.stringify(events), now());
         return { success: true, webhookAdded: true };
     },
 
