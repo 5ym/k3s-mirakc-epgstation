@@ -91,3 +91,48 @@ describe('assign', () => {
         expect(rejected).toHaveLength(0);
     });
 });
+
+describe('assign (前後マージン)', () => {
+    const GR1 = new Map([['GR', 1]]);
+    const MARGINS = { start: 10, end: 15 };
+
+    test('隣り合う番組でもマージンぶんチューナーが重なるなら競合にする', () => {
+        // 22:00 終了 → 22:00 開始。番組の時刻だけ見ると重ならないが、
+        // 前は +15 まで録り続け、後は -10 から録り始めるので実際は 25 重なる
+        const { accepted, rejected } = assign(
+            [
+                res({ id: 1, start_at: 0, end_at: 100, channel: 'T16' }),
+                res({ id: 2, start_at: 100, end_at: 200, channel: 'T21' }),
+            ],
+            GR1,
+            MARGINS,
+        );
+        expect(accepted.map((a) => a.id)).toEqual([1]);
+        expect(rejected).toHaveLength(1);
+    });
+
+    test('同じチャンネルならマージンが重なってもチューナーは1本で足りる', () => {
+        const { accepted, rejected } = assign(
+            [
+                res({ id: 1, start_at: 0, end_at: 100, channel: 'T16' }),
+                res({ id: 2, start_at: 100, end_at: 200, channel: 'T16' }),
+            ],
+            GR1,
+            MARGINS,
+        );
+        expect(accepted).toHaveLength(2);
+        expect(rejected).toHaveLength(0);
+    });
+
+    test('マージンぶん離れていれば競合しない', () => {
+        const { accepted } = assign(
+            [
+                res({ id: 1, start_at: 0, end_at: 100, channel: 'T16' }),
+                res({ id: 2, start_at: 130, end_at: 200, channel: 'T21' }),
+            ],
+            GR1,
+            MARGINS,
+        );
+        expect(accepted).toHaveLength(2);
+    });
+});

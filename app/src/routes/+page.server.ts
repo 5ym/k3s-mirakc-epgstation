@@ -28,7 +28,7 @@ export async function load({ url }) {
     );
 
     const states = showFinished
-        ? "('scheduled','conflict','recording','done','failed','canceled')"
+        ? "('scheduled','conflict','recording','done','failed','canceled','missed')"
         : "('scheduled','conflict','recording')";
     const reservations = queryAll<ReservationRow>(
         `SELECT r.*, s.name AS service_name, rules.name AS rule_name

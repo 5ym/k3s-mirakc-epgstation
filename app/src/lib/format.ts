@@ -61,6 +61,7 @@ export const STATE_LABEL: Record<string, string> = {
     done: '完了',
     failed: '失敗',
     canceled: 'キャンセル',
+    missed: '録り逃し',
     recorded: '録画済み',
     encoding: 'エンコード中',
     available: '視聴可能',

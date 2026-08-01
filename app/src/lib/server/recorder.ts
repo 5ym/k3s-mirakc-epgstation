@@ -1,6 +1,8 @@
-import { mkdirSync, statSync } from 'node:fs';
+import { once } from 'node:events';
+import { createWriteStream, mkdirSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { Program, Recording, Reservation, Service } from '../types';
+import { config } from './config';
 import { database, now, queryOne } from './db';
 import { enqueue } from './encoder';
 import { emit } from './events';
@@ -124,20 +126,51 @@ export async function startRecording(reservation: Reservation): Promise<Recordin
     return recording;
 }
 
+/**
+ * チューナーが空くのを少し待つ。
+ *
+ * 前の番組の録画が終わってから Mirakurun がチューナーを手放すまでには間があり、
+ * 直後に始まる番組がそこで弾かれることがある。番組の頭を数秒落としてでも
+ * 録れたほうがいいので、すぐには諦めない。
+ */
+const OPEN_RETRIES = 5;
+const OPEN_RETRY_WAIT = 2000;
+
+async function openWithRetry(serviceId: number, signal: AbortSignal): Promise<ReadableStream<Uint8Array>> {
+    let last: unknown;
+    for (let attempt = 0; attempt < OPEN_RETRIES; attempt++) {
+        if (signal.aborted) throw new Error('録画が中止されました');
+        try {
+            return await openServiceStream(serviceId, signal);
+        } catch (error) {
+            last = error;
+            if (attempt < OPEN_RETRIES - 1) {
+                await new Promise((resolve) => setTimeout(resolve, OPEN_RETRY_WAIT));
+            }
+        }
+    }
+    throw new Error(`チューナーを ${OPEN_RETRIES} 回試して掴めませんでした: ${last}`);
+}
+
 async function pump(recording: Recording, controller: AbortController): Promise<void> {
     const path = recording.ts_path!;
     mkdirSync(dirname(path), { recursive: true });
 
     let written = 0;
     try {
-        const stream = await openServiceStream(recording.service_id, controller.signal);
-        const sink = Bun.file(path).writer();
+        const stream = await openWithRetry(recording.service_id, controller.signal);
+        // 追記で開く。再起動をまたいで録画を再開したときに、それまでの分を消さないため
+        // (MPEG-TS は 188 バイトのパケットの並びなので、そのまま繋げても読める)
+        const sink = createWriteStream(path, { flags: 'a' });
         try {
             for await (const chunk of chunks(stream)) {
-                written += await sink.write(chunk);
+                written += chunk.byteLength;
+                if (!sink.write(chunk)) await once(sink, 'drain');
             }
         } finally {
-            await sink.end();
+            await new Promise<void>((resolve, reject) => {
+                sink.end((error?: Error | null) => (error ? reject(error) : resolve()));
+            });
         }
     } catch (error) {
         // 終了時刻に達して自分で abort した場合は正常終了。それ以外だけ失敗にする
@@ -212,15 +245,37 @@ export function finish(recordingId: number, size: number): void {
 }
 
 /**
- * プロセスが落ちた時点で録画中だった行を失敗に倒す。
- * AbortController はメモリ上にしか無いため、再起動後に再開はできない。
+ * プロセスが落ちた時点で録画中だった行を拾い直す。
+ *
+ * AbortController はメモリ上にしか無いので、再起動すると録画は止まったままになる。
+ * まだ放送中のものは録り直しに行く。生TSは追記で開くので、落ちるまでに録れていた分は
+ * そのまま残り、抜けるのは止まっていた間だけになる。
+ * 放送が終わってしまったものは、もう取り返せないので失敗に倒す。
  */
-export function failOrphanedRecordings(): number {
-    const orphans = database().prepare(`SELECT id FROM recordings WHERE state = 'recording'`).all() as {
-        id: number;
-    }[];
+export function recoverOrphanedRecordings(): { resumed: number; failed: number } {
+    const orphans = database()
+        .prepare(`SELECT * FROM recordings WHERE state = 'recording'`)
+        .all() as Recording[];
+
+    let resumed = 0;
+    let failed = 0;
+    const at = now();
     for (const orphan of orphans) {
-        fail(orphan.id, 'アプリの再起動により録画が中断されました');
+        if (orphan.ts_path === null || orphan.end_at + config.endMargin <= at) {
+            fail(orphan.id, 'アプリの再起動により録画が中断されました');
+            failed++;
+            continue;
+        }
+
+        const controller = new AbortController();
+        active.set(orphan.id, controller);
+        void pump(orphan, controller).catch((error) => {
+            active.delete(orphan.id);
+            fail(orphan.id, String(error));
+        });
+        console.log(`[boot] 録画を再開: ${orphan.name} (${orphan.service_name})`);
+        resumed++;
     }
-    return orphans.length;
+    if (resumed > 0) emit('recordings');
+    return { resumed, failed };
 }

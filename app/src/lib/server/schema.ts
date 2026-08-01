@@ -122,7 +122,8 @@ CREATE TABLE IF NOT EXISTS reservations (
     -- off / chapter / cut
     cm_cut TEXT NOT NULL DEFAULT 'chapter',
     codec TEXT NOT NULL DEFAULT 'av1',
-    -- scheduled | conflict | recording | done | failed | canceled
+    -- scheduled | conflict | recording | done | failed | canceled | missed
+    -- missed = 始まらないまま放送が終わったもの(アプリが止まっていた等)
     state TEXT NOT NULL DEFAULT 'scheduled',
     conflict_reason TEXT,
     created_at INTEGER NOT NULL,

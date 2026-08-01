@@ -45,7 +45,12 @@ export async function resolveConflicts(): Promise<{ accepted: number; rejected: 
         )
         .all(now()) as Candidate[];
 
-    const { accepted, rejected } = assign(candidates, capacity);
+    // 前後のマージンぶんチューナーを掴む時間は延びる。予約表と実行時のズレを無くすため
+    // 同じ物差しで数える
+    const { accepted, rejected } = assign(candidates, capacity, {
+        start: config.startMargin,
+        end: config.endMargin,
+    });
 
     const at = now();
     const toScheduled = database().prepare(
@@ -73,6 +78,24 @@ export async function resolveConflicts(): Promise<{ accepted: number; rejected: 
 export async function tick(): Promise<void> {
     const at = now();
 
+    // 止めるほうを先にやる。次の番組が始まるときに前の録画がまだチューナーを
+    // 掴んでいると、本数が足りない環境で後続が丸ごと録れない
+    for (const id of activeRecordingIds()) {
+        const rec = queryOne<{ end_at: number }>('SELECT end_at FROM recordings WHERE id = ?', id);
+        if (rec === undefined) continue;
+        if (at >= rec.end_at + config.endMargin) stopRecording(id);
+    }
+
+    // 始まらないまま終わってしまった予約を片付ける。
+    // アプリが止まっていた間に放送が終わったものがここに残り続けていた
+    const expired = database()
+        .prepare(
+            `UPDATE reservations SET state = 'missed', updated_at = ?
+             WHERE state IN ('scheduled', 'conflict') AND end_at <= ?`,
+        )
+        .run(at, at);
+    if (expired.changes > 0) emit('reservations');
+
     const due = database()
         .prepare(
             `SELECT * FROM reservations
@@ -89,12 +112,5 @@ export async function tick(): Promise<void> {
             .run(at, reservation.id);
         if (claimed.changes === 0) continue;
         await startRecording(reservation);
-    }
-
-    // 終了時刻 + マージンを過ぎた録画を止める
-    for (const id of activeRecordingIds()) {
-        const rec = queryOne<{ end_at: number }>('SELECT end_at FROM recordings WHERE id = ?', id);
-        if (rec === undefined) continue;
-        if (at >= rec.end_at + config.endMargin) stopRecording(id);
     }
 }

@@ -72,8 +72,8 @@ export async function openServiceStream(
     const res = await fetch(url, {
         signal,
         headers: {
-            // 録画は2、ライブ視聴は0。チューナーが足りなくなったら Mirakurun が
-            // 優先度の低い視聴側を切り、録画を通す
+            // 録画は2。チューナーが足りなくなったら Mirakurun が
+            // 優先度の低いものを切り、録画を通す
             'X-Mirakurun-Priority': String(priority),
         },
     });

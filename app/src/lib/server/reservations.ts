@@ -21,6 +21,8 @@ export async function reserve(
     if (program === undefined) throw new Error(`番組 ${programId} が見つかりません`);
 
     const at = now();
+    // 終わった番組を予約しても録れない。予約表に並べても取り消す手間が増えるだけ
+    if (program.end_at <= at) throw new Error('この番組は放送が終わっています');
     const priority = options.priority ?? 3;
     const encode = options.encode === false ? 0 : 1;
     const keepOriginal = options.keepOriginal === true ? 1 : 0;

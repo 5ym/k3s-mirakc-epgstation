@@ -4,7 +4,7 @@ import { now, queryOne } from './db';
 import { pump, requeueOrphanedJobs } from './encoder';
 import { sync } from './epg';
 import * as jellyfin from './jellyfin';
-import { failOrphanedRecordings } from './recorder';
+import { recoverOrphanedRecordings } from './recorder';
 import { tick } from './scheduler';
 
 let started = false;
@@ -48,11 +48,12 @@ export function start(): void {
     mkdirSync(config.recordedDir, { recursive: true });
     mkdirSync(config.libraryDir, { recursive: true });
 
-    const orphanedRecordings = failOrphanedRecordings();
+    const recovered = recoverOrphanedRecordings();
     const orphanedJobs = requeueOrphanedJobs();
-    if (orphanedRecordings > 0 || orphanedJobs > 0) {
+    if (recovered.resumed > 0 || recovered.failed > 0 || orphanedJobs > 0) {
         console.log(
-            `[boot] 前回の異常終了を回収: 録画 ${orphanedRecordings} 件を失敗扱い / エンコード ${orphanedJobs} 件を再投入`,
+            `[boot] 前回の異常終了を回収: 録画 ${recovered.resumed} 件を再開 / ` +
+                `${recovered.failed} 件を失敗扱い / エンコード ${orphanedJobs} 件を再投入`,
         );
     }
     lastLibraryRefresh = now();
@@ -86,14 +87,13 @@ export function start(): void {
 export function stop(): void {
     for (const timer of timers) clearInterval(timer);
     timers.length = 0;
-    // 配信中の ffmpeg を道連れにする。放っておくと孤児プロセスがチューナーを掴み続ける
     started = false;
 }
 
 /**
  * Pod の入れ替えなどで止められたときの後始末。
  * 録画中のファイルはここでは触らない(書けたところまでは残す)。次の起動で
- * failOrphanedRecordings が拾って失敗扱いにする。
+ * recoverOrphanedRecordings が拾い、まだ放送中なら続きから録り直す。
  */
 function installShutdownHooks(): void {
     for (const signal of ['SIGTERM', 'SIGINT'] as const) {

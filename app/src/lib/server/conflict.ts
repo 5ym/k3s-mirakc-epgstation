@@ -19,8 +19,29 @@ export interface AssignResult<T extends Assignable> {
     rejected: { reservation: T; reason: string }[];
 }
 
-function overlaps(a: Assignable, b: Assignable): boolean {
-    return a.start_at < b.end_at && b.start_at < a.end_at;
+/**
+ * 実際にチューナーを掴んでいる区間。
+ *
+ * 番組の時刻そのままで数えると、22:00 終了と 22:00 開始の予約が「重ならない」ことに
+ * なってしまう。実際には前の録画は終了マージンぶん伸び、次の録画は開始マージンぶん
+ * 早く始まるので、その間チューナーは2本要る。ここを見落とすと予約表では通っているのに
+ * 実行時に「チューナーが空かない」で録り逃す。
+ */
+function window(a: Assignable, margins: Margins) {
+    return { from: a.start_at - margins.start, to: a.end_at + margins.end };
+}
+
+export interface Margins {
+    /** 開始何ms前から録り始めるか */
+    start: number;
+    /** 終了何ms後まで録り続けるか */
+    end: number;
+}
+
+function overlaps(a: Assignable, b: Assignable, margins: Margins): boolean {
+    const x = window(a, margins);
+    const y = window(b, margins);
+    return x.from < y.to && y.from < x.to;
 }
 
 /**
@@ -33,6 +54,7 @@ function overlaps(a: Assignable, b: Assignable): boolean {
 export function assign<T extends Assignable>(
     candidates: T[],
     capacity: Map<string, number>,
+    margins: Margins = { start: 0, end: 0 },
 ): AssignResult<T> {
     const ordered = [...candidates].sort(
         (a, b) => b.priority - a.priority || a.start_at - b.start_at || a.id - b.id,
@@ -48,17 +70,19 @@ export function assign<T extends Assignable>(
             continue;
         }
 
-        const rivals = accepted.filter((a) => a.type === candidate.type && overlaps(a, candidate));
+        const rivals = accepted.filter((a) => a.type === candidate.type && overlaps(a, candidate, margins));
+        const mine = window(candidate, margins);
         // 同時本数の最大値は必ずどれかの区間の開始時点で現れるので、そこだけ調べれば足りる
-        const instants = [candidate.start_at, ...rivals.map((r) => r.start_at)].filter(
-            (t) => t >= candidate.start_at && t < candidate.end_at,
+        const instants = [mine.from, ...rivals.map((r) => window(r, margins).from)].filter(
+            (t) => t >= mine.from && t < mine.to,
         );
 
         let worst = 0;
         for (const t of instants) {
             const channels = new Set([candidate.channel]);
             for (const rival of rivals) {
-                if (rival.start_at <= t && t < rival.end_at) channels.add(rival.channel);
+                const other = window(rival, margins);
+                if (other.from <= t && t < other.to) channels.add(rival.channel);
             }
             worst = Math.max(worst, channels.size);
         }
