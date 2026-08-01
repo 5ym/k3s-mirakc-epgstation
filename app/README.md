@@ -11,8 +11,8 @@ Mirakurun から EPG と TS を受け取り、予約・録画・エンコード�
 | --- | --- |
 | `src/lib/server/mirakurun.ts` | Mirakurun の API クライアント |
 | `src/lib/server/epg.ts` | 番組表の取り込みと予約時刻の追従 |
-| `src/lib/server/settings.ts` | 画面から変えられる設定 (環境変数を初期値にDBで上書き) |
-| `src/lib/server/rules.ts` | キーワードルールから予約を作る |
+| `src/lib/server/rules.ts` | ルール(キーワード/チャンネル/ジャンル)から予約を作る |
+| `src/lib/server/reservations.ts` | 手動予約と取り消し |
 | `src/lib/server/conflict.ts` | チューナー割り当てと競合判定 (純粋関数) |
 | `src/lib/server/scheduler.ts` | 予約 → 録画の状態遷移 |
 | `src/lib/server/recorder.ts` | TS の受信とファイル書き出し |
@@ -22,10 +22,16 @@ Mirakurun から EPG と TS を受け取り、予約・録画・エンコード�
 | `src/lib/play.ts` | 外部プレイヤーを開くURLの組み立て |
 | `src/lib/server/library.ts` | ライブラリ内のファイル配置 |
 | `src/lib/server/metadata.ts` | .nfo とサムネイル (Kodi など向け) |
-| `src/lib/server/files.ts` | 録画の削除と、ライブラリの実体とDBの突き合わせ |
+| `src/lib/server/files.ts` | 録画の削除と、実体とDBの突き合わせ |
+| `src/lib/server/serve.ts` | ファイルの配信 (Range 対応) |
+| `src/lib/server/dav.ts` | WebDAV (Kodi 向け) |
+| `src/lib/server/auth.ts` | ベーシック認証 |
+| `src/lib/server/migrate.ts` | EPGStation からの引き継ぎ |
 | `src/lib/server/events.ts` | 画面へ変化を知らせる (SSE。ポーリングの代わり) |
 | `src/lib/server/webhook.ts` | 録画の節目を外部へ通知する |
 | `src/lib/server/runtime.ts` | 常駐処理の起動 (hooks.server.ts から呼ばれる) |
+| `src/lib/server/config.ts` | 環境変数 |
+| `src/lib/server/db.ts` / `schema.ts` | SQLite と スキーマ |
 
 ## 状態遷移
 
@@ -63,6 +69,7 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 | `ENCODE_CONCURRENCY` | `1` | 録画エンコードの同時実行数。ライブ配信の本数とは無関係 |
 | `ENCODE_CODEC` | `av1` | 録画の既定コーデック (`av1` / `h264`) |
 | `ENCODE_H264_PRESET` / `ENCODE_H264_CRF` | `medium` / `22` | H.264 のときの品質 |
+| `ENCODE_RETRY_SEEK` | `0.2` | 頭が壊れていて失敗したとき、捨てて再試行する秒数 |
 | `START_MARGIN` / `END_MARGIN` | `10000` / `15000` | 録画の前後マージン(ms) |
 | `EPG_SYNC_INTERVAL` | `600000` | EPG取得の間隔(ms) |
 | `SCHEDULER_TICK` | `5000` | 予約チェックの間隔(ms) |
@@ -73,6 +80,10 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 | `CM_TOLERANCE` | `0.6` | 「15秒の倍数」判定の許容誤差(秒) |
 | `CM_MIN_BLOCK` | `30` | CMブロックとして採用する最短の長さ(秒) |
 | `CM_JLS_COMMAND` | `/opt/jls/JoinLogoScpTrial.sh {input}` | jls検出器の起動コマンド |
+| `CM_JLS_OUTPUT_DIR` | (空) | jls が avs を吐く場所。空なら入力と同じ場所と標準出力から探す |
+| `CM_JLS_FALLBACK_FPS` | `29.97` | fps を取れなかったときに使う値 |
+| `CM_DETECT_TIMEOUT` | `1800000` | CM検出を打ち切るまで(ms) |
+| `PROGRAM_RETENTION` | `86400000` | 終わった番組をDBに残す期間(ms) |
 | `DENPA_AUTOSTART` | `1` | `0` で常駐処理を止める |
 
 ## 画面

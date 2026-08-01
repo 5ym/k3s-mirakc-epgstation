@@ -26,7 +26,7 @@ export function removeIfExists(path: string | null | undefined): boolean {
 
 /**
  * ファイルを消した後に空になったシリーズ/シーズンのフォルダを畳む。
- * 残しておくと Jellyfin に中身の無いシリーズが並び続けるため。
+ * 残しておくと、フォルダを辿るプレイヤーに中身の無いシリーズが並び続けるため。
  * libraryDir 自身より上には絶対に遡らない。
  */
 export function pruneEmptyDirs(path: string): void {

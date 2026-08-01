@@ -63,7 +63,7 @@ describe('episodeNfo', () => {
     test('XMLで意味を持つ文字をエスケープする', () => {
         const nfo = episodeNfo(recording({ description: 'A&B <特番> "生放送"' }));
         expect(nfo).toContain('<plot>A&amp;B &lt;特番&gt; &quot;生放送&quot;</plot>');
-        // エスケープ漏れがあると Jellyfin がNFOごと読み飛ばす
+        // エスケープ漏れがあると、NFO を読むプレイヤーがファイルごと読み飛ばす
         expect(nfo).not.toContain('<特番>');
     });
 

@@ -7,11 +7,11 @@ import { removeIfExists } from './fsx';
 /**
  * メタデータ(NFO)とサムネイルを、動画の隣にサイドカーとして置く。
  *
- * 日本の放送番組は TheTVDB / TMDB に載っていないものがほとんどで、Jellyfin の
+ * 日本の放送番組は TheTVDB / TMDB に載っていないものがほとんどで、
  * インターネット取得に任せるとタイトルだけの一覧になってしまう。番組名・概要・
  * 放送日・放送局は EPG から取れているので、こちらから書いて渡す。
  *
- * Jellyfin 側ではライブラリの設定で NFO のメタデータ保存/読み込みを有効にし、
+ * Kodi など NFO を読むプレイヤーでは、これがそのまま番組情報として使われる。
  * インターネットのメタデータ取得は切っておくと、ここで書いた内容が上書きされない。
  */
 
@@ -59,7 +59,7 @@ export function episodeNfo(recording: Recording): string {
     return lines.join('\n');
 }
 
-/** シリーズのNFO。フォルダ名そのままだと Jellyfin が英題を探しに行くので明示する */
+/** シリーズのNFO。フォルダ名だけだとプレイヤーが英題を探しに行くので明示する */
 export function tvshowNfo(recording: Recording): string {
     return [
         '<?xml version="1.0" encoding="utf-8" standalone="yes"?>',
@@ -114,7 +114,7 @@ export function writeNfo(recording: Recording, videoPath: string): void {
     if (!existsSync(showNfo)) writeFileSync(showNfo, tvshowNfo(recording));
 }
 
-/** 動画と一緒に消す。取り残すと Jellyfin に幽霊のエピソードが残る */
+/** 動画と一緒に消す。取り残すと幽霊のエピソードが残る */
 export function removeSidecars(videoPath: string | null): void {
     if (videoPath === null || videoPath === '') return;
     const { nfo, thumbnail } = sidecarPaths(videoPath);

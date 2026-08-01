@@ -157,7 +157,7 @@ export function keepRanges(cm: Range[], duration: number): Range[] {
 
 /**
  * ffmetadata 形式のチャプター定義。本編とCMを交互のチャプターにして、
- * Jellyfin のチャプター送りでCMを飛ばせるようにする(ファイルは切らない)。
+ * プレイヤーのチャプター送りでCMを飛ばせるようにする(ファイルは切らない)。
  */
 export function chapterMetadata(cm: Range[], duration: number): string {
     const keep = keepRanges(cm, duration);

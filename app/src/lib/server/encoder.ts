@@ -523,7 +523,7 @@ async function runJob(jobId: number): Promise<void> {
         // 取れなくても致命的ではない
     }
 
-    // Jellyfin に番組名・概要・放送日・サムネイルを渡す。動画を置いた直後に作る
+    // 番組名・概要・放送日・サムネイルをサイドカーに書く。動画を置いた直後に作る
     writeNfo(recording, output);
     await writeThumbnail(output, (recording.end_at - recording.start_at) / 1000);
 
