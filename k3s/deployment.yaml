@@ -108,7 +108,7 @@ spec:
     spec:
       containers:
         - name: denpa
-          image: ghcr.io/danything/denpa:sha-1d45ee205176
+          image: ghcr.io/danything/denpa:sha-e26eaea6f938
           imagePullPolicy: IfNotPresent
           env:
             - name: TZ
