@@ -2,6 +2,7 @@ import type { Reservation } from '../types';
 import { config } from './config';
 import { assign } from './conflict';
 import { database, now, queryOne } from './db';
+import { emit } from './events';
 import * as mirakurun from './mirakurun';
 import { activeRecordingIds, startRecording, stopRecording } from './recorder';
 
@@ -60,6 +61,7 @@ export async function resolveConflicts(): Promise<{ accepted: number; rejected: 
         for (const r of rejected) toConflict.run(r.reason, at, r.reservation.id);
     });
     tx();
+    emit('reservations');
 
     return { accepted: accepted.length, rejected: rejected.length };
 }

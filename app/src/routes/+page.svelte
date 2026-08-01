@@ -1,17 +1,12 @@
 <script lang="ts">
-    import { invalidateAll } from '$app/navigation';
     import { submitting } from '$lib/actions';
+    import { liveUpdates } from '$lib/live-updates.svelte';
     import { badgeClass, dateTime, duration, size, stateLabel } from '$lib/format';
 
     let { data, form } = $props();
 
-    // 録画中や配信中はその場で状態が変わるので、その間だけ読み直す
-    const polling = $derived(data.recording.length > 0 || data.live.length > 0);
-    $effect(() => {
-        if (!polling) return;
-        const timer = setInterval(() => void invalidateAll(), 5000);
-        return () => clearInterval(timer);
-    });
+    // 録画・予約・配信のいずれかが動いたらサーバが知らせてくる
+    liveUpdates(['recordings', 'reservations', 'live']);
 
     const active = ['scheduled', 'conflict', 'recording'];
 </script>

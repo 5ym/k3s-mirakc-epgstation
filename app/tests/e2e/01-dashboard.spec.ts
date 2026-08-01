@@ -107,4 +107,25 @@ test.describe('ダッシュボードと画面遷移', () => {
         await expect(button).toBeEnabled();
         await expect(page.getByTestId('loading-bar')).not.toHaveAttribute('data-loading', 'true');
     });
+
+    test('サーバ側の変化が通知で届く', async ({ page, request }) => {
+        await goto(page, '/');
+
+        // 受け取ったイベントを溜める。ポーリングではなく push で届くことを確かめる
+        await page.evaluate(() => {
+            const seen: string[] = [];
+            (window as unknown as { seen: string[] }).seen = seen;
+            const source = new EventSource('/api/events');
+            for (const name of ['recordings', 'reservations', 'live']) {
+                source.addEventListener(name, () => seen.push(name));
+            }
+        });
+
+        // 予約の競合を計算し直すと reservations が飛ぶ
+        await page.getByRole('button', { name: '競合を再計算' }).click();
+
+        await expect
+            .poll(async () => await page.evaluate(() => (window as unknown as { seen: string[] }).seen))
+            .toContain('reservations');
+    });
 });

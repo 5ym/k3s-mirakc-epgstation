@@ -60,7 +60,7 @@
 </svelte:head>
 
 <div class="min-h-screen bg-base-200" data-hydrated={hydrated ? 'true' : undefined}>
-    <div class="navbar bg-base-100 relative shadow-sm">
+    <div class="navbar bg-base-100 sticky top-0 z-40 shadow-sm">
         <div class="flex-1">
             <a class="btn btn-ghost text-xl" href="/">denpa</a>
         </div>
@@ -95,12 +95,12 @@
             無反応に見えると二度押しされる。ヘッダーの下端に重ねて、隙間ができないようにする
         -->
         <div
-            class="absolute inset-x-0 bottom-0 h-1"
+            class="absolute inset-x-0 -bottom-1 h-1 leading-none"
             data-testid="loading-bar"
             data-loading={navigating.to || busy.active ? 'true' : undefined}
         >
             {#if navigating.to || busy.active}
-                <progress class="progress progress-primary h-1 w-full rounded-none"></progress>
+                <progress class="progress progress-primary block h-1 w-full rounded-none"></progress>
             {/if}
         </div>
     </div>

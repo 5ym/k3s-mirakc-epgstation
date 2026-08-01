@@ -3,6 +3,7 @@ import { dirname } from 'node:path';
 import type { Program, Recording, Reservation, Service } from '../types';
 import { database, now, queryOne } from './db';
 import { enqueue } from './encoder';
+import { emit } from './events';
 import { moveFile } from './fsx';
 import { libraryPath, recordedPath } from './library';
 import { writeNfo, writeThumbnail } from './metadata';
@@ -88,6 +89,7 @@ export function createRecording(reservation: Reservation): Recording {
  */
 export async function startRecording(reservation: Reservation): Promise<Recording> {
     const recording = createRecording(reservation);
+    emit('recordings');
     const controller = new AbortController();
     active.set(recording.id, controller);
 
@@ -162,6 +164,7 @@ export function finish(recordingId: number, size: number): void {
                   recording.reservation_id,
               );
 
+    emit('recordings');
     if (reservation === undefined || reservation.encode) {
         enqueue(recording.id);
         return;

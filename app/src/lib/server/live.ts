@@ -1,6 +1,7 @@
 import type { Service } from '../types';
 import { config } from './config';
 import { queryOne } from './db';
+import { emit } from './events';
 import { openServiceStream } from './mirakurun';
 
 /**
@@ -294,8 +295,10 @@ export async function start(
         } catch {
             // 既に終わっていれば何もしない
         }
+        emit('live');
     };
     active.set(id, { session, stop });
+    emit('live');
 
     return {
         stream: tracked(proc.stdout as ReadableStream<Uint8Array>, session, stop),

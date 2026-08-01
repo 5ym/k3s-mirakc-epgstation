@@ -1,6 +1,6 @@
 <script lang="ts">
     import { submitting } from '$lib/actions';
-    import { invalidateAll } from '$app/navigation';
+    import { liveUpdates } from '$lib/live-updates.svelte';
     import {
         badgeClass,
         CM_LABEL,
@@ -14,14 +14,8 @@
 
     let { data, form } = $props();
 
-    // 動いているジョブがある間は定期的に読み直す。
-    // running だけを見ていると、待機中しか無いときに動き出しても気づけない
-    const polling = $derived(data.jobs.some((job) => job.state === 'running' || job.state === 'queued'));
-    $effect(() => {
-        if (!polling) return;
-        const timer = setInterval(() => void invalidateAll(), 3000);
-        return () => clearInterval(timer);
-    });
+    // サーバから通知が来たら読み直す
+    liveUpdates(['recordings']);
 </script>
 
 <div class="mb-4 flex items-center justify-between">

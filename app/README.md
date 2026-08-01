@@ -24,6 +24,7 @@ Mirakurun から EPG と TS を受け取り、予約・録画・エンコード�
 | `src/lib/server/library.ts` | Jellyfin 向けのファイル配置 |
 | `src/lib/server/metadata.ts` | Jellyfin 向けの .nfo とサムネイル |
 | `src/lib/server/jellyfin.ts` | ライブラリの実体とDBの突き合わせ |
+| `src/lib/server/events.ts` | 画面へ変化を知らせる (SSE。ポーリングの代わり) |
 | `src/lib/server/runtime.ts` | 常駐処理の起動 (hooks.server.ts から呼ばれる) |
 
 ## 状態遷移

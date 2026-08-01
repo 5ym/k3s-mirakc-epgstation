@@ -4,6 +4,7 @@ import type { EncodeJob, Recording, VideoCodec } from '../types';
 import { type CmDetection, chapterMetadata, detectCm, keepRanges, type Range, selectExpression } from './cm';
 import { config } from './config';
 import { database, now, queryOne } from './db';
+import { emit } from './events';
 import { removeIfExists } from './fsx';
 import { libraryPath } from './library';
 import { removeSidecars, writeNfo, writeThumbnail } from './metadata';
@@ -441,6 +442,7 @@ async function runJob(jobId: number): Promise<void> {
         database()
             .prepare(`UPDATE encode_jobs SET state = 'failed', error = ?, finished_at = ? WHERE id = ?`)
             .run(result.stderrTail, now(), jobId);
+        emit('recordings');
         database()
             .prepare(`UPDATE recordings SET state = 'failed', error = ?, updated_at = ? WHERE id = ?`)
             .run('エンコードに失敗しました', now(), recording.id);
@@ -461,6 +463,7 @@ async function runJob(jobId: number): Promise<void> {
     database()
         .prepare(`UPDATE encode_jobs SET state = 'done', percent = 1, finished_at = ? WHERE id = ?`)
         .run(now(), jobId);
+    emit('recordings');
 
     if (recording.keep_original) {
         database()
