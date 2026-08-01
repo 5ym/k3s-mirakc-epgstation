@@ -397,7 +397,15 @@
                         {stateLabel(selected.reservation_state)}
                     </span>
                 {:else}
-                    <form method="POST" action="?/reserve" use:submitting>
+                    <form
+                        method="POST"
+                        action="?/reserve"
+                        use:submitting={() =>
+                            async ({ update }) => {
+                                await update();
+                                selected = null;
+                            }}
+                    >
                         <input type="hidden" name="programId" value={selected.id} />
                         <button class="btn btn-primary" data-testid="detail-reserve">予約する</button>
                     </form>

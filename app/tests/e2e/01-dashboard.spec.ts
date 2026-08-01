@@ -42,9 +42,7 @@ test.describe('ダッシュボードと画面遷移', () => {
 
         // いまが何時かの線が出て、開いた時点でそこまでスクロールされている
         await expect(page.getByTestId('now-line')).toBeVisible();
-        const scrolled = await page
-            .getByTestId('guide-grid')
-            .evaluate((el) => (el as HTMLElement).scrollTop);
+        const scrolled = await page.getByTestId('guide-grid').evaluate((el) => (el as HTMLElement).scrollTop);
         expect(scrolled).toBeGreaterThan(0);
 
         // 番組をクリックすると詳細が出る。ここで予約するかどうか決める
