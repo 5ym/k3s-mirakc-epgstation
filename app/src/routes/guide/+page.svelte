@@ -29,6 +29,34 @@
     const SLOT = 5 * 60 * 1000;
 
     const slots = $derived((data.hours * HOUR) / SLOT);
+
+    /** いま何時か。番組表に現在位置の線を出すため、1分ごとに進める */
+    let clock = $state(Date.now());
+    $effect(() => {
+        const timer = setInterval(() => (clock = Date.now()), 60_000);
+        return () => clearInterval(timer);
+    });
+
+    /** 表示中の日にいまが含まれていれば、その行 */
+    const nowRow = $derived(
+        clock >= data.start && clock < data.start + data.hours * HOUR
+            ? Math.floor((clock - data.start) / SLOT) + 2
+            : null,
+    );
+
+    let grid = $state<HTMLElement | null>(null);
+    let nowMark = $state<HTMLElement | null>(null);
+
+    // 開いたときに「いま」が見えている状態にする。24時間ぶん出るので、
+    // 先頭(4:00)のままだと毎回スクロールさせることになる
+    let scrolled = false;
+    $effect(() => {
+        if (scrolled || grid === null || nowMark === null) return;
+        scrolled = true;
+        // ヘッダー行のぶんだけ残して、いまを上に持ってくる
+        grid.scrollTop = Math.max(0, nowMark.offsetTop - 48);
+    });
+
     const end = $derived(data.start + data.hours * HOUR);
 
     /** 何行目から何行分か。ヘッダーが1行目なので +2 */
@@ -62,24 +90,24 @@
 
 <div class="mb-4 flex flex-wrap items-center justify-between gap-2">
     <h1 class="text-2xl font-bold">番組表</h1>
-    <form method="GET" class="flex flex-wrap items-end gap-2" data-testid="guide-filter">
-        <input type="hidden" name="type" value={data.type} />
-        <label class="flex flex-col gap-1">
-            <span class="text-sm font-medium">キーワード</span>
-            <input
-                type="search"
-                name="q"
-                value={data.keyword}
-                placeholder="全チャンネルから探す"
-                class="input input-bordered"
-                data-testid="filter-keyword"
-            />
-        </label>
-        <button class="btn btn-primary" type="submit">検索</button>
-        {#if data.mode === 'list'}
-            <a class="btn" href={href({})} data-testid="clear-keyword">番組表に戻る</a>
-        {/if}
-    </form>
+    {#if data.mode === 'grid'}
+        <form method="GET" class="flex flex-wrap items-end gap-2" data-testid="guide-filter">
+            <input type="hidden" name="type" value={data.type} />
+            <label class="flex flex-col gap-1">
+                <span class="text-sm font-medium">キーワード</span>
+                <input
+                    type="search"
+                    name="q"
+                    placeholder="全チャンネルから探す"
+                    class="input input-bordered"
+                    data-testid="filter-keyword"
+                />
+            </label>
+            <button class="btn btn-primary" type="submit">検索</button>
+        </form>
+    {:else}
+        <a class="btn" href={href({})} data-testid="clear-keyword">番組表に戻る</a>
+    {/if}
 </div>
 
 {#if form?.message}
@@ -122,6 +150,7 @@
         <div
             class="rounded-box bg-base-100 max-h-[75vh] cursor-grab overflow-auto shadow active:cursor-grabbing"
             use:dragScroll
+            bind:this={grid}
             data-testid="guide-grid"
         >
             <div
@@ -159,6 +188,21 @@
                     </div>
                 {/each}
 
+                {#if nowRow !== null}
+                    <div
+                        class="border-error pointer-events-none relative z-10 border-t-2"
+                        style="grid-column: 1 / -1; grid-row: {nowRow};"
+                        bind:this={nowMark}
+                        data-testid="now-line"
+                    >
+                        <span
+                            class="bg-error text-error-content absolute -top-2 left-0 rounded px-1 text-[10px] leading-4"
+                        >
+                            {time(clock)}
+                        </span>
+                    </div>
+                {/if}
+
                 {#each data.programs as program (program.id)}
                     {@const pos = place(program)}
                     <div
@@ -178,7 +222,11 @@
                         >
                             <span class="block text-xs leading-tight font-medium">
                                 {time(program.start_at)}
-                                {program.name}
+                                {#if program.name}
+                                    {program.name}
+                                {:else}
+                                    <span class="text-base-content/40">(番組情報なし)</span>
+                                {/if}
                             </span>
                             {#if program.reservation_state}
                                 <span class="text-primary block text-xs">
@@ -199,23 +247,24 @@
     <div class="card bg-base-100 mb-4 shadow">
         <div class="card-body gap-3 p-4">
             <div class="flex flex-wrap items-center justify-between gap-2">
-                <span class="font-bold" data-testid="search-total">
-                    条件に合う番組は {data.total} 件
-                </span>
-                <form method="POST" action="?/createRule" use:submitting data-testid="to-rule">
-                    <input type="hidden" name="q" value={data.keyword} />
-                    <input type="hidden" name="exclude" value={exclude} />
-                    <input type="hidden" name="types" value={types.join(',')} />
-                    <input type="hidden" name="free" value={free ? '1' : '0'} />
-                    <button class="btn btn-sm btn-primary" data-testid="create-rule">
-                        この条件でルールを作る
-                    </button>
-                </form>
+                <span class="font-bold" data-testid="search-total">条件に合う番組は {data.total} 件</span>
             </div>
 
-            <!-- ルールと同じ条件で絞り込む。ここで見えているものが、そのまま録れるものになる -->
+            <!--
+                条件はここ1箇所で編集する。ルールと同じ判定なので、
+                ここに出ているものがそのまま録れるものになる
+            -->
             <form method="GET" class="flex flex-wrap items-end gap-3" data-testid="search-conditions">
-                <input type="hidden" name="q" value={data.keyword} />
+                <label class="flex flex-col gap-1">
+                    <span class="text-sm font-medium">キーワード</span>
+                    <input
+                        type="search"
+                        name="q"
+                        value={data.keyword}
+                        class="input input-bordered input-sm"
+                        data-testid="filter-keyword"
+                    />
+                </label>
                 <label class="flex flex-col gap-1">
                     <span class="text-sm font-medium">除外キーワード</span>
                     <input
@@ -252,7 +301,15 @@
                     />
                     <span class="text-sm">無料放送のみ</span>
                 </label>
-                <button class="btn btn-sm">絞り込む</button>
+                <button class="btn btn-sm btn-primary">絞り込む</button>
+            </form>
+
+            <form method="POST" action="?/createRule" use:submitting data-testid="to-rule">
+                <input type="hidden" name="q" value={data.keyword} />
+                <input type="hidden" name="exclude" value={exclude} />
+                <input type="hidden" name="types" value={types.join(',')} />
+                <input type="hidden" name="free" value={free ? '1' : '0'} />
+                <button class="btn btn-sm" data-testid="create-rule">この条件でルールを作る</button>
             </form>
         </div>
     </div>

@@ -108,11 +108,20 @@ export function load({ url }) {
             hours: WINDOW_HOURS,
             total: hits.length,
             programs: hits.slice(0, 300),
-            services: queryAll<Service>('SELECT * FROM services ORDER BY type, channel'),
+            services: queryAll<Service>(
+                `SELECT * FROM services
+                 ORDER BY type, remote_control_key IS NULL, remote_control_key, channel, service_id`,
+            ),
         };
     }
 
-    const services = queryAll<Service>('SELECT * FROM services WHERE type = ? ORDER BY channel', type);
+    // テレビと同じ並びにする。リモコン番号を持つのは地上波だけなので、
+    // 持たない局は物理チャンネル順で後ろに続ける
+    const services = queryAll<Service>(
+        `SELECT * FROM services WHERE type = ?
+         ORDER BY remote_control_key IS NULL, remote_control_key, channel, service_id`,
+        type,
+    );
     const programs = queryAll<GridProgram>(
         `SELECT p.*, r.state AS reservation_state
          FROM programs p
