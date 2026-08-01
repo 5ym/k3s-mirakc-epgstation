@@ -1,6 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { expect, type Page, test } from '@playwright/test';
-import { BS11 } from '../fake/services';
 import { goto, syncEpg } from './helpers';
 
 /**
@@ -35,9 +34,9 @@ test.describe('録画とエンコード', () => {
         await syncEpg(request);
 
         // BSは他のテストが触らないので、チューナー競合の心配なく録れる
-        await goto(page, `/guide?service=${BS11.id}`);
+        await goto(page, '/guide?q=BS11イレブン');
 
-        // 少し先の枠(10秒番組)を予約する。番組が終わると行がずれるのでIDで固定する
+        // 少し先の枠(10秒番組)を予約する。番組が終わると並びがずれるのでIDで固定する
         const programId = await page.getByTestId('program-row').nth(2).getAttribute('data-program-id');
         expect(programId).toBeTruthy();
         const row = page.locator(`[data-testid="program-row"][data-program-id="${programId}"]`);

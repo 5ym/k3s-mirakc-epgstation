@@ -247,6 +247,26 @@ export function parseProgressBlock(
 
 const DURATION = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/;
 
+/**
+ * 失敗の理由を stderr から拾う。
+ *
+ * 末尾をそのまま切り出すと、ARIB字幕まわりの「オプションが使われなかった」といった
+ * 警告ばかりが残って肝心の理由が見えない。エラーらしい行を優先して残す。
+ */
+export function failureReason(stderr: string): string {
+    const lines = stderr
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+    const errors = lines.filter((line) =>
+        /error|invalid|failed|no such file|permission denied|not supported|unable to|conversion failed/i.test(
+            line,
+        ),
+    );
+    const picked = errors.length > 0 ? errors : lines;
+    return picked.slice(-8).join('\n').slice(-2000);
+}
+
 async function runFfmpeg(
     job: EncodeJob,
     input: string,
@@ -316,7 +336,7 @@ async function runFfmpeg(
     const [code] = await Promise.all([proc.exited, readStdout, readStderr]);
     procs.delete(job.id);
     updateProgress.run(code === 0 ? 1 : percent, log, job.id);
-    return { code, stderrTail };
+    return { code, stderrTail: failureReason(stderrTail) };
 }
 
 /**
@@ -420,7 +440,7 @@ async function runJob(jobId: number): Promise<void> {
         removeSidecars(output);
         database()
             .prepare(`UPDATE encode_jobs SET state = 'failed', error = ?, finished_at = ? WHERE id = ?`)
-            .run(result.stderrTail.slice(-2000), now(), jobId);
+            .run(result.stderrTail, now(), jobId);
         database()
             .prepare(`UPDATE recordings SET state = 'failed', error = ?, updated_at = ? WHERE id = ?`)
             .run('エンコードに失敗しました', now(), recording.id);

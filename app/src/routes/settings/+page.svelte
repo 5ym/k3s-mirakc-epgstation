@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { enhance } from '$app/forms';
+    import { submitting } from '$lib/actions';
 
     let { data, form } = $props();
 </script>
@@ -63,7 +63,7 @@
                 {/if}
             </div>
 
-            <form method="POST" action="?/issue" use:enhance class="space-y-3">
+            <form method="POST" action="?/issue" use:submitting class="space-y-3">
                 <label class="flex flex-col gap-1">
                     <span class="text-sm font-medium">Jellyfin のURL</span>
                     <input
@@ -98,7 +98,7 @@
 
             <div class="divider text-xs">既にAPIキーがある場合</div>
 
-            <form method="POST" action="?/save" use:enhance class="space-y-3">
+            <form method="POST" action="?/save" use:submitting class="space-y-3">
                 <input type="hidden" name="jellyfinUrl" value={data.jellyfinUrl} />
                 <label class="flex flex-col gap-1">
                     <span class="text-sm font-medium">APIキーを直接貼る</span>
@@ -133,7 +133,7 @@
                     </span>
                 </li>
             </ul>
-            <form method="POST" action="?/setup" use:enhance class="mt-2">
+            <form method="POST" action="?/setup" use:submitting class="mt-2">
                 <button class="btn btn-primary" disabled={!data.enabled} data-testid="run-setup">
                     Jellyfin をセットアップ
                 </button>

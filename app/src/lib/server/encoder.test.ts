@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { buildArgs, isVideoCodec, parseProgressBlock } from './encoder';
+import { buildArgs, failureReason, isVideoCodec, parseProgressBlock } from './encoder';
 
 function argValue(args: string[], key: string): string | undefined {
     const i = args.indexOf(key);
@@ -90,5 +90,24 @@ describe('parseProgressBlock', () => {
 
     test('progress=end で必ず100%にする', () => {
         expect(parseProgressBlock({ progress: 'end', out_time_us: 'N/A' }, NaN, 0.9).percent).toBe(1);
+    });
+});
+
+describe('failureReason', () => {
+    test('警告に埋もれずエラー行を拾う', () => {
+        const stderr = [
+            '[in#0/mpegts] Codec AVOption font has not been used for any stream.',
+            'Stream mapping: Stream #0:3 -> #0:0 (mpeg2video -> av1)',
+            '[libsvtav1 @ 0x1] Error initializing the encoder',
+            'Conversion failed!',
+        ].join('\n');
+        const reason = failureReason(stderr);
+        expect(reason).toContain('Error initializing the encoder');
+        expect(reason).toContain('Conversion failed!');
+        expect(reason).not.toContain('has not been used for any stream');
+    });
+
+    test('エラー行が無ければ末尾をそのまま出す', () => {
+        expect(failureReason('a\nb\nc')).toBe('a\nb\nc');
     });
 });

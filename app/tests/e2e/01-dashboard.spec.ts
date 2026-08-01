@@ -28,13 +28,20 @@ test.describe('ダッシュボードと画面遷移', () => {
         await expect(page.getByTestId('sync-result')).toContainText('局 3');
     });
 
-    test('番組表がキーワードで絞り込める', async ({ page }) => {
+    test('番組表はグリッドで出て、キーワード検索ではリストになる', async ({ page }) => {
         await goto(page, '/guide');
-        await expect(page.getByTestId('program-row').first()).toBeVisible();
 
+        // 既定は地上波のグリッド。時間×チャンネルで並ぶ
+        await expect(page.getByTestId('guide-grid')).toBeVisible();
+        await expect(page.getByTestId('grid-program').first()).toBeVisible();
+
+        // 種別で切り替えられる
+        await page.getByTestId('type-BS').click();
+        await expect(page.getByTestId('grid-program').first()).toContainText('BS11イレブン のテスト番組');
+
+        await goto(page, '/guide');
         await page.getByTestId('filter-keyword').fill('テストアニメ');
-        await page.getByRole('button', { name: '絞り込む' }).click();
-        // GETフォームは通常のページ遷移。遷移前のDOMを読まないようURLの確定を待つ
+        await page.getByRole('button', { name: '検索' }).click();
         await page.waitForURL(/[?&]q=/);
 
         const rows = page.getByTestId('program-row');
@@ -70,5 +77,25 @@ test.describe('ダッシュボードと画面遷移', () => {
         await expect(page.getByTestId('theme-toggle')).toHaveAttribute('data-mode', 'system');
         await goto(page, '/');
         await expect(page.getByTestId('theme-toggle')).toHaveAttribute('data-mode', 'system');
+    });
+
+    test('アクション中はボタンを押せなくし、ローディングを出す', async ({ page }) => {
+        await goto(page, '/');
+
+        // EPG取得は実機だと数秒かかる。その間に二度押しできないことを確かめたいので遅らせる
+        await page.route('**/?/sync', async (route) => {
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+            await route.continue();
+        });
+
+        const button = page.getByTestId('sync-button');
+        await button.click();
+
+        await expect(button).toBeDisabled();
+        await expect(page.getByTestId('loading-bar')).toHaveAttribute('data-loading', 'true');
+
+        await expect(page.getByTestId('sync-result')).toBeVisible();
+        await expect(button).toBeEnabled();
+        await expect(page.getByTestId('loading-bar')).not.toHaveAttribute('data-loading', 'true');
     });
 });

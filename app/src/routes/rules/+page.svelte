@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { enhance } from '$app/forms';
+    import { submitting } from '$lib/actions';
     import { CM_LABEL, dateTime } from '$lib/format';
 
     let { data, form } = $props();
@@ -46,7 +46,7 @@
             条件に合う番組を、これから放送されるぶんから自動で予約します。ルール名はキーワードから付きます。
         </p>
 
-        <form method="POST" use:enhance class="mt-2 max-w-3xl space-y-5">
+        <form method="POST" use:submitting class="mt-2 max-w-3xl space-y-5">
             <div class="grid gap-4 sm:grid-cols-2">
                 <label class="flex flex-col gap-1">
                     <span class="text-sm font-medium">キーワード</span>
@@ -220,7 +220,7 @@
 </div>
 
 <div class="mb-2 flex justify-end">
-    <form method="POST" action="?/apply" use:enhance>
+    <form method="POST" action="?/apply" use:submitting>
         <button class="btn btn-sm" data-testid="rule-apply">今すぐ全ルールを適用</button>
     </form>
 </div>
@@ -260,13 +260,13 @@
                     <td>{rule.priority}</td>
                     <td>{rule.reservations}</td>
                     <td class="flex gap-2">
-                        <form method="POST" action="?/toggle" use:enhance>
+                        <form method="POST" action="?/toggle" use:submitting>
                             <input type="hidden" name="id" value={rule.id} />
                             <button class="btn btn-sm" data-testid="rule-toggle">
                                 {rule.enabled ? '無効化' : '有効化'}
                             </button>
                         </form>
-                        <form method="POST" action="?/delete" use:enhance>
+                        <form method="POST" action="?/delete" use:submitting>
                             <input type="hidden" name="id" value={rule.id} />
                             <button class="btn btn-sm btn-error btn-outline" data-testid="rule-delete">
                                 削除

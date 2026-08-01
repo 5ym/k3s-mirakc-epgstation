@@ -16,7 +16,10 @@ export function dateTime(ms: number): string {
 
 export function duration(startAt: number, endAt: number): string {
     const min = Math.round((endAt - startAt) / 60000);
-    return min >= 60 ? `${Math.floor(min / 60)}時間${min % 60}分` : `${min}分`;
+    if (min < 60) return `${min}分`;
+    const rest = min % 60;
+    // 「24時間0分」のような書き方は読みにくいので、端数が無いときは時間だけ出す
+    return rest === 0 ? `${Math.floor(min / 60)}時間` : `${Math.floor(min / 60)}時間${rest}分`;
 }
 
 export function size(bytes: number): string {

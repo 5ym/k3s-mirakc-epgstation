@@ -1,8 +1,17 @@
 <script lang="ts">
-    import { enhance } from '$app/forms';
+    import { invalidateAll } from '$app/navigation';
+    import { submitting } from '$lib/actions';
     import { badgeClass, dateTime, duration, size, stateLabel } from '$lib/format';
 
     let { data, form } = $props();
+
+    // 録画中や配信中はその場で状態が変わるので、その間だけ読み直す
+    const polling = $derived(data.recording.length > 0 || data.live.length > 0);
+    $effect(() => {
+        if (!polling) return;
+        const timer = setInterval(() => void invalidateAll(), 5000);
+        return () => clearInterval(timer);
+    });
 
     const active = ['scheduled', 'conflict', 'recording'];
 </script>
@@ -22,7 +31,7 @@
                 番組 {data.stats.programs} / 局 {data.stats.services}
             </div>
         </div>
-        <form method="POST" action="?/sync" use:enhance>
+        <form method="POST" action="?/sync" use:submitting>
             <button class="btn btn-sm" data-testid="sync-button">EPGを今すぐ取得</button>
         </form>
     </div>
@@ -140,7 +149,7 @@
                                     {dateTime(session.startedAt)} から
                                 </span>
                             </span>
-                            <form method="POST" action="?/stopLive" use:enhance>
+                            <form method="POST" action="?/stopLive" use:submitting>
                                 <input type="hidden" name="id" value={session.id} />
                                 <button class="btn btn-xs" data-testid="live-stop">切断</button>
                             </form>
@@ -159,11 +168,11 @@
             {data.showFinished ? '進行中のみ' : '完了分も表示'}
         </a>
         {#if data.jellyfin}
-            <form method="POST" action="?/importTimers" use:enhance>
+            <form method="POST" action="?/importTimers" use:submitting>
                 <button class="btn btn-sm" data-testid="import-timers">Jellyfinの録画予約を取り込む</button>
             </form>
         {/if}
-        <form method="POST" action="?/resolve" use:enhance>
+        <form method="POST" action="?/resolve" use:submitting>
             <button class="btn btn-sm">競合を再計算</button>
         </form>
     </div>
@@ -212,7 +221,7 @@
                     </td>
                     <td>
                         {#if active.includes(res.state)}
-                            <form method="POST" action="?/cancel" use:enhance>
+                            <form method="POST" action="?/cancel" use:submitting>
                                 <input type="hidden" name="id" value={res.id} />
                                 <button class="btn btn-sm btn-error btn-outline" data-testid="cancel-button">
                                     取消

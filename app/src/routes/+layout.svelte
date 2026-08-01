@@ -2,6 +2,7 @@
     import '../app.css';
     import { onMount } from 'svelte';
     import { navigating, page } from '$app/state';
+    import { busy } from '$lib/busy.svelte';
 
     let { children } = $props();
 
@@ -59,7 +60,7 @@
 </svelte:head>
 
 <div class="min-h-screen bg-base-200" data-hydrated={hydrated ? 'true' : undefined}>
-    <div class="navbar bg-base-100 shadow-sm">
+    <div class="navbar bg-base-100 relative shadow-sm">
         <div class="flex-1">
             <a class="btn btn-ghost text-xl" href="/">denpa</a>
         </div>
@@ -88,17 +89,20 @@
                 {/each}
             </ul>
         </nav>
-    </div>
 
-    <!--
-        画面遷移の待ち時間を出す。番組表やEPG取得は数秒かかることがあり、
-        無反応に見えると二度押しされる。
-        高さは常に確保しておく(出入りのたびに下の内容がずれないように)
-    -->
-    <div class="h-1" data-testid="loading-bar" data-loading={navigating.to ? 'true' : undefined}>
-        {#if navigating.to}
-            <progress class="progress progress-primary h-1 w-full rounded-none"></progress>
-        {/if}
+        <!--
+            画面遷移とフォーム送信の待ち時間を出す。番組表やEPG取得は数秒かかることがあり、
+            無反応に見えると二度押しされる。ヘッダーの下端に重ねて、隙間ができないようにする
+        -->
+        <div
+            class="absolute inset-x-0 bottom-0 h-1"
+            data-testid="loading-bar"
+            data-loading={navigating.to || busy.active ? 'true' : undefined}
+        >
+            {#if navigating.to || busy.active}
+                <progress class="progress progress-primary h-1 w-full rounded-none"></progress>
+            {/if}
+        </div>
     </div>
 
     <main class="p-4 md:p-6">
