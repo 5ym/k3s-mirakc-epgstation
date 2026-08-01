@@ -99,7 +99,8 @@
 {/if}
 
 <div class="grid gap-6 lg:grid-cols-5">
-    <section class="lg:col-span-2">
+    <!-- min-w-0 が無いと、中の表の幅にグリッドの列が引きずられてページごとはみ出す -->
+    <section class="min-w-0 lg:col-span-2">
         <div class="mb-2 flex min-h-8 flex-wrap items-center justify-between gap-2">
             <h2 class="text-lg font-bold">予約</h2>
             <div class="flex gap-2">
@@ -118,8 +119,8 @@
                     <tr>
                         <th class="whitespace-nowrap">放送日時</th>
                         <!-- 番組名は省略せずそのまま出す。余りはこの列に寄せる -->
-                        <th class="w-full min-w-48">番組</th>
-                        <th class="whitespace-nowrap">種別</th>
+                        <th class="w-full sm:min-w-48">番組</th>
+                        <th class="hidden whitespace-nowrap sm:table-cell">種別</th>
                         <th class="whitespace-nowrap">状態</th>
                         <th></th>
                     </tr>
@@ -152,7 +153,7 @@
                                     <div class="text-error text-sm">{res.conflict_reason}</div>
                                 {/if}
                             </td>
-                            <td class="text-sm">
+                            <td class="hidden text-sm sm:table-cell">
                                 <div class="whitespace-nowrap">
                                     {res.manual ? '手動' : (res.rule_name ?? 'ルール')}
                                 </div>
@@ -196,7 +197,7 @@
         </div>
     </section>
 
-    <section class="lg:col-span-3">
+    <section class="min-w-0 lg:col-span-3">
         <!-- 見出しの高さと下の余白は予約側と揃える。並べたときにずれて見えるため -->
         <div class="mb-2 flex min-h-8 flex-wrap items-center justify-between gap-2">
             <h2 class="text-lg font-bold">録画</h2>
@@ -288,8 +289,8 @@
                     <tr>
                         <th class="whitespace-nowrap">放送日時</th>
                         <!-- 番組名は省略せずそのまま出す。余りはこの列に寄せる -->
-                        <th class="w-full min-w-48">番組</th>
-                        <th class="whitespace-nowrap">サイズ</th>
+                        <th class="w-full sm:min-w-48">番組</th>
+                        <th class="hidden whitespace-nowrap sm:table-cell">サイズ</th>
                         <th class="whitespace-nowrap">状態</th>
                         <th></th>
                     </tr>
@@ -345,7 +346,7 @@
                                     </div>
                                 {/if}
                             </td>
-                            <td class="whitespace-nowrap">{size(rec.ts_size)}</td>
+                            <td class="hidden whitespace-nowrap sm:table-cell">{size(rec.ts_size)}</td>
                             <td class="whitespace-nowrap">
                                 <span
                                     class="badge whitespace-nowrap {badgeClass(rec.state)}"
@@ -354,9 +355,9 @@
                                     {stateLabel(rec.state)}
                                 </span>
                             </td>
-                            <!-- 畳ませない。番組の列に幅を寄せているので、許すとボタンが縦積みになる -->
-                            <td class="whitespace-nowrap">
-                                <div class="flex flex-nowrap items-center gap-2">
+                            <!-- 広い画面では畳ませない(縦積みになる)。狭い画面では畳ませる -->
+                            <td class="sm:whitespace-nowrap">
+                                <div class="flex flex-wrap items-center gap-2 sm:flex-nowrap">
                                     {#if rec.deleted_at === null}
                                         {#if rec.library_path !== null && platform !== null}
                                             <!--

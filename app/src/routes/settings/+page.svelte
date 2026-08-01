@@ -2,24 +2,16 @@
     import { submitting } from '$lib/actions';
     import { EVENT_LABEL } from '$lib/webhook-events';
     import { dateTime } from '$lib/format';
-    import { liveUpdates } from '$lib/live-updates.svelte';
 
     let { data, form } = $props();
 
     // 引き継ぎは数百GBのコピーになる。進み具合はサーバから push される
-    liveUpdates(['migrate']);
-
-    const migrate = $derived(data.migrate.status);
-    const done = $derived(migrate.imported + migrate.skipped + migrate.missing);
 </script>
 
 <h1 class="mb-4 text-2xl font-bold">設定</h1>
 
 {#if form?.message}
     <div class="alert alert-error mb-4" data-testid="settings-error">{form.message}</div>
-{/if}
-{#if form?.migrate}
-    <div class="alert alert-info mb-4" data-testid="migrate-started">{form.migrate}</div>
 {/if}
 
 {#if form?.saved}
@@ -227,111 +219,6 @@
                         {/each}
                     </tbody>
                 </table>
-            </div>
-        {/if}
-    </div>
-</section>
-
-<section class="card bg-base-100 mt-6 shadow" data-testid="migrate-card">
-    <div class="card-body">
-        <h2 class="card-title">EPGStation からの引き継ぎ</h2>
-        <p class="text-base-content/70 text-sm">
-            EPGStation のデータベースを読み、<strong>自動予約ルール・手で入れた予約・録画</strong>を
-            取り込みます。録画は denpa
-            の並びに置き直し、番組情報とサムネイルもここで作ります。何度実行しても取り込み済みのものは飛ばします。
-            ルール由来の予約は、ルールを取り込んだあと denpa が自分で立て直します。
-        </p>
-
-        {#if !data.migrate.available}
-            <div class="alert alert-warning mt-2" data-testid="migrate-unavailable">
-                引き継ぎ元 <code>{data.migrate.source}</code> が見えません。 denpa の Pod に EPGStation の録画PVCをマウントしてください。
-            </div>
-        {:else}
-            <form method="POST" action="?/migrate" use:submitting class="mt-2 space-y-3">
-                <label class="flex cursor-pointer items-start gap-2">
-                    <input
-                        type="checkbox"
-                        name="apply"
-                        class="checkbox checkbox-sm mt-0.5"
-                        data-testid="migrate-apply"
-                    />
-                    <span class="text-sm">
-                        実際に取り込む
-                        <span class="text-base-content/60 block text-xs">
-                            外したままなら何が取り込まれるかを出すだけで、ファイルもデータベースも触りません
-                        </span>
-                    </span>
-                </label>
-                <label class="flex cursor-pointer items-start gap-2">
-                    <input
-                        type="checkbox"
-                        name="move"
-                        class="checkbox checkbox-sm mt-0.5"
-                        data-testid="migrate-move"
-                    />
-                    <span class="text-sm">
-                        コピーではなく移動する
-                        <span class="text-base-content/60 block text-xs">
-                            既定はコピー。中身を確かめてから EPGStation 側を消せます。
-                            空き容量が足りないときだけ移動にしてください
-                        </span>
-                    </span>
-                </label>
-                <button
-                    class="btn btn-primary"
-                    disabled={migrate.state === 'running'}
-                    data-testid="migrate-run"
-                >
-                    {migrate.state === 'running' ? '実行中…' : '実行する'}
-                </button>
-            </form>
-        {/if}
-
-        {#if migrate.state !== 'idle'}
-            <div class="mt-4" data-testid="migrate-progress" data-state={migrate.state}>
-                <div class="flex flex-wrap items-center gap-2 text-sm">
-                    <span class="badge" data-testid="migrate-state">
-                        {migrate.state === 'running' ? '実行中' : migrate.state === 'done' ? '完了' : '失敗'}
-                    </span>
-                    <span class="badge badge-ghost">{migrate.apply ? '取り込み' : '下見'}</span>
-                    {#if migrate.move}
-                        <span class="badge badge-ghost">移動</span>
-                    {/if}
-                    <span data-testid="migrate-counts">
-                        録画 {migrate.imported} 件 / 取り込み済み {migrate.skipped} 件 / ファイル無し {migrate.missing}
-                        件
-                    </span>
-                    <span data-testid="migrate-rule-counts">
-                        ルール {migrate.rules.imported} 件 / 対象外 {migrate.rules.skipped} 件
-                    </span>
-                    <span data-testid="migrate-reservation-counts">
-                        予約 {migrate.reservations.imported} 件 / 対象外 {migrate.reservations.skipped} 件
-                    </span>
-                </div>
-
-                {#if migrate.total > 0}
-                    <progress class="progress progress-primary mt-2 w-full" value={done} max={migrate.total}
-                    ></progress>
-                    <div class="text-base-content/60 mt-1 text-xs">
-                        {done} / {migrate.total}
-                        {#if migrate.current}— {migrate.current}{/if}
-                    </div>
-                {/if}
-
-                {#if migrate.error}
-                    <div class="alert alert-error mt-2" data-testid="migrate-error">{migrate.error}</div>
-                {/if}
-
-                {#if migrate.log.length > 0}
-                    <details class="border-base-300 rounded-box mt-3 border">
-                        <summary class="cursor-pointer px-4 py-2 text-sm font-medium">
-                            記録 ({migrate.log.length} 行)
-                        </summary>
-                        <pre
-                            class="max-h-64 overflow-auto px-4 pb-3 text-xs"
-                            data-testid="migrate-log">{migrate.log.join('\n')}</pre>
-                    </details>
-                {/if}
             </div>
         {/if}
     </div>

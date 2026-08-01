@@ -2,8 +2,7 @@
 
 Mirakurun から EPG と TS を受け取り、予約・録画・エンコード・ライブラリ配置までを行う。
 出来上がった mkv はライブラリに置かれ、denpa が配って外部プレイヤーで見る。見終わったものは
-自動的に消える。EPGStation の置き換えを目指したもので、`enc.js` のエンコード設定は
-そのまま移植してある。
+自動的に消える。EPGStation の置き換えとして作ったもので、エンコード設定はそこから移した。
 
 ## 構成
 
@@ -26,7 +25,6 @@ Mirakurun から EPG と TS を受け取り、予約・録画・エンコード�
 | `src/lib/server/serve.ts` | ファイルの配信 (Range 対応) |
 | `src/lib/server/dav.ts` | WebDAV (Kodi 向け) |
 | `src/lib/server/auth.ts` | ベーシック認証 |
-| `src/lib/server/migrate.ts` | EPGStation からの引き継ぎ |
 | `src/lib/server/events.ts` | 画面へ変化を知らせる (SSE。ポーリングの代わり) |
 | `src/lib/server/webhook.ts` | 録画の節目を外部へ通知する |
 | `src/lib/server/runtime.ts` | 常駐処理の起動 (hooks.server.ts から呼ばれる) |
@@ -94,7 +92,7 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 | `/` | **予約と録画**を2ペインで並べる。予約の取消/競合再計算、再生リンク・再エンコード・削除 |
 | `/guide` | 番組表(グリッド)と番組検索、EPG取得。検索はルールと同じ条件で絞り込め、そのままルールにできる |
 | `/rules` | 自動予約ルールの一覧と作成 |
-| `/settings` | 録画のしかた(コーデック/CM)、通知先(Webhook)、EPGStation からの引き継ぎ |
+| `/settings` | 録画のしかた(コーデック/CM)、通知先(Webhook)、ベーシック認証 |
 | `/api/recordings/<id>/file` | 録画ファイル。Range 対応 |
 | `/dav` | WebDAV (PROPFIND / GET / HEAD)。Kodi 用。書き込みは受けない |
 

@@ -23,10 +23,9 @@ http→https のリダイレクトは Traefik 側で `doany.io` 系だけにか�
 
 denpa 自体の詳細(状態遷移・環境変数・テスト)は [app/README.md](app/README.md)。
 
-EPGStation は停止済みです。MariaDB だけは引き継ぎが済むまで残してあります。済んだら
-`k3s/deployment.yaml` と `k3s/service.yaml` の `db`、`epg-db` / `epgstation-*` の PVC、
-`k3s/sealed-secret.yaml` を消せます。PVC には `Prune=false,Delete=false` が付いているので、
-マニフェストから消しても録画データは残ります。
+EPGStation からは移行済みで、マニフェストもコードも消してあります。PVC には
+`Prune=false,Delete=false` が付いていたので、`epgstation-*` / `epg-db` のデータは
+ディスクに残っています。要らなくなったら手で消してください。
 
 ## 実装予定
 
@@ -119,6 +118,24 @@ Windows は `denpa://` を自前で持ちます。[mpv-handler](https://github.c
 開くのは http(s) だけです。リンクは外から渡ってくるので、`file://` などをそのまま
 mpv に食わせないためです。失敗したときはメッセージボックスを出します
 (黙って終わると「押しても何も起きない」になるため)。
+
+**確認ダイアログについて。** 独自スキームを開くとき、Edge も Chrome も既定で毎回
+「このサイトは PowerShell を開こうとしています」と聞いてきます。これを黙らせる方法は
+ブラウザのポリシー (`AutoLaunchProtocolsFromOrigins`) しかないので、`denpa.ps1` が
+HKCU に書きます。管理者権限は要りませんが、**反映にはブラウザの再起動が要ります**。
+許す origin は `-Origins` で変えられます (既定は `http://dp.home.arpa` と
+`https://dp.doany.io`)。
+
+**再生速度を覚えさせる。** mpv 側の設定です。`%APPDATA%\mpv\mpv.conf` に
+
+```conf
+save-position-on-quit=yes
+```
+
+と書くと、終了時の速度を**録画ごとに**覚えます (`speed` は `watch-later-options` の
+既定に入っています)。再生位置も一緒に残るので続きから観られます。
+常に一定の速度で始めたいなら `speed=1.5` のように直接書きます。
+再生中は `[` と `]` で下げ下げ・上げ上げできます。
 
 レジストリに書く一行は壊れていても Windows が黙って何もしないだけなので、
 `windows/verify.ps1` で先に確かめられます。Windows でなくても走ります。
@@ -228,32 +245,6 @@ Incoming Webhook の URL をそのまま入れられます)。
   打ち切って結果だけ記録します。直近の結果は設定画面に出ます
 - 録画の失敗は画面を開くまで気づけないので、**少なくとも失敗だけでも**入れておくのを勧めます
 
-## EPGStation からの引き継ぎ
-
-EPGStation の MariaDB を読んで、**自動予約ルール・手で入れた予約・録画**を取り込みます。
-録画ファイルは denpa のライブラリの並びに置き直し、`.nfo` とサムネイルまで作ります。
-
-**設定画面から実行できます。** まず何も選ばずに実行すると下見(書き込みなし)になり、
-何が取り込まれるかだけが出ます。確かめてから「実際に取り込む」を入れて実行してください。
-数百GBのコピーになるので裏で進み、進み具合はそのまま画面に出ます。
-
-denpa の Pod に `epgstation-recorded` PVC がマウントされている必要があります
-(`k3s/deployment.yaml` に入れてあります)。マウントできない事情があるときは、同じ処理を
-使い捨てJobでも回せます(`k3s/migrate-job.yaml` を apply。`args` を `["--apply"]` に
-すると実際に取り込む)。
-
-- **既定はコピー**。結果を確かめてから EPGStation 側の PVC を消せます。容量が足りない
-  ときは `["--apply", "--move"]`
-- **何度実行しても同じ結果**になります(取り込み済みは EPGStation 側のIDで判別)
-- エンコード済みと生TSが両方ある録画は**エンコード済みを取ります**
-- 番組表と紐付かない録画も、チャンネル名を残して取り込みます
-- **ルール由来の予約は取り込みません**。ルールを入れたあと denpa が自分で立て直すため
-- EPGStation のルールには denpa に無い項目(正規表現・時刻指定・録画先の指定・重複回避)が
-  あります。**時刻指定のルールと、条件が空になるものは取り込めません**。何が落ちたかは
-  実行結果に出ます
-- 済んだら `k3s/deployment.yaml` の denpa から `EPGSTATION_*` と
-  `epgstation-recorded` のマウントを消せます
-
 ## クラスタ側の前提条件
 
 このリポジトリには `epg` namespace のアプリ本体しか入っていません。k3sホストの初期構築や
@@ -266,8 +257,6 @@ denpa の Pod に `epgstation-recorded` PVC がマウントされている必要
   http→https リダイレクトが `doany.io` 系だけに限定されていること
   (bootstrap の `traefik/redirect-https.yaml`)。`web` エントリポイント全体に
   かけると `dp.home.arpa` も飛ばされます
-- **Sealed Secrets controller** — `kube-system`。`k3s/sealed-secret.yaml` は対応する
-  秘密鍵を持つクラスタでしか復号できないので、ゼロから作る場合は入れ直しが必要
 - **ArgoCD** — push時に webhook が自動登録される運用。Application 自体はクラスタの
   state.db バックアップから復元される前提でマニフェストとしては存在しません
 - **DNS** — `m.doany.io` / `dp.doany.io` が Traefik の外部IPを指すこと。LAN 側の

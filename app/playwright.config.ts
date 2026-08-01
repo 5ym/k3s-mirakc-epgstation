@@ -8,7 +8,6 @@ const WEBHOOK_PORT = 8096;
 export const TEST_ROOT = '/tmp/denpa-e2e';
 export const LIBRARY_DIR = `${TEST_ROOT}/library`;
 /** EPGStation の引き継ぎ元。マウント前後の見え方を試すので、あえて作らずに始める */
-export const EPGSTATION_DIR = `${TEST_ROOT}/epgstation-recorded`;
 export const WEBHOOK_URL = `http://127.0.0.1:${WEBHOOK_PORT}`;
 
 export default defineConfig({
@@ -71,10 +70,7 @@ export default defineConfig({
                 START_MARGIN: '0',
                 END_MARGIN: '500',
                 ENCODE_CONCURRENCY: '2',
-                EPGSTATION_RECORDED_DIR: EPGSTATION_DIR,
                 // 何も待ち受けていない先。引き継ぎが失敗したときの見え方を試す
-                EPGSTATION_DB_HOST: '127.0.0.1',
-                EPGSTATION_DB_PORT: '1',
                 // ベーシック認証は設定画面から入れる。env は初期値として使えることの確認用
                 BASIC_AUTH_USER: 'denpa',
                 BASIC_AUTH_PASSWORD: 'ひみつ',
