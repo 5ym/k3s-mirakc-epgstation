@@ -44,12 +44,6 @@
                     ? '変更なし(既に許可済み)'
                     : form.setup.granted.join(', ')}
             </div>
-            <div>
-                ライブTV: チューナー{form.setup.liveTv.tunerAdded ? '追加' : '既存のまま'} / 番組表{form.setup
-                    .liveTv.guideAdded
-                    ? '追加'
-                    : '既存のまま'}
-            </div>
         </div>
     </div>
 {/if}
@@ -140,12 +134,6 @@
                 </li>
                 <li>メタデータを .nfo から読ませ、インターネット取得を無効化</li>
                 <li>管理者に「メディアの削除を許可」を付与</li>
-                <li>
-                    ライブTVのチューナー(M3U)と番組表(XMLTV)を登録
-                    <span class="text-base-content/60 block font-mono text-xs">
-                        {data.iptvOrigin}/api/iptv/playlist.m3u?profile={data.liveProfile}
-                    </span>
-                </li>
             </ul>
             <form method="POST" action="?/setup" use:submitting class="mt-2">
                 <button class="btn btn-primary" disabled={!data.enabled} data-testid="run-setup">

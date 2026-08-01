@@ -38,7 +38,7 @@ test.describe('設定', () => {
         await expect(page.getByTestId('settings-error')).toContainText('ログインに失敗しました');
     });
 
-    test('Jellyfin 側のライブラリ・削除許可・ライブTVをまとめて設定できる', async ({ page, request }) => {
+    test('Jellyfin 側のライブラリと削除許可をまとめて設定できる', async ({ page, request }) => {
         await goto(page, '/settings');
         await page.getByTestId('jellyfin-url').fill(JELLYFIN_URL);
         await page.getByTestId('jellyfin-user').fill('admin');
@@ -70,10 +70,6 @@ test.describe('設定', () => {
         const guest = state.users.find((u: { Name: string }) => u.Name === 'guest');
         expect(admin.Policy.EnableContentDeletion).toBe(true);
         expect(guest.Policy.EnableContentDeletion).toBe(false);
-
-        // ライブTVもここで登録される
-        expect(state.tunerHosts).toHaveLength(1);
-        expect(state.listingProviders).toHaveLength(1);
     });
 
     test('2回セットアップしても重複しない', async ({ page, request }) => {
@@ -90,7 +86,5 @@ test.describe('設定', () => {
 
         const state = await (await request.get(`${JELLYFIN_URL}/__control/state`)).json();
         expect(state.folders).toHaveLength(1);
-        expect(state.tunerHosts).toHaveLength(1);
-        expect(state.listingProviders).toHaveLength(1);
     });
 });

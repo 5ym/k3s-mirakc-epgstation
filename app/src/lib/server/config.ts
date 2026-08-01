@@ -84,20 +84,14 @@ export const config = {
      * M3U に書き込む denpa 自身のURL。Jellyfin から解決できる形にする
      * (同じクラスタなら `http://denpa:3000`)。空ならリクエストのオリジンを使う
      */
-    iptvOrigin: str('IPTV_ORIGIN', '').replace(/\/+$/, ''),
     /** Jellyfin に渡す既定のプロファイル。h264 / av1 */
-    liveProfile: str('LIVE_PROFILE', 'h264'),
     /** H.264 側の x264 プリセット。実時間に間に合わないときは速い側へ */
-    livePreset: str('LIVE_PRESET', 'veryfast'),
     /**
      * AV1 側の SVT-AV1 プリセット(0〜13、大きいほど速い)。
      * 録画のバッチエンコードと違い実時間で回す必要があるので、既定はかなり速い側に振ってある。
      * それでもソフトウェアエンコードでHDを実時間で回すのは厳しい(README参照)。
      */
-    liveAv1Preset: num('LIVE_AV1_PRESET', 10),
-    liveCrf: num('LIVE_CRF', 23),
     /** 誰も読まなくなったストリームを切ってチューナーを解放するまでの時間(ms) */
-    liveIdleTimeout: num('LIVE_IDLE_TIMEOUT', 30 * SEC),
 
     /**
      * Jellyfin に作るライブラリの名前。
@@ -119,7 +113,6 @@ export const config = {
     /** ライブラリの実体とDBを突き合わせる間隔。Jellyfin 側での削除をここで拾う */
     reconcileInterval: num('RECONCILE_INTERVAL', 5 * MIN),
     /** Jellyfin の録画タイマーを取り込む間隔。押してから反映されるまでの待ち時間になる */
-    timerImportInterval: num('JELLYFIN_TIMER_INTERVAL', 30 * SEC),
     /** 終了した番組情報をDBに残しておく期間。番組表の遡り表示にしか使わないので短くてよい */
     programRetention: num('PROGRAM_RETENTION', 24 * 60 * MIN),
 

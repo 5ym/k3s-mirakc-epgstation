@@ -4,7 +4,6 @@ import { now, queryOne } from './db';
 import { pump, requeueOrphanedJobs } from './encoder';
 import { sync } from './epg';
 import * as jellyfin from './jellyfin';
-import { reapIdle, stopAll } from './live';
 import { failOrphanedRecordings } from './recorder';
 import { tick } from './scheduler';
 
@@ -73,14 +72,6 @@ export function start(): void {
         await refreshLibraryIfChanged();
     });
 
-    // 誰も読んでいない中継を畳んでチューナーを解放する
-    every(config.liveIdleTimeout, 'live', reapIdle);
-
-    // Jellyfin の録画ボタンで作られたタイマーを denpa の予約に変換する
-    if (jellyfin.enabled()) {
-        every(config.timerImportInterval, 'timers', jellyfin.importTimers);
-    }
-
     // Jellyfin 側で消された録画を一覧から落とす
     void guard('reconcile', jellyfin.reconcile);
     every(config.reconcileInterval, 'reconcile', jellyfin.reconcile);
@@ -96,7 +87,6 @@ export function stop(): void {
     for (const timer of timers) clearInterval(timer);
     timers.length = 0;
     // 配信中の ffmpeg を道連れにする。放っておくと孤児プロセスがチューナーを掴み続ける
-    stopAll();
     started = false;
 }
 

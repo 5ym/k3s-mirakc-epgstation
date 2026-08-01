@@ -245,12 +245,6 @@ spec:
             # 録画のコーデック。非力なノードでは h264 にする
             - name: ENCODE_CODEC
               value: av1
-            # Jellyfin のライブTVに登録する M3U に書き込むURL。
-            # Jellyfin Pod から解決できる必要がある
-            - name: IPTV_ORIGIN
-              value: http://denpa:3000
-            - name: LIVE_PROFILE
-              value: av1
             - name: ENCODE_CONCURRENCY
               value: '2'
             # EPGStation からの引き継ぎ。設定画面から実行する。

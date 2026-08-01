@@ -8,13 +8,7 @@
 const PORT = Number(process.env.FAKE_JELLYFIN_PORT ?? 8096);
 
 let refreshCount = 0;
-let guideRefreshCount = 0;
-// 実 Jellyfin の /System/Configuration/livetv 相当
-const tunerHosts: Record<string, unknown>[] = [];
-const listingProviders: Record<string, unknown>[] = [];
 let nextId = 1;
-// Jellyfin のライブTV画面で録画ボタンを押すと作られるタイマー
-const timers: Record<string, unknown>[] = [];
 // denpa からの通知を受け取る先。テストで届いた内容を確かめる
 const webhookCalls: Record<string, unknown>[] = [];
 // ライブラリ(VirtualFolders)とユーザー。denpa の初期セットアップの相手
@@ -36,30 +30,10 @@ Bun.serve({
         const url = new URL(request.url);
 
         if (url.pathname === '/__control/state') {
-            return json({
-                refreshCount,
-                guideRefreshCount,
-                tunerHosts,
-                listingProviders,
-                timers,
-                folders,
-                users,
-                webhookCalls,
-            });
-        }
-        // 「録画ボタンを押した」を再現する
-        if (url.pathname === '/__control/timer' && request.method === 'POST') {
-            const body = (await request.json()) as Record<string, unknown>;
-            const timer = { Id: `timer-${nextId++}`, PrePaddingSeconds: 0, PostPaddingSeconds: 0, ...body };
-            timers.push(timer);
-            return json(timer);
+            return json({ refreshCount, folders, users, webhookCalls });
         }
         if (url.pathname === '/__control/reset' && request.method === 'POST') {
             refreshCount = 0;
-            guideRefreshCount = 0;
-            tunerHosts.length = 0;
-            listingProviders.length = 0;
-            timers.length = 0;
             webhookCalls.length = 0;
             folders.length = 0;
             for (const u of users) u.Policy.EnableContentDeletion = false;
@@ -118,56 +92,6 @@ Bun.serve({
             const body = (await request.json()) as { Id: string; LibraryOptions: Record<string, unknown> };
             const folder = folders.find((f) => f.ItemId === body.Id);
             if (folder !== undefined) folder.LibraryOptions = body.LibraryOptions;
-            return new Response(null, { status: 204 });
-        }
-
-        // ライブTVの登録まわり。実 Jellyfin 10.11 のリクエスト/レスポンス形に合わせてある
-        if (url.pathname === '/System/Configuration/livetv') {
-            return json({ TunerHosts: tunerHosts, ListingProviders: listingProviders });
-        }
-        if (url.pathname === '/LiveTv/TunerHosts') {
-            if (request.method === 'POST') {
-                const body = (await request.json()) as Record<string, unknown>;
-                const entry = { ...body, Id: `tuner-${nextId++}` };
-                tunerHosts.push(entry);
-                return json(entry);
-            }
-            if (request.method === 'DELETE') {
-                const id = url.searchParams.get('id');
-                const i = tunerHosts.findIndex((t) => t.Id === id);
-                if (i >= 0) tunerHosts.splice(i, 1);
-                return new Response(null, { status: 204 });
-            }
-        }
-        if (url.pathname === '/LiveTv/ListingProviders') {
-            if (request.method === 'POST') {
-                const body = (await request.json()) as Record<string, unknown>;
-                const entry = { ...body, Id: `listing-${nextId++}` };
-                listingProviders.push(entry);
-                return json(entry);
-            }
-            if (request.method === 'DELETE') {
-                const id = url.searchParams.get('id');
-                const i = listingProviders.findIndex((l) => l.Id === id);
-                if (i >= 0) listingProviders.splice(i, 1);
-                return new Response(null, { status: 204 });
-            }
-        }
-        if (url.pathname === '/LiveTv/Timers') {
-            return json({ Items: timers, TotalRecordCount: timers.length });
-        }
-        const timerPath = url.pathname.match(/^\/LiveTv\/Timers\/(.+)$/);
-        if (timerPath !== null && request.method === 'DELETE') {
-            const i = timers.findIndex((t) => t.Id === timerPath[1]);
-            if (i >= 0) timers.splice(i, 1);
-            return new Response(null, { status: 204 });
-        }
-
-        if (url.pathname === '/ScheduledTasks') {
-            return json([{ Id: 'task-guide', Key: 'RefreshGuide', Name: 'Refresh Guide' }]);
-        }
-        if (url.pathname === '/ScheduledTasks/Running/task-guide' && request.method === 'POST') {
-            guideRefreshCount++;
             return new Response(null, { status: 204 });
         }
 

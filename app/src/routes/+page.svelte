@@ -6,7 +6,7 @@
     let { data, form } = $props();
 
     // 録画・予約・配信のいずれかが動いたらサーバが知らせてくる
-    liveUpdates(['recordings', 'reservations', 'live']);
+    liveUpdates(['recordings', 'reservations']);
 
     const active = ['scheduled', 'conflict', 'recording'];
 </script>
@@ -38,12 +38,6 @@
 {#if form?.sync}
     <div class="alert alert-info mb-4" data-testid="sync-result">
         局 {form.sync.services} / 番組 {form.sync.programs} / 新規予約 {form.sync.reserved}
-    </div>
-{/if}
-{#if form?.timers}
-    <div class="alert alert-info mb-4" data-testid="import-result">
-        取り込み {form.timers.imported} 件 / 対象外 {form.timers.skipped} 件 / 失敗 {form.timers.failed} 件
-        {#each form.timers.messages as message}<span class="ml-2 text-sm">{message}</span>{/each}
     </div>
 {/if}
 
@@ -134,40 +128,6 @@
             {/if}
         </div>
     </section>
-
-    <section class="card bg-base-100 shadow" data-testid="live-sessions">
-        <div class="card-body p-4">
-            <h2 class="card-title text-base">Jellyfin へ配信中</h2>
-            {#if data.live.length === 0}
-                <p class="text-base-content/60 text-sm">なし</p>
-            {:else}
-                <p class="text-base-content/60 text-xs">
-                    チューナーは録画と共有です。録画が始まると優先度の低い配信は切られます。
-                </p>
-                <ul class="space-y-2">
-                    {#each data.live as session (session.id)}
-                        <li
-                            class="flex items-center justify-between gap-2"
-                            data-testid="live-session"
-                            data-session-id={session.id}
-                        >
-                            <span>
-                                {session.serviceName}
-                                <span class="badge badge-sm badge-ghost">{session.profile}</span>
-                                <span class="text-base-content/60 text-xs">
-                                    {dateTime(session.startedAt)} から
-                                </span>
-                            </span>
-                            <form method="POST" action="?/stopLive" use:submitting>
-                                <input type="hidden" name="id" value={session.id} />
-                                <button class="btn btn-xs" data-testid="live-stop">切断</button>
-                            </form>
-                        </li>
-                    {/each}
-                </ul>
-            {/if}
-        </div>
-    </section>
 </div>
 
 <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -176,11 +136,6 @@
         <a class="btn btn-sm" href={data.showFinished ? '/' : '/?all=1'}>
             {data.showFinished ? '進行中のみ' : '完了分も表示'}
         </a>
-        {#if data.jellyfin}
-            <form method="POST" action="?/importTimers" use:submitting>
-                <button class="btn btn-sm" data-testid="import-timers">Jellyfinの録画予約を取り込む</button>
-            </form>
-        {/if}
         <form method="POST" action="?/resolve" use:submitting>
             <button class="btn btn-sm">競合を再計算</button>
         </form>

@@ -19,8 +19,6 @@ Mirakurun から EPG と TS を受け取り、予約・録画・エンコード�
 | `src/lib/server/cm.ts` | CM検出 (無音 + CM尺) |
 | `src/lib/server/cm-jls.ts` | CM検出 (join_logo_scp。任意) |
 | `src/lib/server/encoder.ts` | 録画のエンコード (AV1 / H.264) |
-| `src/lib/server/live.ts` | ライブ中継のエンコードとセッション管理 |
-| `src/lib/server/iptv.ts` | Jellyfin に渡す M3U / XMLTV |
 | `src/lib/server/library.ts` | Jellyfin 向けのファイル配置 |
 | `src/lib/server/metadata.ts` | Jellyfin 向けの .nfo とサムネイル |
 | `src/lib/server/jellyfin.ts` | ライブラリの実体とDBの突き合わせ |
@@ -46,7 +44,6 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 | `MIRAKURUN_URL` | `http://mirakurun:40772` | Mirakurun |
 | `JELLYFIN_URL` / `JELLYFIN_API_KEY` | (空) | 初期値。設定画面で入れた値が優先される。Jellyfin連携に必須 |
 | `RECONCILE_INTERVAL` | `300000` | ライブラリの実体とDBを突き合わせる間隔(ms) |
-| `JELLYFIN_TIMER_INTERVAL` | `30000` | Jellyfin の録画タイマーを取り込む間隔(ms) |
 | `JELLYFIN_LIBRARY_NAME` | `録画` | Jellyfin に作るライブラリの名前 |
 | `WRITE_NFO` | `1` | Jellyfin 向けの `.nfo` を書くか |
 | `THUMBNAIL_POSITION` / `THUMBNAIL_WIDTH` | `120` / `480` | サムネイルの切り出し位置(秒)と幅 |
@@ -57,11 +54,6 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 | `ENCODE_CONCURRENCY` | `1` | 録画エンコードの同時実行数。ライブ配信の本数とは無関係 |
 | `ENCODE_CODEC` | `av1` | 録画の既定コーデック (`av1` / `h264`) |
 | `ENCODE_H264_PRESET` / `ENCODE_H264_CRF` | `medium` / `22` | H.264 のときの品質 |
-| `LIVE_PROFILE` | `h264` | M3U に載せる既定プロファイル |
-| `LIVE_PRESET` / `LIVE_CRF` | `veryfast` / `23` | ライブの x264 設定 |
-| `LIVE_AV1_PRESET` | `10` | ライブの SVT-AV1 プリセット (大きいほど速い) |
-| `LIVE_IDLE_TIMEOUT` | `30000` | 読まれなくなった中継を切るまで(ms) |
-| `IPTV_ORIGIN` | (空) | M3U に書く denpa のURL。空ならリクエスト元から決める |
 | `START_MARGIN` / `END_MARGIN` | `10000` / `15000` | 録画の前後マージン(ms) |
 | `EPG_SYNC_INTERVAL` | `600000` | EPG取得の間隔(ms) |
 | `SCHEDULER_TICK` | `5000` | 予約チェックの間隔(ms) |

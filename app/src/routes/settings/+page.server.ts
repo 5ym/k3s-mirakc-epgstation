@@ -1,19 +1,13 @@
 import { fail } from '@sveltejs/kit';
 import { config } from '$lib/server/config';
 import { database, now, queryAll, queryOne } from '$lib/server/db';
-import {
-    allowDeletion,
-    issueApiKey,
-    enabled as jellyfinEnabled,
-    registerLiveTv,
-    setupLibrary,
-} from '$lib/server/jellyfin';
+import { allowDeletion, issueApiKey, enabled as jellyfinEnabled, setupLibrary } from '$lib/server/jellyfin';
 import { available as migrateAvailable, source, start, status } from '$lib/server/migrate';
 import { isStored, saveSettings, settings } from '$lib/server/settings';
 import { send, type Webhook } from '$lib/server/webhook';
 import { EVENTS } from '$lib/webhook-events';
 
-export function load({ url }) {
+export function load() {
     const current = settings();
     return {
         jellyfinUrl: current.jellyfinUrl,
@@ -25,9 +19,6 @@ export function load({ url }) {
         },
         enabled: jellyfinEnabled(),
         libraryDir: config.libraryDir,
-        // Jellyfin から見た denpa のURL。M3U に書き込まれる
-        iptvOrigin: config.iptvOrigin === '' ? url.origin : config.iptvOrigin,
-        liveProfile: config.liveProfile,
         webhooks: queryAll<Webhook>('SELECT * FROM webhooks ORDER BY id'),
         events: EVENTS,
         migrate: {
@@ -120,16 +111,14 @@ export const actions = {
     },
 
     /** ライブラリ・メタデータ・削除許可・ライブTV をまとめて設定する */
-    setup: async ({ url }) => {
+    setup: async () => {
         if (!jellyfinEnabled())
             return fail(400, { message: '先に Jellyfin のURLとAPIキーを設定してください' });
-        const origin = config.iptvOrigin === '' ? url.origin : config.iptvOrigin;
 
         try {
             const library = await setupLibrary(config.libraryDir);
             const granted = await allowDeletion();
-            const liveTv = await registerLiveTv(origin, config.liveProfile);
-            return { success: true, setup: { library, granted, liveTv } };
+            return { success: true, setup: { library, granted } };
         } catch (error) {
             return fail(502, { message: `Jellyfin の設定に失敗しました: ${error}` });
         }

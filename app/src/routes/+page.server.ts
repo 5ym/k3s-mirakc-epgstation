@@ -1,8 +1,7 @@
 import { fail } from '@sveltejs/kit';
 import { database, queryAll, queryOne } from '$lib/server/db';
 import { sync } from '$lib/server/epg';
-import { importTimers, enabled as jellyfinEnabled } from '$lib/server/jellyfin';
-import { sessions, stopSession } from '$lib/server/live';
+import { enabled as jellyfinEnabled } from '$lib/server/jellyfin';
 import { ping } from '$lib/server/mirakurun';
 import { cancel } from '$lib/server/reservations';
 import { resolveConflicts } from '$lib/server/scheduler';
@@ -68,7 +67,6 @@ export async function load({ url }) {
         showFinished,
         stats,
         failures,
-        live: sessions(),
         mirakurun: await ping(),
         jellyfin: jellyfinEnabled(),
     };
@@ -77,12 +75,6 @@ export async function load({ url }) {
 export const actions = {
     sync: async () => {
         return { success: true, sync: await sync() };
-    },
-
-    stopLive: async ({ request }) => {
-        const form = await request.formData();
-        stopSession(Number(form.get('id')));
-        return { success: true };
     },
 
     cancel: async ({ request }) => {
@@ -107,14 +99,5 @@ export const actions = {
     resolve: async () => {
         await resolveConflicts();
         return { success: true };
-    },
-
-    importTimers: async () => {
-        // 定期取り込み(JELLYFIN_TIMER_INTERVAL)を待たずに反映したいとき用
-        try {
-            return { success: true, timers: await importTimers() };
-        } catch (error) {
-            return fail(502, { message: `Jellyfin から取り込めませんでした: ${error}` });
-        }
     },
 };

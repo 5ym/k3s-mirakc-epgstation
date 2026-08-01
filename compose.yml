@@ -27,8 +27,6 @@ services:
             # Jellyfin の初期設定後に発行した API キーを .env に書く。
             # 無いと録画タイマーの取り込みもライブTV登録も動かない
             JELLYFIN_API_KEY: ${JELLYFIN_API_KEY:-}
-            # Jellyfin コンテナから見た開発サーバのURL。M3U に書き込まれる
-            IPTV_ORIGIN: http://app:5173
             RECONCILE_INTERVAL: '60000'
             EPG_SYNC_INTERVAL: '60000'
             SCHEDULER_TICK: '2000'
