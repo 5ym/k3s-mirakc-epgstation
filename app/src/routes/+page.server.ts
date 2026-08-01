@@ -68,19 +68,10 @@ export function load({ url }) {
         Date.now() - 24 * 60 * 60 * 1000,
     );
 
-    // 失敗は放っておくと気づけないので目立つところに出す。
-    // 時間で勝手に消すと見逃すので、確認するまで残して消せるようにしてある
-    const failures = queryAll<{ id: number; name: string; error: string | null; updated_at: number }>(
-        `SELECT id, name, error, updated_at FROM recordings
-         WHERE state = 'failed' AND deleted_at IS NULL AND acknowledged_at IS NULL
-         ORDER BY updated_at DESC LIMIT 10`,
-    );
-
     return {
         reservations,
         recordings,
         jobs,
-        failures,
         showFinished,
         showDeleted,
         /*
@@ -177,17 +168,6 @@ export const actions = {
         const id = Number(form.get('id'));
         if (!Number.isFinite(id)) return fail(400, { message: '予約IDが不正です' });
         await cancel(id);
-        return { success: true };
-    },
-
-    acknowledge: async ({ request }) => {
-        const form = await request.formData();
-        const id = Number(form.get('id'));
-        const sql =
-            Number.isFinite(id) && id > 0
-                ? `UPDATE recordings SET acknowledged_at = ? WHERE id = ${id}`
-                : `UPDATE recordings SET acknowledged_at = ? WHERE state = 'failed' AND acknowledged_at IS NULL`;
-        database().prepare(sql).run(Date.now());
         return { success: true };
     },
 

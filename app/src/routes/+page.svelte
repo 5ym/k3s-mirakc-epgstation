@@ -89,33 +89,6 @@
     <div class="alert alert-error mb-4" data-testid="dashboard-error">{form.message}</div>
 {/if}
 
-{#if data.failures.length > 0}
-    <div class="alert alert-error mb-4 items-start" data-testid="failures">
-        <div class="w-full">
-            <div class="flex flex-wrap items-center justify-between gap-2">
-                <span class="font-bold">失敗した録画が {data.failures.length} 件あります</span>
-                <form method="POST" action="?/acknowledge" use:submitting>
-                    <button class="btn btn-xs" data-testid="ack-all">すべて確認済みにする</button>
-                </form>
-            </div>
-            <ul class="mt-1 space-y-1 text-sm">
-                {#each data.failures as failure (failure.id)}
-                    <li class="flex items-start justify-between gap-2" data-testid="failure-row">
-                        <span>
-                            {dateTime(failure.updated_at)}
-                            {failure.name} — {failure.error ?? '理由不明'}
-                        </span>
-                        <form method="POST" action="?/acknowledge" use:submitting>
-                            <input type="hidden" name="id" value={failure.id} />
-                            <button class="btn btn-xs" data-testid="ack-one">確認</button>
-                        </form>
-                    </li>
-                {/each}
-            </ul>
-        </div>
-    </div>
-{/if}
-
 <div class="grid gap-6 xl:grid-cols-5">
     <section class="xl:col-span-2">
         <div class="mb-2 flex min-h-8 flex-wrap items-center justify-between gap-2">
@@ -341,11 +314,17 @@
                                      必要なときは data-library-path を見る -->
                                 <div class="text-base-content/60 truncate text-sm">{rec.service_name}</div>
                                 {#if rec.error}
-                                    <!-- 削除済みの行では error 列に削除理由が入る。失敗ではないので赤くしない -->
+                                    <!--
+                                        失敗の理由はこの行にそのまま出す。上にまとめて出していた頃は
+                                        どの録画のことか見に行く必要があった。
+                                        削除済みの行では error 列に削除理由が入る。失敗ではないので赤くしない
+                                    -->
                                     <div
-                                        class={rec.deleted_at === null
-                                            ? 'text-error text-sm'
-                                            : 'text-base-content/60 text-sm'}
+                                        class="line-clamp-2 text-sm {rec.deleted_at === null
+                                            ? 'text-error'
+                                            : 'text-base-content/60'}"
+                                        title={rec.error}
+                                        data-testid="recording-error"
                                     >
                                         {rec.error}
                                     </div>

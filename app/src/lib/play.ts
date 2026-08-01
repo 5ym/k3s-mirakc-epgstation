@@ -63,14 +63,21 @@ export function playLinks(
     const encodedTitle = encodeURIComponent(title);
 
     if (platform === 'windows') {
-        // mpv-handler://PLUGINS/ENCODED_URL/?PARAMETERS=VALUES
-        // URL もタイトルもパディング無しの base64url。スキームは mpv-handler で、
-        // mpv:// は 0.3 までの古い名前(いま渡しても何も起きない)
+        /*
+         * denpa 自前のスキーム。windows/denpa.ps1 で登録する。
+         *
+         * 以前は mpv-handler に渡していたが、あちらは別途インストールと
+         * config.toml が要るうえ、こちらから渡せるのは向こうが決めた形だけ。
+         * mpv を起動するだけなら中継は要らないので、自分のスキームを持つ。
+         *
+         * URL もタイトルもパディング無しの base64url にする。生のURLを
+         * クエリに入れると、資格情報の @ や記号でブラウザ側の解釈がぶれる
+         */
         return [
             {
                 label: 'mpv で再生',
-                href: `mpv-handler://play/${base64Url(withCredentials)}/?v_title=${base64Url(title)}`,
-                note: 'mpv-handler が必要',
+                href: `denpa://play/${base64Url(withCredentials)}/?title=${base64Url(title)}`,
+                note: 'windows/denpa.ps1 で登録が必要',
             },
         ];
     }

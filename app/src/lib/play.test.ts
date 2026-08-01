@@ -23,18 +23,17 @@ describe('base64Url', () => {
     });
 });
 
-/** mpv-handler://play/<ここ>/?... を取り出す */
+/** denpa://play/<ここ>/?... を取り出す */
 function mpvUrl(href: string): string {
-    return href.replace('mpv-handler://play/', '').replace(/\/\?.*$/, '');
+    return href.replace('denpa://play/', '').replace(/\/\?.*$/, '');
 }
 
 describe('playLinks', () => {
-    test('Windows は mpv-handler のスキームで開く', () => {
+    test('Windows は denpa 自前のスキームで開く', () => {
         const [link] = playLinks(URL, TITLE, 'windows');
-        // mpv:// は 0.3 までの古い名前。いま渡してもどこにも届かない
-        expect(link.href).toBe(`mpv-handler://play/${base64Url(URL)}/?v_title=${base64Url(TITLE)}`);
-        // 入っていないと開けないので、それが分かるようにしておく
-        expect(link.note).toContain('mpv-handler');
+        expect(link.href).toBe(`denpa://play/${base64Url(URL)}/?title=${base64Url(TITLE)}`);
+        // 登録しないと開けないので、それが分かるようにしておく
+        expect(link.note).toContain('denpa.ps1');
     });
 
     test('Android はアプリを名指しせず、端末に選ばせる', () => {

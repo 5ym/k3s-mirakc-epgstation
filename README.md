@@ -91,19 +91,34 @@ docker compose run --rm unit bun run format # フォーマット適用
 
 | 端末 | 渡し方 | 必要なもの |
 | --- | --- | --- |
-| Windows | `mpv-handler://play/<base64url>/?v_title=<base64url>` | [mpv-handler](https://github.com/akiirui/mpv-handler) — 登録は [windows/mpv-handler.ps1](windows/mpv-handler.ps1) |
+| Windows | `denpa://play/<base64url>/?title=<base64url>` | mpv と [windows/denpa.ps1](windows/denpa.ps1) での登録 |
 | Android | `intent://...action=VIEW;type=video/*` | 動画が再生できるアプリ(端末が選択画面を出す) |
 | iOS | `vlc-x-callback://` / `infuse://` | VLC または Infuse |
 | その他 | 素のURL | 好きなプレイヤーに貼る |
 
 Android はアプリを名指ししません。入っていないときに何も起きないうえ好みも人それぞれ
-なので、端末に選ばせます。番組名を渡せるもの(Android の `S.title`、Infuse の `name`、
-mpv-handler の `v_title`)には渡しています。
+なので、端末に選ばせます。番組名はどの端末にも渡しています(Android の `S.title`、
+Infuse の `name`、Windows は `title`)。
 
-> Windows で押しても何も起きないときは、まず**スキームが `mpv-handler://` であること**を
-> 確認してください。`mpv://` は mpv-handler 0.3 までの古い名前で、いまのものは受け付けません。
-> 次に `mpv-handler.exe` と同じフォルダの **`config.toml` に mpv の場所**が書いてあること。
-> `windows\mpv-handler.ps1 -Test` を使うと、コンソールを出したまま開いて理由が見えます。
+Windows は `denpa://` を自前で持ちます。[mpv-handler](https://github.com/akiirui/mpv-handler)
+のような外部の中継は使いません。mpv を起動するだけなら要らないうえ、別途インストールと
+`config.toml` が必要になるためです。
+
+ハンドラには `%1` でリンクがそのまま渡りますが、mpv は `denpa://` も base64 も知りません。
+**復号して mpv に渡す一枚だけはどうしても要ります**が、それはレジストリの値に直接書きます。
+ファイルを置かないので、後から消えたり移動したりして壊れることがありません。
+登録先は HKCU なので管理者権限も要りません。
+
+```powershell
+.\denpa.ps1          # 登録 (登録済みなら解除するか聞く)
+.\denpa.ps1 -Test    # 実際に開いてみる
+.\denpa.ps1 -Show    # 登録されている中身を見る
+.\denpa.ps1 -Remove  # 解除
+```
+
+開くのは http(s) だけです。リンクは外から渡ってくるので、`file://` などをそのまま
+mpv に食わせないためです。失敗したときはメッセージボックスを出します
+(黙って終わると「押しても何も起きない」になるため)。
 
 配信は `/api/recordings/<id>/file`。Range に対応しているのでプレイヤー側から早送り
 できます。エンコード済みがあればそれを、無ければ生TSを返します。
@@ -243,6 +258,12 @@ denpa の Pod に `epgstation-recorded` PVC がマウントされている必要
   state.db バックアップから復元される前提でマニフェストとしては存在しません
 - **DNS** — `m.doany.io` / `dp.doany.io` が Traefik の外部IPを指すこと。LAN 側の
   名前解決で `dp.home.arpa` も同じIPを指すこと
+- **`PROTOCOL_HEADER=x-forwarded-proto`** — denpa の環境変数
+  (`k3s/deployment.yaml`)。SvelteKit の CSRF 判定は Origin ヘッダと自分の origin を
+  突き合わせるが、adapter-node は `ORIGIN` も `PROTOCOL_HEADER` も無いと **https と
+  決め打つ**ため、平文の `dp.home.arpa` からの POST が全部 403 になる
+  (画面上は「押しても何も起きない」に見える)。`ORIGIN` は1つしか書けず
+  `dp.doany.io` と両立しないので、リクエストごとにヘッダを見る
 - **チューナードライバ** — mirakurun は `privileged: true` かつ `/dev/bus`・`/dev/dvb` を
   hostPath でマウントするので、ノード側にドライバが読み込まれていること
 - **GHCR** — `ghcr.io/danything/mirakurun` と `.../denpa` を pull できること

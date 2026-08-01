@@ -113,6 +113,16 @@ spec:
           env:
             - name: TZ
               value: Asia/Tokyo
+            # SvelteKit の CSRF 判定は Origin ヘッダと自分の origin を突き合わせる。
+            # adapter-node は ORIGIN も PROTOCOL_HEADER も無いと https と決め打つので、
+            # 平文で開いている dp.home.arpa からの POST が全部 403 になっていた
+            # (画面上は「押しても何も起きない」に見える)。
+            # ORIGIN は1つしか書けず dp.doany.io と両立しないので、
+            # Traefik が付ける x-forwarded-proto をリクエストごとに見る。
+            # HOST_HEADER は既定の host のままにする。Traefik は元の Host を渡すし、
+            # kubelet のヘルスチェックは x-forwarded-host を付けないため
+            - name: PROTOCOL_HEADER
+              value: x-forwarded-proto
             - name: MIRAKURUN_URL
               value: http://mirakurun:40772
             - name: DENPA_DB

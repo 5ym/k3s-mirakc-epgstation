@@ -49,6 +49,16 @@ test.describe('エンコードの失敗', () => {
         await row.getByTestId('encode-dismiss').click();
         await expect(page.getByTestId('encode-row')).toHaveCount(0);
 
+        // ジョブを消しても、失敗したことは録画一覧の行にそのまま残る。
+        // 上にまとめて出していた頃は、どの録画のことか見に行く必要があった
+        await goto(page, '/');
+        const failed = page
+            .getByTestId('recording-row')
+            .filter({ has: page.getByTestId('recording-error') })
+            .first();
+        await expect(failed.getByTestId('recording-state')).toHaveText('失敗');
+        await expect(failed.getByTestId('recording-error')).toContainText('エンコードに失敗しました');
+
         rmSync(FAIL_MARKER);
     });
 });
