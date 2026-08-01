@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     denpa の「mpv で再生」ボタンから mpv を開けるようにする。
 

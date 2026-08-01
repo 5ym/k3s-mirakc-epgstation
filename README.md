@@ -120,6 +120,20 @@ Windows は `denpa://` を自前で持ちます。[mpv-handler](https://github.c
 mpv に食わせないためです。失敗したときはメッセージボックスを出します
 (黙って終わると「押しても何も起きない」になるため)。
 
+レジストリに書く一行は壊れていても Windows が黙って何もしないだけなので、
+`windows/verify.ps1` で先に確かめられます。Windows でなくても走ります。
+
+```sh
+docker run --rm -v "$PWD/windows:/w:ro" mcr.microsoft.com/powershell:latest \
+    pwsh -NoProfile -File /w/verify.ps1
+```
+
+> `.ps1` は **UTF-8 BOM 付き + CRLF** で置いてあります。PowerShell 5.1 は BOM が無いと
+> ANSI (日本語環境では CP932) として読み、CP932 の先行バイトが次の ASCII 文字を
+> 巻き込むので `'` や `}` が消えて構文エラーになります。`.gitattributes` で保っています。
+> WSL のパスから直接実行すると「セキュリティの警告」が出ます。`R` で進めるか、
+> Windows 側にコピーしてから実行してください。
+
 配信は `/api/recordings/<id>/file`。Range に対応しているのでプレイヤー側から早送り
 できます。エンコード済みがあればそれを、無ければ生TSを返します。
 
