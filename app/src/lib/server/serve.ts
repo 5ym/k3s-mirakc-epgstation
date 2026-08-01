@@ -2,12 +2,30 @@ import { createReadStream, statSync } from 'node:fs';
 import { Readable } from 'node:stream';
 
 /**
+ * ダウンロードしたときのファイル名。
+ *
+ * 付けないとブラウザは URL の末尾から名前を作るので、`/api/recordings/12/file`
+ * が「file」という拡張子の無いファイルとして落ちてくる。
+ * 日本語は素の filename では渡せないので filename* を使い、
+ * 読めない相手向けに ASCII に落としたものも並べて出す (RFC 6266)。
+ */
+export function contentDisposition(filename: string, attachment: boolean): string {
+    const ascii = filename.replace(/[^\u0020-\u007e]/g, '_').replace(/["\\]/g, '_');
+    return `${attachment ? 'attachment' : 'inline'}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
+/**
  * ファイルをそのまま返す。Range に対応する。
  *
  * mpv も VLC も Kodi も Range でシークする。対応していないと、
  * プレイヤーによっては全部落とし終わるまで早送りできない。
  */
-export function serveFile(path: string, contentType: string, request: Request): Response {
+export function serveFile(
+    path: string,
+    contentType: string,
+    request: Request,
+    disposition?: string,
+): Response {
     let size: number;
     try {
         size = statSync(path).size;
@@ -15,7 +33,8 @@ export function serveFile(path: string, contentType: string, request: Request): 
         return new Response('not found', { status: 404 });
     }
 
-    const base = { 'Content-Type': contentType, 'Accept-Ranges': 'bytes' };
+    const base: Record<string, string> = { 'Content-Type': contentType, 'Accept-Ranges': 'bytes' };
+    if (disposition !== undefined) base['Content-Disposition'] = disposition;
     if (request.method === 'HEAD') {
         return new Response(null, { headers: { ...base, 'Content-Length': String(size) } });
     }

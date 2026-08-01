@@ -2,7 +2,7 @@
     import { submitting } from '$lib/actions';
     import ProgramDetail from '$lib/components/ProgramDetail.svelte';
     import { liveUpdates } from '$lib/live-updates.svelte';
-    import { detectPlatform, type Platform, playLinks } from '$lib/play';
+    import { detectPlatform, type Platform, playLinks, withCredentials } from '$lib/play';
     import {
         badgeClass,
         cmRanges,
@@ -37,6 +37,14 @@
 
     /** プレイヤーに渡すので絶対URLにする */
     const fileUrl = (id: number) => `${origin}/api/recordings/${id}/file`;
+
+    /*
+     * ダウンロードも資格情報を URL に入れる。ブラウザは画面を開いたときの認証を
+     * ダウンロードに引き継がないので、素のURLだと 401 になって落ちてこない。
+     * ?download=1 でサーバが添付として返し、ファイル名も付く
+     */
+    const downloadUrl = (id: number) =>
+        withCredentials(`${origin}/api/recordings/${id}/file?download=1`, data.credentials);
 
     /** 行から開いた番組詳細。番組表と同じ見せ方をする */
     let detail = $state<Detail | null>(null);
@@ -90,8 +98,8 @@
     <div class="alert alert-error mb-4" data-testid="dashboard-error">{form.message}</div>
 {/if}
 
-<div class="grid gap-6 xl:grid-cols-5">
-    <section class="xl:col-span-2">
+<div class="grid gap-6 lg:grid-cols-5">
+    <section class="lg:col-span-2">
         <div class="mb-2 flex min-h-8 flex-wrap items-center justify-between gap-2">
             <h2 class="text-lg font-bold">予約</h2>
             <div class="flex gap-2">
@@ -109,8 +117,8 @@
                 <thead>
                     <tr>
                         <th class="whitespace-nowrap">放送日時</th>
-                        <!-- 番組名は長いので、余りは全部こちらに寄せる -->
-                        <th class="w-full">番組</th>
+                        <!-- 番組名は省略せずそのまま出す。余りはこの列に寄せる -->
+                        <th class="w-full min-w-48">番組</th>
                         <th class="whitespace-nowrap">種別</th>
                         <th class="whitespace-nowrap">状態</th>
                         <th></th>
@@ -136,13 +144,10 @@
                                     ({duration(res.start_at, res.end_at)})
                                 </div>
                             </td>
-                            <!--
-                                局名は番組名の下に小さく。録画一覧と同じ出し方。
-                                max-w-0 は truncate を効かせるため(中身が幅を押し広げるのを止める)
-                            -->
-                            <td class="max-w-0">
-                                <div class="truncate font-medium" title={res.name}>{res.name}</div>
-                                <div class="text-base-content/60 truncate text-sm">{res.service_name}</div>
+                            <!-- 局名は番組名の下に小さく。録画一覧と同じ出し方 -->
+                            <td>
+                                <div class="font-medium">{res.name}</div>
+                                <div class="text-base-content/60 text-sm">{res.service_name}</div>
                                 {#if res.conflict_reason}
                                     <div class="text-error text-sm">{res.conflict_reason}</div>
                                 {/if}
@@ -191,7 +196,7 @@
         </div>
     </section>
 
-    <section class="xl:col-span-3">
+    <section class="lg:col-span-3">
         <!-- 見出しの高さと下の余白は予約側と揃える。並べたときにずれて見えるため -->
         <div class="mb-2 flex min-h-8 flex-wrap items-center justify-between gap-2">
             <h2 class="text-lg font-bold">録画</h2>
@@ -282,8 +287,8 @@
                 <thead>
                     <tr>
                         <th class="whitespace-nowrap">放送日時</th>
-                        <!-- 番組名は長いので、余りは全部こちらに寄せる -->
-                        <th class="w-full">番組</th>
+                        <!-- 番組名は省略せずそのまま出す。余りはこの列に寄せる -->
+                        <th class="w-full min-w-48">番組</th>
                         <th class="whitespace-nowrap">サイズ</th>
                         <th class="whitespace-nowrap">状態</th>
                         <th></th>
@@ -311,12 +316,11 @@
                                     ({recordedDuration(rec)})
                                 </span>
                             </td>
-                            <!-- max-w-0 は truncate を効かせるため -->
-                            <td class="max-w-0">
-                                <div class="truncate font-medium" title={rec.name}>{rec.name}</div>
+                            <td>
+                                <div class="font-medium">{rec.name}</div>
                                 <!-- ファイルの置き場所は普段は見ないので出さない。
                                      必要なときは data-library-path を見る -->
-                                <div class="text-base-content/60 truncate text-sm">{rec.service_name}</div>
+                                <div class="text-base-content/60 text-sm">{rec.service_name}</div>
                                 {#if rec.error}
                                     <!--
                                         失敗の理由はこの行にそのまま出す。上にまとめて出していた頃は
@@ -371,7 +375,7 @@
                                             {/each}
                                             <a
                                                 class="btn btn-sm btn-ghost"
-                                                href={`/api/recordings/${rec.id}/file`}
+                                                href={downloadUrl(rec.id)}
                                                 download
                                                 data-testid="download-link"
                                             >

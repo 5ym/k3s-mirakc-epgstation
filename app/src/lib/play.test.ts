@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { base64Url, detectPlatform, playLinks } from './play';
+import { base64Url, detectPlatform, playLinks, withCredentials } from './play';
 
 const TITLE = 'テストアニメ 第1話';
 
@@ -77,6 +77,16 @@ describe('ベーシック認証つきのURL', () => {
             const url = new globalThis.URL(link.href).searchParams.get('url') ?? '';
             expect(url).toBe('http://denpa:p%40ss%20word@denpa.local/api/recordings/12/file');
         }
+    });
+
+    test('ダウンロード用のURLにも同じように埋められる', () => {
+        // ブラウザは画面を開いたときの認証をダウンロードに引き継がない
+        expect(withCredentials('http://denpa.local/api/recordings/12/file?download=1', cred)).toBe(
+            'http://denpa.local/api/recordings/12/file?download=1'.replace(
+                'http://',
+                'http://denpa:p%40ss%20word@',
+            ),
+        );
     });
 
     test('資格情報が無ければ素のURLのまま', () => {

@@ -27,6 +27,20 @@ export function base64Url(value: string): string {
     return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
+/**
+ * ベーシック認証の資格情報を URL に埋める。
+ *
+ * プレイヤーは認証ダイアログを出せないものが多く、ブラウザからの
+ * ダウンロードもページの資格情報を引き継がないので、URL に入れるしかない。
+ */
+export function withCredentials(url: string, credentials?: { user: string; password: string }): string {
+    if (credentials === undefined) return url;
+    return url.replace(
+        /^(https?:\/\/)/,
+        `$1${encodeURIComponent(credentials.user)}:${encodeURIComponent(credentials.password)}@`,
+    );
+}
+
 export interface PlayLink {
     label: string;
     href: string;
@@ -50,16 +64,9 @@ export function playLinks(
     platform: Platform,
     credentials?: { user: string; password: string },
 ): PlayLink[] {
-    // プレイヤーはベーシック認証のダイアログを出せないものが多いので、
-    // URL に埋めて渡す。埋められないもの(Android の intent)は素のURLのまま
-    const withCredentials =
-        credentials === undefined
-            ? url
-            : url.replace(
-                  /^(https?:\/\/)/,
-                  `$1${encodeURIComponent(credentials.user)}:${encodeURIComponent(credentials.password)}@`,
-              );
-    const encodedUrl = encodeURIComponent(withCredentials);
+    // 埋められないもの(Android の intent)は素のURLのまま
+    const authed = withCredentials(url, credentials);
+    const encodedUrl = encodeURIComponent(authed);
     const encodedTitle = encodeURIComponent(title);
 
     if (platform === 'windows') {
@@ -76,7 +83,7 @@ export function playLinks(
         return [
             {
                 label: 'mpv で再生',
-                href: `denpa://play/${base64Url(withCredentials)}/?title=${base64Url(title)}`,
+                href: `denpa://play/${base64Url(authed)}/?title=${base64Url(title)}`,
                 note: 'windows/denpa.ps1 で登録が必要',
             },
         ];

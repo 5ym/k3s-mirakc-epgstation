@@ -104,6 +104,19 @@ test.describe('録画とエンコード', () => {
         expect(part.headers()['content-range']).toMatch(/^bytes 0-99\/\d+$/);
         expect((await part.body()).byteLength).toBe(100);
 
+        // ダウンロードのリンクは資格情報を URL に入れる。ブラウザは画面を開いた
+        // ときの認証をダウンロードに引き継がないので、素のURLだと 401 になる
+        const href = (await recording.getByTestId('download-link').getAttribute('href')) ?? '';
+        expect(href).toContain('denpa:');
+        expect(href).toContain('download=1');
+
+        // 名前を付けないと「file」という拡張子の無いファイルとして落ちてくる
+        const attached = await request.get(href);
+        expect(attached.status()).toBe(200);
+        const disposition = attached.headers()['content-disposition'] ?? '';
+        expect(disposition).toMatch(/^attachment;/);
+        expect(disposition).toContain('.mkv');
+
         // 節目ごとに通知が飛び、どれも番組名と一緒にチャンネル名が入っていること。
         // 番組名だけだと、どの局のものか通知を見ただけでは分からない
         const state = await (await request.get(`${WEBHOOK_URL}/__control/state`)).json();
