@@ -29,5 +29,8 @@
         "tailwindcss": "^4.1.16",
         "typescript": "^5.9.3",
         "vite": "^8.0.0"
+    },
+    "dependencies": {
+        "mysql2": "^3.23.2"
     }
 }
