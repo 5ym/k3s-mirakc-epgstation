@@ -55,6 +55,8 @@ test.describe('設定', () => {
 
         // 日本の番組は TheTVDB に載っていないので、.nfo を読ませてネット取得は切る
         expect(state.folders).toHaveLength(1);
+        // ライブTVのタイルと並ぶので、中身が分かる名前にしてある
+        expect(state.folders[0].Name).toBe('録画');
         expect(state.folders[0].CollectionType).toBe('tvshows');
         expect(state.folders[0].LibraryOptions.MetadataSavers).toEqual(['Nfo']);
         expect(state.folders[0].LibraryOptions.EnableInternetProviders).toBe(false);

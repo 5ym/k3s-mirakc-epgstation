@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import type { Program, Recording, Service } from '../types';
+import { config } from './config';
 import { database, now, queryAll, queryOne } from './db';
 import { pruneEmptyDirs, removeIfExists } from './fsx';
 import { removeSidecars } from './metadata';
@@ -210,8 +211,10 @@ interface JellyfinUser {
  * 切って denpa が書いた .nfo を読ませる。これを有効なままにすると、空の検索結果で
  * せっかくのメタデータが上書きされる。
  */
-export async function setupLibrary(libraryPath: string): Promise<{ created: boolean; name: string }> {
-    const name = 'テレビ番組';
+export async function setupLibrary(
+    libraryPath: string,
+): Promise<{ created: boolean; renamed: boolean; name: string }> {
+    const name = config.jellyfinLibraryName;
     const folders = await api<VirtualFolder[]>('/Library/VirtualFolders');
     const existing = folders.find((f) => f.Locations.includes(libraryPath));
 
@@ -240,7 +243,14 @@ export async function setupLibrary(libraryPath: string): Promise<{ created: bool
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ Id: existing.ItemId, LibraryOptions: options }),
         });
-        return { created: false, name: existing.Name };
+        // 名前を変えたくなったときのために、違っていたら付け替える
+        let renamed = false;
+        if (existing.Name !== name) {
+            const rename = new URLSearchParams({ name: existing.Name, newName: name });
+            await api<void>(`/Library/VirtualFolders/Name?${rename}`, { method: 'POST' });
+            renamed = true;
+        }
+        return { created: false, renamed, name };
     }
 
     const query = new URLSearchParams({
@@ -254,7 +264,7 @@ export async function setupLibrary(libraryPath: string): Promise<{ created: bool
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ LibraryOptions: options }),
     });
-    return { created: true, name };
+    return { created: true, renamed: false, name };
 }
 
 /**

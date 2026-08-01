@@ -100,6 +100,11 @@ Bun.serve({
                 return new Response(null, { status: 204 });
             }
         }
+        if (url.pathname === '/Library/VirtualFolders/Name' && request.method === 'POST') {
+            const folder = folders.find((f) => f.Name === url.searchParams.get('name'));
+            if (folder !== undefined) folder.Name = url.searchParams.get('newName');
+            return new Response(null, { status: 204 });
+        }
         if (url.pathname === '/Library/VirtualFolders/LibraryOptions' && request.method === 'POST') {
             const body = (await request.json()) as { Id: string; LibraryOptions: Record<string, unknown> };
             const folder = folders.find((f) => f.ItemId === body.Id);

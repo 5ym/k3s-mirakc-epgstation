@@ -23,7 +23,9 @@
             <div>
                 ライブラリ「{form.setup.library.name}」を{form.setup.library.created
                     ? '追加'
-                    : '既存のまま更新'}しました
+                    : form.setup.library.renamed
+                      ? '名前を変更して更新'
+                      : '既存のまま更新'}しました
             </div>
             <div>
                 削除を許可: {form.setup.granted.length === 0

@@ -99,6 +99,11 @@ export const config = {
     /** 誰も読まなくなったストリームを切ってチューナーを解放するまでの時間(ms) */
     liveIdleTimeout: num('LIVE_IDLE_TIMEOUT', 30 * SEC),
 
+    /**
+     * Jellyfin に作るライブラリの名前。
+     * ライブTVのタイルと並ぶので、中身が分かる名前にしておく
+     */
+    jellyfinLibraryName: str('JELLYFIN_LIBRARY_NAME', '録画'),
     /** Jellyfin 向けの .nfo を書くか */
     writeNfo: bool('WRITE_NFO', true),
     /** サムネイルを切り出す位置(秒)。頭は提供表示やCMのことが多いので少し進める */

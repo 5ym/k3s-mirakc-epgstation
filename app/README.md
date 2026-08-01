@@ -45,6 +45,7 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 | `JELLYFIN_URL` / `JELLYFIN_API_KEY` | (空) | 初期値。設定画面で入れた値が優先される。Jellyfin連携に必須 |
 | `RECONCILE_INTERVAL` | `300000` | ライブラリの実体とDBを突き合わせる間隔(ms) |
 | `JELLYFIN_TIMER_INTERVAL` | `30000` | Jellyfin の録画タイマーを取り込む間隔(ms) |
+| `JELLYFIN_LIBRARY_NAME` | `録画` | Jellyfin に作るライブラリの名前 |
 | `WRITE_NFO` | `1` | Jellyfin 向けの `.nfo` を書くか |
 | `THUMBNAIL_POSITION` / `THUMBNAIL_WIDTH` | `120` / `480` | サムネイルの切り出し位置(秒)と幅 |
 | `DENPA_DB` | `/app/data/denpa.db` | SQLite の置き場 |
