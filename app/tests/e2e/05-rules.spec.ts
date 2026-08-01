@@ -29,7 +29,7 @@ test.describe('自動予約ルール', () => {
         await expect(rule.getByTestId('rule-cmcut-badge')).toContainText('CM: カット');
 
         // 偽Mirakurunは同じ番組名を周期的に返すので、ルール作成と同時に予約が立つ
-        await goto(page, '/reservations');
+        await goto(page, '/');
         const fromRule = page.getByTestId('reservation-row').filter({ hasText: 'テストアニメ自動録画' });
         await expect(fromRule.first()).toBeVisible();
 
@@ -42,7 +42,7 @@ test.describe('自動予約ルール', () => {
         await expect(page.getByTestId('rule-row')).toHaveCount(0);
 
         // 後続に影響しないよう、このルールが作った予約は片付ける
-        await goto(page, '/reservations');
+        await goto(page, '/');
         for (;;) {
             const buttons = page.getByTestId('cancel-button');
             if ((await buttons.count()) === 0) break;

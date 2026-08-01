@@ -71,6 +71,16 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 | `CM_JLS_COMMAND` | `/opt/jls/JoinLogoScpTrial.sh {input}` | jls検出器の起動コマンド |
 | `DENPA_AUTOSTART` | `1` | `0` で常駐処理を止める |
 
+## 画面
+
+| 画面 | 役割 |
+| --- | --- |
+| `/` | ダッシュボード兼**予約一覧**。状態・失敗の通知・録画中・配信中と、予約の取消/競合再計算/Jellyfinからの取り込み |
+| `/guide` | 番組表。ここから手動予約する |
+| `/rules` | 自動予約ルール |
+| `/recordings` | ライブラリ。**エンコード中の一覧も上に出る**(ライブラリに入る途中の状態なので) |
+| `/settings` | Jellyfin の接続設定とセットアップ |
+
 ## テスト
 
 E2E を主、単体テストは純粋関数の境界条件だけ、という方針。

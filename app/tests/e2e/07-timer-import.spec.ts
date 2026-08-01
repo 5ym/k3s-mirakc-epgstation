@@ -27,7 +27,7 @@ test.describe('Jellyfin の録画予約の取り込み', () => {
             },
         });
 
-        await goto(page, '/reservations');
+        await goto(page, '/');
         const before = await page.getByTestId('reservation-row').count();
 
         await page.getByTestId('import-timers').click();
@@ -57,7 +57,7 @@ test.describe('Jellyfin の録画予約の取り込み', () => {
             },
         });
 
-        await goto(page, '/reservations');
+        await goto(page, '/');
         await page.getByTestId('import-timers').click();
         await expect(page.getByTestId('import-result')).toContainText('取り込み 1 件');
         await page.getByTestId('reservation-row').first().getByTestId('cancel-button').click();
@@ -75,7 +75,7 @@ test.describe('Jellyfin の録画予約の取り込み', () => {
             },
         });
 
-        await goto(page, '/reservations');
+        await goto(page, '/');
         await page.getByTestId('import-timers').click();
         await expect(page.getByTestId('import-result')).toContainText('対象外 1 件');
 
@@ -94,7 +94,7 @@ test.describe('Jellyfin の録画予約の取り込み', () => {
             },
         });
 
-        await goto(page, '/reservations');
+        await goto(page, '/');
         await page.getByTestId('import-timers').click();
         const result = page.getByTestId('import-result');
         await expect(result).toContainText('失敗 1 件');

@@ -28,7 +28,7 @@ test.describe('手動予約', () => {
         await expect(row).toContainText('予約済み');
         await expect(row.getByTestId('reserve-button')).toHaveCount(0);
 
-        await goto(page, '/reservations');
+        await goto(page, '/');
         const reservation = page.locator(`[data-testid="reservation-row"][data-program-id="${programId}"]`);
         await expect(reservation).toHaveCount(1);
         await expect(reservation).toContainText('手動');
@@ -38,7 +38,7 @@ test.describe('手動予約', () => {
         await expect(reservation).toHaveCount(0);
 
         // 取り消したものは「完了分も表示」でだけ見える
-        await goto(page, '/reservations?all=1');
+        await goto(page, '/?all=1');
         await expect(
             page.locator(`[data-testid="reservation-row"][data-program-id="${programId}"]`),
         ).toContainText('キャンセル');
@@ -52,7 +52,7 @@ test.describe('手動予約', () => {
         await row.getByTestId('reserve-button').click();
         await expect(row).toContainText('予約済み');
 
-        await goto(page, '/reservations');
+        await goto(page, '/');
         const reservation = page.locator(`[data-testid="reservation-row"][data-program-id="${programId}"]`);
         // GRのチューナーは2本あるので、他局の予約と重なっても競合しない
         await expect(reservation.getByTestId('reservation-state')).toHaveText('予約済み');

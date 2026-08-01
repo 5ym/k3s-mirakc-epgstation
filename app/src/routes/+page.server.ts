@@ -1,50 +1,74 @@
-import { database, queryOne } from '$lib/server/db';
+import { fail } from '@sveltejs/kit';
+import { queryAll, queryOne } from '$lib/server/db';
 import { sync } from '$lib/server/epg';
-import { enabled as jellyfinEnabled } from '$lib/server/jellyfin';
+import { importTimers, enabled as jellyfinEnabled } from '$lib/server/jellyfin';
 import { sessions, stopSession } from '$lib/server/live';
 import { ping } from '$lib/server/mirakurun';
-import type { EncodeJob, Recording, Reservation } from '$lib/types';
+import { cancel } from '$lib/server/reservations';
+import { resolveConflicts } from '$lib/server/scheduler';
+import type { Recording, Reservation } from '$lib/types';
 
-interface JobRow extends EncodeJob {
-    recording_name: string;
+interface ReservationRow extends Reservation {
+    service_name: string;
+    rule_name: string | null;
 }
 
-export async function load() {
-    const recording = database()
-        .prepare(`SELECT * FROM recordings WHERE state = 'recording' ORDER BY start_at`)
-        .all() as Recording[];
+const DAY = 24 * 60 * 60 * 1000;
 
-    const upcoming = database()
-        .prepare(
-            `SELECT * FROM reservations WHERE state IN ('scheduled','conflict') AND end_at > ?
-             ORDER BY start_at LIMIT 10`,
-        )
-        .all(Date.now()) as Reservation[];
+/**
+ * ダッシュボードは予約一覧を兼ねる。
+ * 「これから何が録れるか」と「いま何が起きているか」は同じ画面で見たいものなので、
+ * 予約を別画面に切り出すと行き来するだけになる。
+ */
+export async function load({ url }) {
+    const at = Date.now();
+    const showFinished = url.searchParams.get('all') === '1';
 
-    const encoding = database()
-        .prepare(
-            `SELECT j.*, r.name AS recording_name FROM encode_jobs j
-             JOIN recordings r ON r.id = j.recording_id
-             WHERE j.state IN ('queued','running') ORDER BY j.id LIMIT 10`,
-        )
-        .all() as JobRow[];
+    const recording = queryAll<Recording>(
+        `SELECT * FROM recordings WHERE state = 'recording' ORDER BY start_at`,
+    );
+
+    const states = showFinished
+        ? "('scheduled','conflict','recording','done','failed','canceled')"
+        : "('scheduled','conflict','recording')";
+    const reservations = queryAll<ReservationRow>(
+        `SELECT r.*, s.name AS service_name, rules.name AS rule_name
+         FROM reservations r
+         JOIN services s ON s.id = r.service_id
+         LEFT JOIN rules ON rules.id = r.rule_id
+         WHERE r.state IN ${states}
+         ORDER BY r.start_at ${showFinished ? 'DESC' : 'ASC'} LIMIT 300`,
+    );
 
     const stats = queryOne<Record<string, number>>(
         `SELECT
-                (SELECT COUNT(*) FROM recordings WHERE state = 'available' AND deleted_at IS NULL) AS available,
-                (SELECT COUNT(*) FROM recordings WHERE deleted_at IS NOT NULL) AS deleted,
-                (SELECT COUNT(*) FROM programs) AS programs,
-                (SELECT COUNT(*) FROM services) AS services,
-            (SELECT COUNT(*) FROM reservations WHERE state = 'conflict') AS conflicts`,
+            (SELECT COUNT(*) FROM recordings WHERE state = 'available' AND deleted_at IS NULL) AS available,
+            (SELECT COALESCE(SUM(ts_size), 0) FROM recordings WHERE deleted_at IS NULL) AS bytes,
+            (SELECT COUNT(*) FROM reservations WHERE state = 'scheduled' AND start_at BETWEEN ? AND ?) AS today,
+            (SELECT COUNT(*) FROM reservations WHERE state = 'conflict' AND end_at > ?) AS conflicts,
+            (SELECT COUNT(*) FROM programs) AS programs,
+            (SELECT COUNT(*) FROM services) AS services,
+            (SELECT COUNT(*) FROM encode_jobs WHERE state IN ('queued','running')) AS encoding`,
+        at,
+        at + DAY,
+        at,
     )!;
+
+    // 失敗は放っておくと気づけないので、直近1日ぶんを目立つところに出す
+    const failures = queryAll<{ id: number; name: string; error: string | null; updated_at: number }>(
+        `SELECT id, name, error, updated_at FROM recordings
+         WHERE state = 'failed' AND updated_at > ? ORDER BY updated_at DESC LIMIT 5`,
+        at - DAY,
+    );
 
     return {
         recording,
-        upcoming,
-        encoding,
+        reservations,
+        showFinished,
         stats,
-        mirakurun: await ping(),
+        failures,
         live: sessions(),
+        mirakurun: await ping(),
         jellyfin: jellyfinEnabled(),
     };
 }
@@ -58,5 +82,27 @@ export const actions = {
         const form = await request.formData();
         stopSession(Number(form.get('id')));
         return { success: true };
+    },
+
+    cancel: async ({ request }) => {
+        const form = await request.formData();
+        const id = Number(form.get('id'));
+        if (!Number.isFinite(id)) return fail(400, { message: '予約IDが不正です' });
+        await cancel(id);
+        return { success: true };
+    },
+
+    resolve: async () => {
+        await resolveConflicts();
+        return { success: true };
+    },
+
+    importTimers: async () => {
+        // 定期取り込み(JELLYFIN_TIMER_INTERVAL)を待たずに反映したいとき用
+        try {
+            return { success: true, timers: await importTimers() };
+        } catch (error) {
+            return fail(502, { message: `Jellyfin から取り込めませんでした: ${error}` });
+        }
     },
 };

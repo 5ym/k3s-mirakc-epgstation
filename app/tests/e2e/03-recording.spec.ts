@@ -45,7 +45,7 @@ test.describe('録画とエンコード', () => {
         await expect(row.getByTestId('reserve-button')).toHaveCount(0);
 
         const reservationRow = `[data-testid="reservation-row"][data-program-id="${programId}"]`;
-        await waitForRowState(page, '/reservations?all=1', reservationRow, 'reservation-state', '完了');
+        await waitForRowState(page, '/?all=1', reservationRow, 'reservation-state', '完了');
 
         const recordingRow = `[data-testid="recording-row"][data-program-id="${programId}"]`;
         await waitForRowState(page, '/recordings', recordingRow, 'recording-state', '視聴可能');

@@ -8,12 +8,11 @@ test.describe('ダッシュボードと画面遷移', () => {
         await goto(page, '/');
         await expect(page.getByTestId('status')).toContainText('Mirakurun');
 
-        // 偽Mirakurunは3局を返す。取り込めていれば「番組 / 局」の右側が3になる
-        await expect(page.getByTestId('stats')).toContainText('/ 3');
+        // 偽Mirakurunは3局を返す。取り込めていればヘッダの「局」が3になる
+        await expect(page.getByTestId('status')).toContainText('局 3');
 
         for (const [name, heading] of [
             ['nav-guide', '番組表'],
-            ['nav-reservations', '予約'],
             ['nav-rules', '自動予約ルール'],
             ['nav-settings', '設定'],
             ['nav-recordings', 'ライブラリ'],

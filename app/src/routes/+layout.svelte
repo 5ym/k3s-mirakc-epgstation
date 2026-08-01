@@ -24,7 +24,6 @@
     const links = [
         { href: '/', label: 'ダッシュボード' },
         { href: '/guide', label: '番組表' },
-        { href: '/reservations', label: '予約' },
         { href: '/rules', label: 'ルール' },
         { href: '/recordings', label: 'ライブラリ' },
         { href: '/settings', label: '設定' },
