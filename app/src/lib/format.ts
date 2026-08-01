@@ -9,6 +9,12 @@ export function time(ms: number): string {
     return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/** 日付だけ。時刻と2行に分けて出すとき用 */
+export function date(ms: number): string {
+    const d = new Date(ms);
+    return `${d.getMonth() + 1}/${d.getDate()}(${WEEKDAYS[d.getDay()]})`;
+}
+
 export function dateTime(ms: number): string {
     const d = new Date(ms);
     return `${d.getMonth() + 1}/${d.getDate()}(${WEEKDAYS[d.getDay()]}) ${pad(d.getHours())}:${pad(d.getMinutes())}`;

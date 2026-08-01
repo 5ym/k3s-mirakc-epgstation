@@ -49,18 +49,19 @@ test.describe('録画とエンコード', () => {
         const recordingRow = `[data-testid="recording-row"][data-program-id="${programId}"]`;
         await waitForRowState(page, '/', recordingRow, 'recording-state', '視聴可能');
 
-        // ライブラリ上のパスが決まっていること。実体との突き合わせにこのパスを使う
+        // ライブラリ上のパスが決まっていること。実体との突き合わせにこのパスを使う。
+        // 画面には出さない(普段は見ないので)ので、行の属性から取る
         await goto(page, '/');
         const recording = page.locator(recordingRow);
-        await expect(recording).toContainText('/tmp/denpa-e2e/library/');
-        await expect(recording).toContainText('.mkv');
+        const videoPath = (await recording.getAttribute('data-library-path')) ?? '';
+        expect(videoPath).toContain('/tmp/denpa-e2e/library/');
+        expect(videoPath).toContain('.mkv');
 
         // CM検出が走り、既定のチャプター付与として記録されていること
         // 出るのは検出した区間。設定そのものは全体設定なので一覧には出さない
         await expect(recording.getByTestId('cm-info')).toContainText('CM 5:00-6:00');
 
         // .nfo を読むプレイヤー(Kodi など)向けに、サイドカーが揃っていること
-        const videoPath = ((await recording.locator('span.font-mono').first().textContent()) ?? '').trim();
         const base = videoPath.replace(/\.mkv$/, '');
         expect(existsSync(`${base}.nfo`)).toBe(true);
         expect(existsSync(`${base}-thumb.jpg`)).toBe(true);
@@ -142,7 +143,7 @@ test.describe('CMの実カット', () => {
 
         // 字幕はエンコードの前にTSを切ることで残している。
         // フィルタで切っていた頃は -sn で落とすしかなかった
-        const videoPath = ((await recording.locator('span.font-mono').first().textContent()) ?? '').trim();
+        const videoPath = (await recording.getAttribute('data-library-path')) ?? '';
         expect(videoPath).toContain('.mkv');
         // 切るための作業ファイルは片付いていること
         expect(existsSync(`${videoPath.replace(/\.mkv$/, '')}.cut.ts`)).toBe(false);

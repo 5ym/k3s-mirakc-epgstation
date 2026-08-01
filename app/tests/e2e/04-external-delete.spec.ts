@@ -16,7 +16,7 @@ test.describe('ライブラリから外で消された録画の反映', () => {
         await expect(recording).toBeVisible();
 
         const recordingId = await recording.getAttribute('data-recording-id');
-        const libraryPath = ((await recording.locator('span.font-mono').first().textContent()) ?? '').trim();
+        const libraryPath = (await recording.getAttribute('data-library-path')) ?? '';
         expect(libraryPath).toContain('/tmp/denpa-e2e/library/');
 
         // ファイルが在るうちは照合しても何も起きない

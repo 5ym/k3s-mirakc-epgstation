@@ -45,11 +45,11 @@ export function load({ url }) {
         .prepare(
             `SELECT * FROM recordings
              WHERE deleted_at IS ${showDeleted ? 'NOT NULL' : 'NULL'}
-             -- 録画中のものは予約側に「録画中」として出している。
-             -- 両方に出ると同じ番組が2行あるように見えるので、こちらには出さない
-             AND state != 'recording'
-             -- エンコード中は状態が動いているので先頭に固定する
-             ORDER BY (state IN ('recorded','encoding')) DESC, start_at DESC
+             -- 進行中のものは上のエンコード欄と予約一覧に出ている。
+             -- ここにも出すと同じ番組が2箇所に並ぶので、落ち着いたものだけ出す
+             AND state NOT IN ('recording', 'encoding')
+             -- エンコード待ちは状態が動くので先頭に固定する
+             ORDER BY (state = 'recorded') DESC, start_at DESC
              LIMIT 300`,
         )
         .all() as Recording[];

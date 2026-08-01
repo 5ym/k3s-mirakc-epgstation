@@ -3,7 +3,17 @@
     import ProgramDetail from '$lib/components/ProgramDetail.svelte';
     import { liveUpdates } from '$lib/live-updates.svelte';
     import { detectPlatform, type Platform, playLinks } from '$lib/play';
-    import { badgeClass, cmRanges, dateTime, duration, percent, size, stateLabel, time } from '$lib/format';
+    import {
+        badgeClass,
+        cmRanges,
+        date,
+        dateTime,
+        duration,
+        percent,
+        size,
+        stateLabel,
+        time,
+    } from '$lib/format';
     import type { ProgramDetail as Detail } from '$lib/types';
 
     let { data, form } = $props();
@@ -144,16 +154,21 @@
                             onclick={(event) => rowClick(event, res.program_id, res)}
                             onkeydown={(event) => rowClick(event, res.program_id, res)}
                         >
+                            <!-- 日付と時刻で2行にする。1行だと番組名の幅をだいぶ食う -->
                             <td class="whitespace-nowrap">
-                                {dateTime(res.start_at)} 〜 {time(res.end_at)}
-                                <span class="text-base-content/60 text-xs">
+                                <div>{date(res.start_at)}</div>
+                                <div class="text-base-content/60 text-sm">
+                                    {time(res.start_at)}〜{time(res.end_at)}
                                     ({duration(res.start_at, res.end_at)})
-                                </span>
+                                </div>
                             </td>
-                            <!-- 局名は番組名の下に小さく。録画一覧と同じ出し方 -->
-                            <td>
-                                <div class="font-medium">{res.name}</div>
-                                <div class="text-base-content/60 text-sm">{res.service_name}</div>
+                            <!--
+                                局名は番組名の下に小さく。録画一覧と同じ出し方。
+                                max-w-0 は truncate を効かせるため(中身が幅を押し広げるのを止める)
+                            -->
+                            <td class="max-w-0">
+                                <div class="truncate font-medium" title={res.name}>{res.name}</div>
+                                <div class="text-base-content/60 truncate text-sm">{res.service_name}</div>
                                 {#if res.conflict_reason}
                                     <div class="text-error text-sm">{res.conflict_reason}</div>
                                 {/if}
@@ -307,6 +322,7 @@
                             data-testid="recording-row"
                             data-recording-id={rec.id}
                             data-program-id={rec.program_id}
+                            data-library-path={rec.library_path}
                             class="hover cursor-pointer"
                             tabindex="0"
                             onclick={(event) => rowClick(event, rec.program_id, rec)}
@@ -318,14 +334,12 @@
                                     ({duration(rec.start_at, rec.end_at)})
                                 </span>
                             </td>
-                            <td>
-                                <div class="font-medium">{rec.name}</div>
-                                <div class="text-base-content/60 text-sm">
-                                    {rec.service_name}
-                                    {#if rec.library_path}
-                                        <span class="ml-1 font-mono text-xs">{rec.library_path}</span>
-                                    {/if}
-                                </div>
+                            <!-- max-w-0 は truncate を効かせるため -->
+                            <td class="max-w-0">
+                                <div class="truncate font-medium" title={rec.name}>{rec.name}</div>
+                                <!-- ファイルの置き場所は普段は見ないので出さない。
+                                     必要なときは data-library-path を見る -->
+                                <div class="text-base-content/60 truncate text-sm">{rec.service_name}</div>
                                 {#if rec.error}
                                     <!-- 削除済みの行では error 列に削除理由が入る。失敗ではないので赤くしない -->
                                     <div
@@ -353,8 +367,9 @@
                                     {stateLabel(rec.state)}
                                 </span>
                             </td>
-                            <td>
-                                <div class="flex flex-wrap items-center gap-2">
+                            <!-- 畳ませない。番組の列に幅を寄せているので、許すとボタンが縦積みになる -->
+                            <td class="whitespace-nowrap">
+                                <div class="flex flex-nowrap items-center gap-2">
                                     {#if rec.deleted_at === null}
                                         {#if rec.library_path !== null && platform !== null}
                                             <!--
