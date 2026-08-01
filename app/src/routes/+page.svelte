@@ -50,7 +50,7 @@
 {/if}
 {#if form?.reconcile}
     <div class="alert alert-info mb-4" data-testid="reconcile-result">
-        照合 {form.reconcile.checked} 件 / 実体が無く削除済みにした {form.reconcile.removed} 件
+        照合 {form.reconcile.checked} 件 / 実体が無く削除済み {form.reconcile.removed} 件
     </div>
 {/if}
 
