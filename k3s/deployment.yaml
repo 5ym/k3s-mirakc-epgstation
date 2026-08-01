@@ -102,7 +102,7 @@ spec:
     spec:
       containers:
         - name: epgstation
-          image: ghcr.io/danything/epgstation:sha-7fded66830d0
+          image: ghcr.io/danything/epgstation:sha-241280b8ad75
           imagePullPolicy: IfNotPresent
           env:
             - name: TZ
@@ -162,7 +162,7 @@ spec:
     spec:
       containers:
         - name: denpa
-          image: ghcr.io/danything/denpa:sha-33f8a02a7e66
+          image: ghcr.io/danything/denpa:sha-0b35d969fd5e
           imagePullPolicy: IfNotPresent
           env:
             - name: TZ
