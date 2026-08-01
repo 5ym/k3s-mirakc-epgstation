@@ -81,12 +81,14 @@
 <div class="mb-4 flex flex-wrap items-center justify-between gap-2">
     <div class="flex flex-wrap items-center gap-2">
         <h1 class="text-2xl font-bold">番組表</h1>
-        <div
-            class="badge badge-lg {data.mirakurun.ok ? 'badge-success' : 'badge-error'}"
-            data-testid="status"
-        >
-            Mirakurun {data.mirakurun.ok ? (data.mirakurun.version ?? 'OK') : 'NG'}
-        </div>
+        <!-- 疎通確認は後から流れてくる。場所だけ先に確保して、来たら差し替える -->
+        {#await data.mirakurun}
+            <div class="badge badge-lg badge-ghost" data-testid="status">Mirakurun 確認中</div>
+        {:then mirakurun}
+            <div class="badge badge-lg {mirakurun.ok ? 'badge-success' : 'badge-error'}" data-testid="status">
+                Mirakurun {mirakurun.ok ? (mirakurun.version ?? 'OK') : 'NG'}
+            </div>
+        {/await}
         <div class="badge badge-lg badge-ghost">番組 {data.counts.programs} / 局 {data.counts.services}</div>
         <!-- 番組表が古いと気づくのはこの画面なので、取り直すのもここに置く -->
         <form method="POST" action="?/sync" use:submitting>

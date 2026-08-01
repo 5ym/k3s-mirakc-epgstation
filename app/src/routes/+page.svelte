@@ -108,7 +108,7 @@
 
 <div class="grid gap-6 xl:grid-cols-5">
     <section class="xl:col-span-2">
-        <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div class="mb-2 flex min-h-8 flex-wrap items-center justify-between gap-2">
             <h2 class="text-lg font-bold">予約</h2>
             <div class="flex gap-2">
                 <a class="btn btn-sm" href={data.showFinished ? '/' : '/?all=1'}>
@@ -124,12 +124,12 @@
             <table class="table table-zebra">
                 <thead>
                     <tr>
-                        <th>放送日時</th>
-                        <th>チャンネル</th>
-                        <th>番組</th>
-                        <th>種別</th>
-                        <th>状態</th>
-                        <th class="w-28"></th>
+                        <th class="whitespace-nowrap">放送日時</th>
+                        <!-- 番組名は長いので、余りは全部こちらに寄せる -->
+                        <th class="w-full">番組</th>
+                        <th class="whitespace-nowrap">種別</th>
+                        <th class="whitespace-nowrap">状態</th>
+                        <th></th>
                     </tr>
                 </thead>
                 <tbody data-testid="reservation-list">
@@ -150,9 +150,10 @@
                                     ({duration(res.start_at, res.end_at)})
                                 </span>
                             </td>
-                            <td class="whitespace-nowrap">{res.service_name}</td>
+                            <!-- 局名は番組名の下に小さく。録画一覧と同じ出し方 -->
                             <td>
                                 <div class="font-medium">{res.name}</div>
+                                <div class="text-base-content/60 text-sm">{res.service_name}</div>
                                 {#if res.conflict_reason}
                                     <div class="text-error text-sm">{res.conflict_reason}</div>
                                 {/if}
@@ -190,7 +191,7 @@
                             </td>
                         </tr>
                     {:else}
-                        <tr><td colspan="6" class="text-base-content/60">予約はありません</td></tr>
+                        <tr><td colspan="5" class="text-base-content/60">予約はありません</td></tr>
                     {/each}
                 </tbody>
             </table>
@@ -198,7 +199,8 @@
     </section>
 
     <section class="xl:col-span-3">
-        <div class="mb-4 flex items-center justify-between">
+        <!-- 見出しの高さと下の余白は予約側と揃える。並べたときにずれて見えるため -->
+        <div class="mb-2 flex min-h-8 flex-wrap items-center justify-between gap-2">
             <h2 class="text-lg font-bold">録画</h2>
             <div class="flex gap-2">
                 <a class="btn btn-sm" href={data.showDeleted ? '/' : '/?deleted=1'}>
@@ -210,9 +212,8 @@
             </div>
         </div>
 
-        {#if form?.message}
-            <div class="alert alert-error mb-4" data-testid="recording-error">{form.message}</div>
-        {/if}
+        <!-- エラーは画面の頭に1つだけ出す。予約も録画も同じ form を見るので、
+             ここにも出すと同じ文言が2回並ぶ -->
         {#if form?.reconcile}
             <div class="alert alert-info mb-4" data-testid="reconcile-result">
                 照合 {form.reconcile.checked} 件 / 実体が無く削除済み {form.reconcile.removed} 件
@@ -287,11 +288,12 @@
             <table class="table table-zebra">
                 <thead>
                     <tr>
-                        <th>放送日時</th>
-                        <th>番組</th>
-                        <th>サイズ</th>
-                        <th>状態</th>
-                        <th class="w-56"></th>
+                        <th class="whitespace-nowrap">放送日時</th>
+                        <!-- 番組名は長いので、余りは全部こちらに寄せる -->
+                        <th class="w-full">番組</th>
+                        <th class="whitespace-nowrap">サイズ</th>
+                        <th class="whitespace-nowrap">状態</th>
+                        <th></th>
                     </tr>
                 </thead>
                 <tbody data-testid="recording-list">

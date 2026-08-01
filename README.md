@@ -28,8 +28,15 @@ EPGStation は**停止済み**です。MariaDB だけは引き継ぎ(ルール�
 
 `dp.home.arpa` は LAN 内(`10.10.0.0/16`)専用の口です。`dp.doany.io` は forward-auth を
 通していますが、mpv も Kodi も OIDC のリダイレクトを扱えません。こちらは forward-auth を
-通さず、denpa 自身のベーシック認証に任せます。自己署名だとプレイヤーが弾くことがあるので
-平文で出しています。
+通さず、denpa 自身のベーシック認証に任せます。
+
+**`https://dp.home.arpa/` で開きます。** Traefik の `web` エントリポイントには
+クラスタ全体で https へのリダイレクトがかかっており、これはルート単位では外せません
+(リダイレクトはルータに入る手前で起きるため)。平文で待ち受けても 301 で飛ばされるだけなので、
+`websecure` に置いて自己署名証明書 (`k3s/tls-secret.yaml`) を出しています。
+ブラウザでは初回に警告が出ますが、mpv と Kodi は証明書を検証しないのでそのまま通ります。
+平文で出したい場合は Traefik 側にリダイレクトのかかっていないエントリポイントを
+追加する必要があります(クラスタ側の設定で、このリポジトリの管理外)。
 
 denpa 自体の詳細(状態遷移・環境変数・テスト)は [app/README.md](app/README.md) を参照。
 
@@ -318,6 +325,7 @@ k3sホストの初期構築やクラスタ共通のアドオン類は別の(プ�
   state.dbバックアップ/リストアで復元される前提のため、このリポジトリにも
   bootstrap側にもマニフェストとしては存在しない。
 - **DNS**: `m.doany.io` / `dp.doany.io` がTraefikの外部IPを指すこと。
+  LAN 側の名前解決で `dp.home.arpa` も同じIPを指すこと。
   (`e.doany.io` と `e.home.arpa` は EPGStation 用だったので不要になった)
 - **チューナードライバ**: `k3s/deployment.yaml` の mirakurun は
   `privileged: true` かつ `/dev/bus`・`/dev/dvb` をhostPathでマウントする
@@ -344,12 +352,46 @@ k3sホストの初期構築やクラスタ共通のアドオン類は別の(プ�
 カードが読めないときはその場で失敗させます。付けないと上記の
 「録れているのに全部スクランブル」を静かに量産します。
 
+**`pcscd` が動いていてもリーダーが見つからないことがあります。** そのときは
+`pcscd -f -d` を前面で走らせるとどこで止まっているか分かります。
+
+```text
+hotplug_libudev.c:421:HPAddDevice() Adding USB device: Gemalto PC Twin Reader
+ccid_usb.c:899:WriteUSB() write failed (4/3): LIBUSB_ERROR_TIMEOUT
+```
+
+このように**デバイスは見つかるが最初の書き込みがタイムアウトする**場合、リーダーが
+掴まれたままの状態で固まっています。USB レベルで入れ直すと戻ります
+(`4-11` の部分は `lsusb` と `/sys/bus/usb/devices` から引く)。
+
+```sh
+kubectl -n epg exec deploy/mirakurun -- pkill pcscd
+echo 4-11 | sudo tee /sys/bus/usb/drivers/usb/unbind
+sleep 2
+echo 4-11 | sudo tee /sys/bus/usb/drivers/usb/bind
+kubectl -n epg exec deploy/mirakurun -- bash -c 'pcscd; sleep 2; pcsc_scan -r'
+```
+
 確認のしかた:
 
 ```sh
-kubectl -n epg exec deploy/mirakurun -- pcsc_scan -r     # リーダーが見えるか
-kubectl -n epg exec deploy/denpa -- sh -c '...'          # 録画TSのスクランブル率
+# リーダーが見えるか。見えれば "0: Gemalto PC Twin Reader 00 00" のように出る
+kubectl -n epg exec deploy/mirakurun -- pcsc_scan -r
+
+# カードが読めるか。B-CAS なら ATR が返る
+kubectl -n epg exec deploy/mirakurun -- bash -c 'timeout 8 pcsc_scan -n | head -12'
+
+# 実際に復号できているか。Mirakurun から10秒ぶん取って、
+# transport_scrambling_control が立っているパケットの割合を数える
+kubectl -n epg exec deploy/mirakurun -- bash -c '
+  curl -s --max-time 10 "http://localhost:40772/api/services/<id>/stream?decode=1" > /tmp/s.ts
+  perl -e "binmode STDIN; my (\$t,\$s)=(0,0);
+    while (read(STDIN,\$b,188)==188) { last if substr(\$b,0,1) ne \"\x47\";
+      \$t++; \$s++ if (ord(substr(\$b,3,1)) & 0xC0); }
+    printf(\"packets=%d scrambled=%d (%.1f%%)\n\", \$t, \$s, \$t ? 100*\$s/\$t : 0);" < /tmp/s.ts'
 ```
+
+0% ならデスクランブルできています。壊れているときは 98〜99% になります。
 
 ## チャンネルスキャン
 

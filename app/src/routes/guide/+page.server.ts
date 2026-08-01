@@ -67,7 +67,12 @@ export async function load({ url }) {
         services,
         // 予約の詳細で初期値として出す
         defaults: settings(),
-        mirakurun: await ping(),
+        /*
+         * Mirakurun への疎通確認。await せずに promise のまま返して後から流し込む。
+         * 待ってから返すと、Mirakurun の応答が遅いぶん番組表そのものが出るのが遅れる。
+         * 番組表は手元のDBだけで描けるので、状態表示のために止める必要はない
+         */
+        mirakurun: ping(),
         counts: queryOne<{ programs: number; services: number }>(
             'SELECT (SELECT COUNT(*) FROM programs) AS programs, (SELECT COUNT(*) FROM services) AS services',
         )!,

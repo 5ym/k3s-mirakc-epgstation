@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { expect, type Page, test } from '@playwright/test';
+import { WEBHOOK_URL } from '../../playwright.config';
 import { goto, reserveSoon, syncEpg, upcoming } from './helpers';
 
 /**
@@ -32,6 +33,12 @@ test.describe('録画とエンコード', () => {
     test('予約した番組が録画され、エンコードされてライブラリに入る', async ({ page, request }) => {
         test.setTimeout(180_000);
         await syncEpg(request);
+
+        // 節目の通知が実際にどう飛ぶかも、この一連の流れで見ておく
+        await request.post(`${WEBHOOK_URL}/__control/reset`);
+        await goto(page, '/settings');
+        await page.getByTestId('webhook-url').fill(`${WEBHOOK_URL}/__control/webhook`);
+        await page.getByTestId('webhook-add').click();
 
         // BSは他のテストが触らないので、チューナー競合の心配なく録れる
         const programId = await reserveSoon(page, request, 'BS');
@@ -88,6 +95,22 @@ test.describe('録画とエンコード', () => {
         expect(part.status()).toBe(206);
         expect(part.headers()['content-range']).toMatch(/^bytes 0-99\/\d+$/);
         expect((await part.body()).byteLength).toBe(100);
+
+        // 節目ごとに通知が飛び、どれも番組名と一緒にチャンネル名が入っていること。
+        // 番組名だけだと、どの局のものか通知を見ただけでは分からない
+        const state = await (await request.get(`${WEBHOOK_URL}/__control/state`)).json();
+        const events = state.webhookCalls.map((call: { event: string }) => call.event);
+        expect(events).toContain('recording.started');
+        expect(events).toContain('recording.finished');
+        expect(events).toContain('encode.finished');
+        for (const call of state.webhookCalls as { text: string; recording?: { service: string } }[]) {
+            expect(call.text).toContain('BS11イレブン');
+            expect(call.recording?.service).toBe('BS11イレブン');
+        }
+
+        // 後続のテストに通知先を持ち越さない
+        await goto(page, '/settings');
+        await page.getByTestId('webhook-delete').first().click();
     });
 });
 

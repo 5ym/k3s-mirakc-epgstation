@@ -500,7 +500,7 @@ async function runJob(jobId: number): Promise<void> {
         emit('recordings');
         notify({
             event: 'encode.failed',
-            text: `エンコードに失敗しました: ${recording.name}`,
+            text: `エンコードに失敗しました: ${recording.name} (${recording.service_name})`,
             recording: {
                 id: recording.id,
                 name: recording.name,
@@ -533,7 +533,7 @@ async function runJob(jobId: number): Promise<void> {
     emit('recordings');
     notify({
         event: 'encode.finished',
-        text: `エンコードが終わりました: ${recording.name}`,
+        text: `エンコードが終わりました: ${recording.name} (${recording.service_name})`,
         recording: {
             id: recording.id,
             name: recording.name,

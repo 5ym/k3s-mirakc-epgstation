@@ -67,8 +67,10 @@ spec:
 # 扱えない。こちらは forward-auth を通さず、denpa 自身のベーシック認証に任せる。
 # LAN 内(10.10.0.0/16)からしか通さない。
 #
-# 自己署名だとプレイヤーが証明書で弾くことがあるので平文で出す。
-# 中身は録画ファイルなので、LAN 内であればこれで足りる。
+# web エントリポイントには Traefik 全体で https へのリダイレクトがかかっていて、
+# ルート単位では外せない(リダイレクトはルータの手前で起きる)。平文で受けても
+# 301 で飛ばされるだけなので、こちらも websecure に置いて自己署名証明書を出す。
+# .arpa は公開ドメインではないので ACME では取れない。
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -76,7 +78,9 @@ metadata:
   namespace: epg
 spec:
   entryPoints:
-    - web
+    - websecure
+  tls:
+    secretName: dp-home-arpa-tls
   routes:
     - match: Host(`dp.home.arpa`) && ClientIP(`10.10.0.0/16`)
       kind: Rule
