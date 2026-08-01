@@ -1,6 +1,6 @@
 import { fail } from '@sveltejs/kit';
 import { config } from '$lib/server/config';
-import { db, queryOne } from '$lib/server/db';
+import { database, queryOne } from '$lib/server/db';
 import { sync } from '$lib/server/epg';
 import { enabled as jellyfinEnabled, registerLiveTv } from '$lib/server/jellyfin';
 import { sessions, stopSession } from '$lib/server/live';
@@ -12,18 +12,18 @@ interface JobRow extends EncodeJob {
 }
 
 export async function load() {
-    const recording = db
+    const recording = database()
         .prepare(`SELECT * FROM recordings WHERE state = 'recording' ORDER BY start_at`)
         .all() as Recording[];
 
-    const upcoming = db
+    const upcoming = database()
         .prepare(
             `SELECT * FROM reservations WHERE state IN ('scheduled','conflict') AND end_at > ?
              ORDER BY start_at LIMIT 10`,
         )
         .all(Date.now()) as Reservation[];
 
-    const encoding = db
+    const encoding = database()
         .prepare(
             `SELECT j.*, r.name AS recording_name FROM encode_jobs j
              JOIN recordings r ON r.id = j.recording_id

@@ -1,7 +1,7 @@
 import type { Reservation } from '../types';
 import { config } from './config';
 import { assign } from './conflict';
-import { db, now, queryOne } from './db';
+import { database, now, queryOne } from './db';
 import * as mirakurun from './mirakurun';
 import { activeRecordingIds, startRecording, stopRecording } from './recorder';
 
@@ -34,7 +34,7 @@ export async function tunerCapacity(): Promise<Map<string, number>> {
 
 export async function resolveConflicts(): Promise<{ accepted: number; rejected: number }> {
     const capacity = await tunerCapacity();
-    const candidates = db
+    const candidates = database()
         .prepare(
             `SELECT r.*, s.type AS type, s.channel AS channel
              FROM reservations r
@@ -47,15 +47,15 @@ export async function resolveConflicts(): Promise<{ accepted: number; rejected: 
     const { accepted, rejected } = assign(candidates, capacity);
 
     const at = now();
-    const toScheduled = db.prepare(
+    const toScheduled = database().prepare(
         `UPDATE reservations SET state = 'scheduled', conflict_reason = NULL, updated_at = ?
          WHERE id = ? AND state = 'conflict'`,
     );
-    const toConflict = db.prepare(
+    const toConflict = database().prepare(
         `UPDATE reservations SET state = 'conflict', conflict_reason = ?, updated_at = ?
          WHERE id = ? AND state = 'scheduled'`,
     );
-    const tx = db.transaction(() => {
+    const tx = database().transaction(() => {
         for (const a of accepted) toScheduled.run(at, a.id);
         for (const r of rejected) toConflict.run(r.reason, at, r.reservation.id);
     });
@@ -71,7 +71,7 @@ export async function resolveConflicts(): Promise<{ accepted: number; rejected: 
 export async function tick(): Promise<void> {
     const at = now();
 
-    const due = db
+    const due = database()
         .prepare(
             `SELECT * FROM reservations
              WHERE state = 'scheduled' AND start_at - ? <= ? AND end_at > ?`,
@@ -80,7 +80,7 @@ export async function tick(): Promise<void> {
 
     for (const reservation of due) {
         // 状態を先に進めてから録画を開始する。tick が重なっても二重に開始しない
-        const claimed = db
+        const claimed = database()
             .prepare(
                 `UPDATE reservations SET state = 'recording', updated_at = ? WHERE id = ? AND state = 'scheduled'`,
             )

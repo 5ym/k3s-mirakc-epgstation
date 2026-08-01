@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import type { Program, Recording, Service } from '../types';
 import { config } from './config';
-import { db, now, queryAll, queryOne } from './db';
+import { database, now, queryAll, queryOne } from './db';
 import { pruneEmptyDirs, removeIfExists } from './fsx';
 import { removeSidecars } from './metadata';
 import { reserve } from './reservations';
@@ -257,9 +257,11 @@ export function deleteRecordingFiles(recording: Recording, reason: string): void
         pruneEmptyDirs(recording.library_path);
     }
     removeIfExists(recording.ts_path);
-    db.prepare(
-        `UPDATE recordings SET deleted_at = ?, library_path = NULL, ts_path = NULL, error = ?, updated_at = ? WHERE id = ?`,
-    ).run(now(), reason, now(), recording.id);
+    database()
+        .prepare(
+            `UPDATE recordings SET deleted_at = ?, library_path = NULL, ts_path = NULL, error = ?, updated_at = ? WHERE id = ?`,
+        )
+        .run(now(), reason, now(), recording.id);
 }
 
 /**

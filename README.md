@@ -21,7 +21,7 @@ IngressRoute を消す」の順で行ってください。PVC は `Prune=false,D
 | コンポーネント | 役割 | URL |
 | --- | --- | --- |
 | Mirakurun | チューナー制御・EPG・TS配信 | `m.doany.io` |
-| denpa | 予約・録画・CM検出・エンコード・ライブラリ管理 | `d.doany.io` |
+| denpa | 予約・録画・CM検出・エンコード・ライブラリ管理 | `dp.doany.io` |
 | Jellyfin | 視聴 | `j.doany.io` |
 | EPGStation | 従来の録画基盤(移行完了後に撤去) | `e.doany.io` |
 
@@ -268,7 +268,7 @@ k3sホストの初期構築やクラスタ共通のアドオン類は別の(プ�
   ArgoCDへのwebhookが自動登録される運用。ArgoCD Application自体はクラスタの
   state.dbバックアップ/リストアで復元される前提のため、このリポジトリにも
   bootstrap側にもマニフェストとしては存在しない。
-- **DNS**: `m.doany.io` / `e.doany.io` / `d.doany.io` / `j.doany.io` がTraefikの
+- **DNS**: `m.doany.io` / `e.doany.io` / `dp.doany.io` / `j.doany.io` がTraefikの
   外部IPを指すこと。`e.home.arpa` はLAN内(`10.10.0.0/16`)専用で、
   `k3s/tls-secret.yaml` に同梱の自己署名証明書で処理される。
   なお `j.doany.io` (Jellyfin) だけは forward-auth を通していない。TV・スマホの

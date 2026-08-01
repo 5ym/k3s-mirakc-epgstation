@@ -1,7 +1,7 @@
 import type { CmMode, Program, Recording, Reservation, VideoCodec } from '../types';
 import { isCmMode } from './cm';
 import { config } from './config';
-import { db, now, queryOne } from './db';
+import { database, now, queryOne } from './db';
 import { isVideoCodec } from './encoder';
 import { stopRecording } from './recorder';
 import { resolveConflicts } from './scheduler';
@@ -27,8 +27,9 @@ export async function reserve(
     const cmCut = isCmMode(options.cmCut) ? options.cmCut : config.cmCutDefault;
     const codec = isVideoCodec(options.codec) ? options.codec : config.encodeCodec;
 
-    db.prepare(
-        `INSERT INTO reservations
+    database()
+        .prepare(
+            `INSERT INTO reservations
             (program_id, rule_id, service_id, name, description, start_at, end_at,
              priority, manual, encode, keep_original, cm_cut, codec, state, created_at, updated_at)
          VALUES (?, NULL, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 'scheduled', ?, ?)
@@ -41,21 +42,22 @@ export async function reserve(
             codec = excluded.codec,
             state = CASE WHEN reservations.state = 'canceled' THEN 'scheduled' ELSE reservations.state END,
             updated_at = excluded.updated_at`,
-    ).run(
-        program.id,
-        program.service_id,
-        program.name,
-        program.description,
-        program.start_at,
-        program.end_at,
-        priority,
-        encode,
-        keepOriginal,
-        cmCut,
-        codec,
-        at,
-        at,
-    );
+        )
+        .run(
+            program.id,
+            program.service_id,
+            program.name,
+            program.description,
+            program.start_at,
+            program.end_at,
+            priority,
+            encode,
+            keepOriginal,
+            cmCut,
+            codec,
+            at,
+            at,
+        );
 
     await resolveConflicts();
     return queryOne<Reservation>('SELECT * FROM reservations WHERE program_id = ?', programId)!;
@@ -77,9 +79,8 @@ export async function cancel(reservationId: number): Promise<void> {
         if (recording !== undefined) stopRecording(recording.id);
     }
 
-    db.prepare(`UPDATE reservations SET state = 'canceled', updated_at = ? WHERE id = ?`).run(
-        now(),
-        reservationId,
-    );
+    database()
+        .prepare(`UPDATE reservations SET state = 'canceled', updated_at = ? WHERE id = ?`)
+        .run(now(), reservationId);
     await resolveConflicts();
 }

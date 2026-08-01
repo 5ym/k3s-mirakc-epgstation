@@ -1,7 +1,7 @@
 import { fail } from '@sveltejs/kit';
 import { isCmMode } from '$lib/server/cm';
 import { config } from '$lib/server/config';
-import { db, now } from '$lib/server/db';
+import { database, now } from '$lib/server/db';
 import { isVideoCodec } from '$lib/server/encoder';
 import { applyRules } from '$lib/server/rules';
 import { resolveConflicts } from '$lib/server/scheduler';
@@ -12,13 +12,13 @@ interface Row extends Rule {
 }
 
 export function load() {
-    const rules = db
+    const rules = database()
         .prepare(
             `SELECT r.*, (SELECT COUNT(*) FROM reservations WHERE rule_id = r.id) AS reservations
              FROM rules r ORDER BY r.id DESC`,
         )
         .all() as Row[];
-    const services = db.prepare('SELECT * FROM services ORDER BY type, channel').all() as Service[];
+    const services = database().prepare('SELECT * FROM services ORDER BY type, channel').all() as Service[];
     return { rules, services };
 }
 
@@ -50,23 +50,25 @@ export const actions = {
 
         const cmCut = form.get('cmCut');
         const codec = form.get('codec');
-        db.prepare(
-            `INSERT INTO rules (name, keyword, ignore_keyword, service_ids, genres, free_only,
+        database()
+            .prepare(
+                `INSERT INTO rules (name, keyword, ignore_keyword, service_ids, genres, free_only,
                                 enabled, priority, encode, keep_original, cm_cut, codec, created_at)
              VALUES (?, ?, ?, ?, NULL, ?, 1, ?, ?, ?, ?, ?, ?)`,
-        ).run(
-            name,
-            keyword,
-            String(form.get('ignoreKeyword') ?? '').trim(),
-            ids,
-            form.get('freeOnly') === 'on' ? 1 : 0,
-            Number(form.get('priority') ?? 2) || 2,
-            form.get('encode') === 'on' ? 1 : 0,
-            form.get('keepOriginal') === 'on' ? 1 : 0,
-            isCmMode(cmCut) ? cmCut : config.cmCutDefault,
-            isVideoCodec(codec) ? codec : config.encodeCodec,
-            now(),
-        );
+            )
+            .run(
+                name,
+                keyword,
+                String(form.get('ignoreKeyword') ?? '').trim(),
+                ids,
+                form.get('freeOnly') === 'on' ? 1 : 0,
+                Number(form.get('priority') ?? 2) || 2,
+                form.get('encode') === 'on' ? 1 : 0,
+                form.get('keepOriginal') === 'on' ? 1 : 0,
+                isCmMode(cmCut) ? cmCut : config.cmCutDefault,
+                isVideoCodec(codec) ? codec : config.encodeCodec,
+                now(),
+            );
 
         await reapply();
         return { success: true };
@@ -76,7 +78,7 @@ export const actions = {
         const form = await request.formData();
         const id = Number(form.get('id'));
         if (!Number.isFinite(id)) return fail(400, { message: 'ルールIDが不正です' });
-        db.prepare('UPDATE rules SET enabled = 1 - enabled WHERE id = ?').run(id);
+        database().prepare('UPDATE rules SET enabled = 1 - enabled WHERE id = ?').run(id);
         await reapply();
         return { success: true };
     },
@@ -85,9 +87,9 @@ export const actions = {
         const form = await request.formData();
         const id = Number(form.get('id'));
         if (!Number.isFinite(id)) return fail(400, { message: 'ルールIDが不正です' });
-        db.prepare('DELETE FROM rules WHERE id = ?').run(id);
+        database().prepare('DELETE FROM rules WHERE id = ?').run(id);
         // ルールを消しても、これから録るぶんの予約は残す(消したい場合は予約側で取り消す)
-        db.prepare('UPDATE reservations SET rule_id = NULL WHERE rule_id = ?').run(id);
+        database().prepare('UPDATE reservations SET rule_id = NULL WHERE rule_id = ?').run(id);
         return { success: true };
     },
 

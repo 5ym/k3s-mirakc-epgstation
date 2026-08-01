@@ -1,5 +1,5 @@
 import { fail } from '@sveltejs/kit';
-import { db, now, queryOne } from '$lib/server/db';
+import { database, now, queryOne } from '$lib/server/db';
 import { cancel, pump } from '$lib/server/encoder';
 import type { EncodeJob } from '$lib/types';
 
@@ -9,7 +9,7 @@ interface Row extends EncodeJob {
 }
 
 export function load() {
-    const jobs = db
+    const jobs = database()
         .prepare(
             `SELECT j.*, r.name AS recording_name, r.state AS recording_state
              FROM encode_jobs j JOIN recordings r ON r.id = j.recording_id
@@ -46,14 +46,15 @@ export const actions = {
             return fail(400, { message: '生TSが残っていないためやり直せません' });
         }
 
-        db.prepare(
-            `UPDATE encode_jobs SET state = 'queued', percent = 0, error = NULL,
+        database()
+            .prepare(
+                `UPDATE encode_jobs SET state = 'queued', percent = 0, error = NULL,
              started_at = NULL, finished_at = NULL WHERE id = ?`,
-        ).run(id);
-        db.prepare(`UPDATE recordings SET state = 'recorded', error = NULL, updated_at = ? WHERE id = ?`).run(
-            now(),
-            job.recording_id,
-        );
+            )
+            .run(id);
+        database()
+            .prepare(`UPDATE recordings SET state = 'recorded', error = NULL, updated_at = ? WHERE id = ?`)
+            .run(now(), job.recording_id);
         pump();
         return { success: true };
     },

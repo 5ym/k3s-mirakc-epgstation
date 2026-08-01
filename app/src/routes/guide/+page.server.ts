@@ -1,5 +1,5 @@
 import { fail } from '@sveltejs/kit';
-import { db } from '$lib/server/db';
+import { database } from '$lib/server/db';
 import { reserve } from '$lib/server/reservations';
 import type { Program, Service } from '$lib/types';
 
@@ -12,7 +12,7 @@ interface Row extends Program {
 }
 
 export async function load({ url }) {
-    const services = db.prepare('SELECT * FROM services ORDER BY type, channel').all() as Service[];
+    const services = database().prepare('SELECT * FROM services ORDER BY type, channel').all() as Service[];
     const serviceId = Number(url.searchParams.get('service') ?? '') || null;
     const keyword = (url.searchParams.get('q') ?? '').trim();
 
@@ -28,7 +28,7 @@ export async function load({ url }) {
         params.push(`%${keyword}%`, `%${keyword}%`);
     }
 
-    const programs = db
+    const programs = database()
         .prepare(
             `SELECT p.*, s.name AS service_name, r.id AS reservation_id, r.state AS reservation_state
              FROM programs p

@@ -127,7 +127,7 @@ spec:
   tls:
     certResolver: mydnschallenge
   routes:
-    - match: Host(`d.doany.io`)
+    - match: Host(`dp.doany.io`)
       kind: Rule
       priority: 50
       middlewares:

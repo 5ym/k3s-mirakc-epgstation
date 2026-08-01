@@ -1,5 +1,5 @@
 import type { Program, Rule } from '../types';
-import { db, now } from './db';
+import { database, now } from './db';
 import { toHalfWidth } from './title';
 
 function parseList(json: string | null): number[] | null {
@@ -50,15 +50,15 @@ export function matches(rule: Rule, program: Program): boolean {
  * キャンセルした予約をルールが勝手に作り直すことはない。
  */
 export function applyRules(): number {
-    const rules = db.prepare('SELECT * FROM rules WHERE enabled = 1').all() as Rule[];
+    const rules = database().prepare('SELECT * FROM rules WHERE enabled = 1').all() as Rule[];
     if (rules.length === 0) return 0;
 
     const at = now();
-    const programs = db
+    const programs = database()
         .prepare('SELECT * FROM programs WHERE start_at > ? ORDER BY start_at')
         .all(at) as Program[];
 
-    const insert = db.prepare(`
+    const insert = database().prepare(`
         INSERT OR IGNORE INTO reservations
             (program_id, rule_id, service_id, name, description, start_at, end_at,
              priority, manual, encode, keep_original, cm_cut, codec, state, created_at, updated_at)
@@ -66,7 +66,7 @@ export function applyRules(): number {
     `);
 
     let created = 0;
-    const tx = db.transaction(() => {
+    const tx = database().transaction(() => {
         for (const program of programs) {
             for (const rule of rules) {
                 if (!matches(rule, program)) continue;

@@ -1,5 +1,5 @@
 import { fail } from '@sveltejs/kit';
-import { db } from '$lib/server/db';
+import { database } from '$lib/server/db';
 import { importTimers, enabled as jellyfinEnabled } from '$lib/server/jellyfin';
 import { cancel } from '$lib/server/reservations';
 import { resolveConflicts } from '$lib/server/scheduler';
@@ -16,7 +16,7 @@ export function load({ url }) {
         ? "('scheduled','conflict','recording','done','failed','canceled')"
         : "('scheduled','conflict','recording')";
 
-    const reservations = db
+    const reservations = database()
         .prepare(
             `SELECT r.*, s.name AS service_name, rules.name AS rule_name
              FROM reservations r

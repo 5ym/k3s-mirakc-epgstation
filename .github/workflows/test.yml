@@ -16,6 +16,11 @@ concurrency:
   group: test-denpa-${{ github.ref }}
   cancel-in-progress: true
 
+# 本番コンテナは TZ=Asia/Tokyo で動く。放送日やXMLTVのオフセットはローカル時刻で
+# 組み立てるので、ランナー既定のUTCのままだとテストが本番と違う値を見ることになる
+env:
+  TZ: Asia/Tokyo
+
 defaults:
   run:
     working-directory: app

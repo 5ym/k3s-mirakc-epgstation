@@ -1,5 +1,5 @@
 import { config } from './config';
-import { db, now } from './db';
+import { database, now } from './db';
 import * as mirakurun from './mirakurun';
 import { applyRules } from './rules';
 import { resolveConflicts } from './scheduler';
@@ -8,7 +8,7 @@ import { toHalfWidth } from './title';
 const CHANNEL_TYPES = new Set(['GR', 'BS', 'CS', 'SKY']);
 
 export function syncServices(services: mirakurun.MirakurunService[]): number {
-    const stmt = db.prepare(`
+    const stmt = database().prepare(`
         INSERT INTO services (id, service_id, network_id, name, type, channel, remote_control_key, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
@@ -22,7 +22,7 @@ export function syncServices(services: mirakurun.MirakurunService[]): number {
     `);
     const at = now();
     let count = 0;
-    const tx = db.transaction(() => {
+    const tx = database().transaction(() => {
         for (const s of services) {
             // channel を持たないサービス(データ放送等)は録画対象にならないので捨てる
             if (s.channel === undefined || !CHANNEL_TYPES.has(s.channel.type)) continue;
@@ -51,7 +51,7 @@ function audioType(p: mirakurun.MirakurunProgram): number | null {
 }
 
 export function syncPrograms(programs: mirakurun.MirakurunProgram[]): number {
-    const stmt = db.prepare(`
+    const stmt = database().prepare(`
         INSERT INTO programs (id, service_id, network_id, event_id, start_at, end_at,
                               name, description, extended, genres, is_free, audio_type, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -68,7 +68,7 @@ export function syncPrograms(programs: mirakurun.MirakurunProgram[]): number {
     `);
     const at = now();
     let count = 0;
-    const tx = db.transaction(() => {
+    const tx = database().transaction(() => {
         for (const p of programs) {
             // duration 0 は「終了時刻未定」を意味する。録画時間が決まらないので扱わない
             if (!p.duration) continue;
@@ -96,7 +96,7 @@ export function syncPrograms(programs: mirakurun.MirakurunProgram[]): number {
 
 /** 予約時刻の追従。放送時間が動いた番組の予約を新しい時刻に合わせる */
 export function syncReservationTimes(): number {
-    const changed = db
+    const changed = database()
         .prepare(
             `
         UPDATE reservations
@@ -114,7 +114,7 @@ export function syncReservationTimes(): number {
 /** 終わった番組を消す。番組表は未来しか見ないので、直近の分だけ残せば足りる */
 export function pruneOldPrograms(): number {
     const cutoff = now() - config.programRetention;
-    return db.prepare('DELETE FROM programs WHERE end_at < ?').run(cutoff).changes;
+    return database().prepare('DELETE FROM programs WHERE end_at < ?').run(cutoff).changes;
 }
 
 export interface SyncResult {

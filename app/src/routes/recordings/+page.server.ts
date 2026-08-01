@@ -1,12 +1,12 @@
 import { fail } from '@sveltejs/kit';
-import { db, queryOne } from '$lib/server/db';
+import { database, queryOne } from '$lib/server/db';
 import { enqueue, pump } from '$lib/server/encoder';
 import { deleteRecordingFiles, reconcile, refreshLibrary } from '$lib/server/jellyfin';
 import type { Recording } from '$lib/types';
 
 export function load({ url }) {
     const showDeleted = url.searchParams.get('deleted') === '1';
-    const recordings = db
+    const recordings = database()
         .prepare(
             `SELECT * FROM recordings
              WHERE deleted_at IS ${showDeleted ? 'NOT NULL' : 'NULL'}

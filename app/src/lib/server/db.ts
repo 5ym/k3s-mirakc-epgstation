@@ -4,15 +4,30 @@ import { dirname } from 'node:path';
 import { config } from './config';
 import { SCHEMA } from './schema';
 
-mkdirSync(dirname(config.dbPath), { recursive: true });
+/**
+ * SQLite への接続。
+ *
+ * 最初に使われるまで開かない。import しただけでディレクトリを掘ってDBを作ると、
+ * 引数の組み立てなど「DBに触らないはずの関数」を単体テストするだけで書き込み権限が
+ * 要るようになってしまう(実際、CIで /app を掘ろうとして落ちた)。
+ */
+let instance: Database | null = null;
 
-export const db = new Database(config.dbPath, { create: true });
+export function database(): Database {
+    if (instance !== null) return instance;
 
-// WAL でないと、録画中の書き込みとUIの読み取りが SQLITE_BUSY で衝突する
-db.exec('PRAGMA journal_mode = WAL');
-db.exec('PRAGMA busy_timeout = 5000');
-db.exec('PRAGMA synchronous = NORMAL');
-db.exec(SCHEMA);
+    mkdirSync(dirname(config.dbPath), { recursive: true });
+    const db = new Database(config.dbPath, { create: true });
+
+    // WAL でないと、録画中の書き込みとUIの読み取りが SQLITE_BUSY で衝突する
+    db.exec('PRAGMA journal_mode = WAL');
+    db.exec('PRAGMA busy_timeout = 5000');
+    db.exec('PRAGMA synchronous = NORMAL');
+    db.exec(SCHEMA);
+
+    instance = db;
+    return instance;
+}
 
 export function now(): number {
     return Date.now();
@@ -27,9 +42,15 @@ export function now(): number {
  * `db.query` を使うのは、同じSQLの prepared statement をbun側で使い回させるため。
  */
 export function queryOne<T>(sql: string, ...params: SQLQueryBindings[]): T | undefined {
-    return (db.query(sql).get(...params) as T | null) ?? undefined;
+    return (
+        (database()
+            .query(sql)
+            .get(...params) as T | null) ?? undefined
+    );
 }
 
 export function queryAll<T>(sql: string, ...params: SQLQueryBindings[]): T[] {
-    return db.query(sql).all(...params) as T[];
+    return database()
+        .query(sql)
+        .all(...params) as T[];
 }

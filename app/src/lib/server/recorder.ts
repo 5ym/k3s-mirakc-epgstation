@@ -1,7 +1,7 @@
 import { mkdirSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { Program, Recording, Reservation, Service } from '../types';
-import { db, now, queryOne } from './db';
+import { database, now, queryOne } from './db';
 import { enqueue } from './encoder';
 import { moveFile } from './fsx';
 import { libraryPath, recordedPath } from './library';
@@ -22,20 +22,17 @@ export function stopRecording(recordingId: number): void {
 }
 
 function fail(recordingId: number, error: string): void {
-    db.prepare(`UPDATE recordings SET state = 'failed', error = ?, updated_at = ? WHERE id = ?`).run(
-        error,
-        now(),
-        recordingId,
-    );
+    database()
+        .prepare(`UPDATE recordings SET state = 'failed', error = ?, updated_at = ? WHERE id = ?`)
+        .run(error, now(), recordingId);
     const rec = queryOne<{ reservation_id: number | null }>(
         'SELECT reservation_id FROM recordings WHERE id = ?',
         recordingId,
     );
     if (rec?.reservation_id != null) {
-        db.prepare(`UPDATE reservations SET state = 'failed', updated_at = ? WHERE id = ?`).run(
-            now(),
-            rec.reservation_id,
-        );
+        database()
+            .prepare(`UPDATE reservations SET state = 'failed', updated_at = ? WHERE id = ?`)
+            .run(now(), rec.reservation_id);
     }
 }
 
@@ -45,7 +42,7 @@ export function createRecording(reservation: Reservation): Recording {
     const parsed = parseTitle(reservation.name);
     const at = now();
 
-    const info = db
+    const info = database()
         .prepare(
             `INSERT INTO recordings
                 (reservation_id, program_id, service_id, service_name, name, series, subtitle,
@@ -80,7 +77,7 @@ export function createRecording(reservation: Reservation): Recording {
         subtitle: parsed.subtitle,
         start_at: reservation.start_at,
     });
-    db.prepare('UPDATE recordings SET ts_path = ? WHERE id = ?').run(path, id);
+    database().prepare('UPDATE recordings SET ts_path = ? WHERE id = ?').run(path, id);
 
     return queryOne<Recording>('SELECT * FROM recordings WHERE id = ?', id)!;
 }
@@ -146,18 +143,15 @@ async function pump(recording: Recording, controller: AbortController): Promise<
 /** 録画完了。エンコードするならキューに積み、しないならそのままライブラリに置く */
 export function finish(recordingId: number, size: number): void {
     const at = now();
-    db.prepare(`UPDATE recordings SET state = 'recorded', ts_size = ?, updated_at = ? WHERE id = ?`).run(
-        size,
-        at,
-        recordingId,
-    );
+    database()
+        .prepare(`UPDATE recordings SET state = 'recorded', ts_size = ?, updated_at = ? WHERE id = ?`)
+        .run(size, at, recordingId);
 
     const recording = queryOne<Recording>('SELECT * FROM recordings WHERE id = ?', recordingId)!;
     if (recording.reservation_id != null) {
-        db.prepare(`UPDATE reservations SET state = 'done', updated_at = ? WHERE id = ?`).run(
-            at,
-            recording.reservation_id,
-        );
+        database()
+            .prepare(`UPDATE reservations SET state = 'done', updated_at = ? WHERE id = ?`)
+            .run(at, recording.reservation_id);
     }
 
     const reservation =
@@ -178,9 +172,11 @@ export function finish(recordingId: number, size: number): void {
     moveFile(recording.ts_path!, dest);
     writeNfo(recording, dest);
     void writeThumbnail(dest, (recording.end_at - recording.start_at) / 1000);
-    db.prepare(
-        `UPDATE recordings SET state = 'available', library_path = ?, ts_path = NULL, updated_at = ? WHERE id = ?`,
-    ).run(dest, now(), recording.id);
+    database()
+        .prepare(
+            `UPDATE recordings SET state = 'available', library_path = ?, ts_path = NULL, updated_at = ? WHERE id = ?`,
+        )
+        .run(dest, now(), recording.id);
 }
 
 /**
@@ -188,7 +184,7 @@ export function finish(recordingId: number, size: number): void {
  * AbortController はメモリ上にしか無いため、再起動後に再開はできない。
  */
 export function failOrphanedRecordings(): number {
-    const orphans = db.prepare(`SELECT id FROM recordings WHERE state = 'recording'`).all() as {
+    const orphans = database().prepare(`SELECT id FROM recordings WHERE state = 'recording'`).all() as {
         id: number;
     }[];
     for (const orphan of orphans) {

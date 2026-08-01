@@ -3,7 +3,7 @@ import { dirname } from 'node:path';
 import type { EncodeJob, Recording, VideoCodec } from '../types';
 import { type CmDetection, chapterMetadata, detectCm, keepRanges, type Range, selectExpression } from './cm';
 import { config } from './config';
-import { db, now, queryOne } from './db';
+import { database, now, queryOne } from './db';
 import { removeIfExists } from './fsx';
 import { libraryPath } from './library';
 import { removeSidecars, writeNfo, writeThumbnail } from './metadata';
@@ -193,7 +193,7 @@ export function enqueue(recordingId: number): number {
     );
     if (existing !== undefined) return existing.id;
 
-    const info = db
+    const info = database()
         .prepare(`INSERT INTO encode_jobs (recording_id, state, created_at) VALUES (?, 'queued', ?)`)
         .run(recordingId, now());
     return Number(info.lastInsertRowid);
@@ -206,9 +206,11 @@ export function cancel(jobId: number): void {
         proc.kill();
         return;
     }
-    db.prepare(
-        `UPDATE encode_jobs SET state = 'canceled', finished_at = ? WHERE id = ? AND state = 'queued'`,
-    ).run(now(), jobId);
+    database()
+        .prepare(
+            `UPDATE encode_jobs SET state = 'canceled', finished_at = ? WHERE id = ? AND state = 'queued'`,
+        )
+        .run(now(), jobId);
 }
 
 interface Progress {
@@ -266,7 +268,7 @@ async function runFfmpeg(
     let lastWrite = 0;
     let stderrTail = '';
 
-    const updateProgress = db.prepare('UPDATE encode_jobs SET percent = ?, log = ? WHERE id = ?');
+    const updateProgress = database().prepare('UPDATE encode_jobs SET percent = ?, log = ? WHERE id = ?');
 
     // 動画長は ffprobe を別に叩くとチャンネル切替直後のTSでハングして巻き込まれるため、
     // ffmpeg 自身が起動時に stderr へ出す "Duration:" 行から取る
@@ -328,7 +330,7 @@ async function prepareCm(
     const none = { keep: null, chaptersFile: null };
     if (recording.cm_cut === 'off' || recording.ts_path === null) return none;
 
-    db.prepare('UPDATE encode_jobs SET log = ? WHERE id = ?').run('CM検出中...', jobId);
+    database().prepare('UPDATE encode_jobs SET log = ? WHERE id = ?').run('CM検出中...', jobId);
 
     let detection: CmDetection;
     try {
@@ -338,15 +340,12 @@ async function prepareCm(
         return none;
     }
 
-    db.prepare('UPDATE recordings SET cm_ranges = ?, updated_at = ? WHERE id = ?').run(
-        JSON.stringify(detection.cm),
-        now(),
-        recording.id,
-    );
-    db.prepare('UPDATE encode_jobs SET log = ? WHERE id = ?').run(
-        `CM ${detection.cm.length} 箇所 (${detection.note})`,
-        jobId,
-    );
+    database()
+        .prepare('UPDATE recordings SET cm_ranges = ?, updated_at = ? WHERE id = ?')
+        .run(JSON.stringify(detection.cm), now(), recording.id);
+    database()
+        .prepare('UPDATE encode_jobs SET log = ? WHERE id = ?')
+        .run(`CM ${detection.cm.length} 箇所 (${detection.note})`, jobId);
     if (detection.cm.length === 0) return none;
 
     if (recording.cm_cut === 'cut') {
@@ -363,18 +362,15 @@ async function runJob(jobId: number): Promise<void> {
     const recording = queryOne<Recording>('SELECT * FROM recordings WHERE id = ?', job.recording_id);
 
     if (recording === undefined || recording.ts_path === null) {
-        db.prepare(`UPDATE encode_jobs SET state = 'failed', error = ?, finished_at = ? WHERE id = ?`).run(
-            '元の録画ファイルが見つかりません',
-            now(),
-            jobId,
-        );
+        database()
+            .prepare(`UPDATE encode_jobs SET state = 'failed', error = ?, finished_at = ? WHERE id = ?`)
+            .run('元の録画ファイルが見つかりません', now(), jobId);
         return;
     }
 
-    db.prepare(`UPDATE recordings SET state = 'encoding', updated_at = ? WHERE id = ?`).run(
-        now(),
-        recording.id,
-    );
+    database()
+        .prepare(`UPDATE recordings SET state = 'encoding', updated_at = ? WHERE id = ?`)
+        .run(now(), recording.id);
 
     const output = libraryPath(recording, '.mkv');
     mkdirSync(dirname(output), { recursive: true });
@@ -393,7 +389,7 @@ async function runJob(jobId: number): Promise<void> {
     if (result.code !== 0 && !canceled.has(jobId)) {
         // 録画開始直後の頭数百msだけ壊れているケースをここで拾う(詳細は buildArgs のコメント参照)。
         // 別の理由での失敗もここに来るが、-ss を付けても同じ理由でもう一度失敗するだけなので無害
-        db.prepare('UPDATE encode_jobs SET attempts = attempts + 1 WHERE id = ?').run(jobId);
+        database().prepare('UPDATE encode_jobs SET attempts = attempts + 1 WHERE id = ?').run(jobId);
         result = await runFfmpeg(
             job,
             recording.ts_path,
@@ -410,30 +406,24 @@ async function runJob(jobId: number): Promise<void> {
     if (canceled.has(jobId)) {
         removeIfExists(output);
         removeSidecars(output);
-        db.prepare(`UPDATE encode_jobs SET state = 'canceled', finished_at = ? WHERE id = ?`).run(
-            now(),
-            jobId,
-        );
-        db.prepare(`UPDATE recordings SET state = 'recorded', updated_at = ? WHERE id = ?`).run(
-            now(),
-            recording.id,
-        );
+        database()
+            .prepare(`UPDATE encode_jobs SET state = 'canceled', finished_at = ? WHERE id = ?`)
+            .run(now(), jobId);
+        database()
+            .prepare(`UPDATE recordings SET state = 'recorded', updated_at = ? WHERE id = ?`)
+            .run(now(), recording.id);
         return;
     }
 
     if (result.code !== 0) {
         removeIfExists(output);
         removeSidecars(output);
-        db.prepare(`UPDATE encode_jobs SET state = 'failed', error = ?, finished_at = ? WHERE id = ?`).run(
-            result.stderrTail.slice(-2000),
-            now(),
-            jobId,
-        );
-        db.prepare(`UPDATE recordings SET state = 'failed', error = ?, updated_at = ? WHERE id = ?`).run(
-            'エンコードに失敗しました',
-            now(),
-            recording.id,
-        );
+        database()
+            .prepare(`UPDATE encode_jobs SET state = 'failed', error = ?, finished_at = ? WHERE id = ?`)
+            .run(result.stderrTail.slice(-2000), now(), jobId);
+        database()
+            .prepare(`UPDATE recordings SET state = 'failed', error = ?, updated_at = ? WHERE id = ?`)
+            .run('エンコードに失敗しました', now(), recording.id);
         return;
     }
 
@@ -448,20 +438,23 @@ async function runJob(jobId: number): Promise<void> {
     writeNfo(recording, output);
     await writeThumbnail(output, (recording.end_at - recording.start_at) / 1000);
 
-    db.prepare(`UPDATE encode_jobs SET state = 'done', percent = 1, finished_at = ? WHERE id = ?`).run(
-        now(),
-        jobId,
-    );
+    database()
+        .prepare(`UPDATE encode_jobs SET state = 'done', percent = 1, finished_at = ? WHERE id = ?`)
+        .run(now(), jobId);
 
     if (recording.keep_original) {
-        db.prepare(
-            `UPDATE recordings SET state = 'available', library_path = ?, ts_size = ?, updated_at = ? WHERE id = ?`,
-        ).run(output, size, now(), recording.id);
+        database()
+            .prepare(
+                `UPDATE recordings SET state = 'available', library_path = ?, ts_size = ?, updated_at = ? WHERE id = ?`,
+            )
+            .run(output, size, now(), recording.id);
     } else {
         removeIfExists(recording.ts_path);
-        db.prepare(
-            `UPDATE recordings SET state = 'available', library_path = ?, ts_path = NULL, ts_size = ?, updated_at = ? WHERE id = ?`,
-        ).run(output, size, now(), recording.id);
+        database()
+            .prepare(
+                `UPDATE recordings SET state = 'available', library_path = ?, ts_path = NULL, ts_size = ?, updated_at = ? WHERE id = ?`,
+            )
+            .run(output, size, now(), recording.id);
     }
 }
 
@@ -474,7 +467,7 @@ export function pump(): void {
         if (next === undefined) return;
 
         // 実際に走り出す前に状態を進めておく。次のループが同じジョブを拾わないため
-        const claimed = db
+        const claimed = database()
             .prepare(
                 `UPDATE encode_jobs SET state = 'running', started_at = ?, attempts = attempts + 1
                  WHERE id = ? AND state = 'queued'`,
@@ -486,9 +479,11 @@ export function pump(): void {
         runningJobs.add(jobId);
         void runJob(jobId)
             .catch((error) => {
-                db.prepare(
-                    `UPDATE encode_jobs SET state = 'failed', error = ?, finished_at = ? WHERE id = ?`,
-                ).run(String(error), now(), jobId);
+                database()
+                    .prepare(
+                        `UPDATE encode_jobs SET state = 'failed', error = ?, finished_at = ? WHERE id = ?`,
+                    )
+                    .run(String(error), now(), jobId);
             })
             .finally(() => {
                 runningJobs.delete(jobId);
@@ -505,7 +500,7 @@ export function pump(): void {
  * ffmpeg は親と一緒に死んでいるので、出力を捨てて頭からやり直す。
  */
 export function requeueOrphanedJobs(): number {
-    return db
+    return database()
         .prepare(
             `UPDATE encode_jobs SET state = 'queued', percent = 0, started_at = NULL WHERE state = 'running'`,
         )

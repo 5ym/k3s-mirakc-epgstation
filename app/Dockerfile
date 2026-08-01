@@ -35,19 +35,23 @@ CMD ["bun", "run", "test"]
 FROM docker.io/library/debian:trixie-slim AS ffmpeg
 SHELL ["/bin/bash", "-c"]
 
+# ダウンロードは CI で切られることがあるので必ずリトライさせる。
+# 一度これで ffmpeg の取得に失敗してデプロイが止まった
+ENV CURL="curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 20"
+
 ENV DEV="curl ca-certificates build-essential cmake pkg-config nasm zlib1g-dev libfreetype6-dev libopus-dev libsvtav1enc-dev libx264-dev libdav1d-dev libfontconfig-dev"
 ENV FFMPEG_VERSION=8.1
 
 RUN apt-get update && \
     apt-get -y --no-install-recommends install $DEV && \
     mkdir -p /usr/share/fonts/truetype/rounded-mplus-arib && \
-    curl -fsSL https://raw.githubusercontent.com/5ym/arib-font/main/rounded-mplus-1m-arib.ttf \
+    $CURL https://raw.githubusercontent.com/5ym/arib-font/main/rounded-mplus-1m-arib.ttf \
       -o /usr/share/fonts/truetype/rounded-mplus-arib/rounded-mplus-1m-arib.ttf && \
     mkdir /tmp/arib && cd /tmp/arib && \
-    curl -fsSL https://github.com/xqq/libaribcaption/archive/refs/heads/master.tar.gz | tar -xz --strip-components=1 && \
+    $CURL https://github.com/xqq/libaribcaption/archive/refs/heads/master.tar.gz | tar -xz --strip-components=1 && \
     mkdir build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build . -j$(nproc) && cmake --install . && \
     mkdir /tmp/ffmpeg_sources && cd /tmp/ffmpeg_sources && \
-    curl -fsSL http://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.bz2 | tar -xj --strip-components=1 && \
+    $CURL https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.bz2 | tar -xj --strip-components=1 && \
     ./configure \
       --enable-gpl \
       --enable-libopus \
