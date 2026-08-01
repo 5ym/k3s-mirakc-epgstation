@@ -44,19 +44,31 @@ test.describe('ダッシュボードと画面遷移', () => {
         }
     });
 
-    test('ライトとダークを切り替えられ、再読み込みしても残る', async ({ page }) => {
+    test('テーマは端末に合わせる/ライト/ダークを切り替えられ、再読み込みしても残る', async ({ page }) => {
         await goto(page, '/');
         const html = page.locator('html');
+        const toggle = page.getByTestId('theme-toggle');
+
+        // 既定は端末の設定に従う。テストはダークの端末として動かしている
+        await expect(toggle).toHaveAttribute('data-mode', 'system');
         await expect(html).toHaveAttribute('data-theme', 'dark');
 
-        await page.getByTestId('theme-toggle').click();
+        await toggle.click();
         await expect(html).toHaveAttribute('data-theme', 'light');
 
-        // 再読み込み時に一瞬ダークが見えないよう、ハイドレーション前に当てている
+        await toggle.click();
+        await expect(html).toHaveAttribute('data-theme', 'dark');
+        await expect(toggle).toHaveAttribute('data-mode', 'dark');
+
+        // 明示した設定は再読み込みしても残る(ちらつかないようハイドレーション前に当てている)
         await goto(page, '/guide');
-        await expect(html).toHaveAttribute('data-theme', 'light');
-
-        await page.getByTestId('theme-toggle').click();
         await expect(html).toHaveAttribute('data-theme', 'dark');
+        await expect(page.getByTestId('theme-toggle')).toHaveAttribute('data-mode', 'dark');
+
+        // 一周して端末に合わせるへ戻る
+        await page.getByTestId('theme-toggle').click();
+        await expect(page.getByTestId('theme-toggle')).toHaveAttribute('data-mode', 'system');
+        await goto(page, '/');
+        await expect(page.getByTestId('theme-toggle')).toHaveAttribute('data-mode', 'system');
     });
 });

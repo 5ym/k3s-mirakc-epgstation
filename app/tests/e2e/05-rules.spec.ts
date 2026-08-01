@@ -5,7 +5,6 @@ import { goto, syncEpg } from './helpers';
 test.describe('自動予約ルール', () => {
     test('条件が空のルールは作れない', async ({ page }) => {
         await goto(page, '/rules');
-        await page.getByTestId('rule-name').fill('条件なし');
         await page.getByTestId('rule-submit').click();
         await expect(page.getByTestId('rule-error')).toContainText(
             'キーワードかチャンネルのどちらかは指定してください',
@@ -17,20 +16,22 @@ test.describe('自動予約ルール', () => {
         await syncEpg(request);
 
         await goto(page, '/rules');
-        await page.getByTestId('rule-name').fill('テストアニメ自動録画');
         await page.getByTestId('rule-keyword').fill('テストアニメ');
+        // チャンネルは既定で畳んである
+        await page.getByTestId('channel-summary').click();
         await page.getByTestId('rule-services').locator(`input[value="${BS11.id}"]`).check();
         await page.getByTestId('rule-cmcut').selectOption('cut');
         await page.getByTestId('rule-submit').click();
 
+        // ルール名はキーワードから付く
         const rule = page.getByTestId('rule-row').first();
-        await expect(rule).toContainText('テストアニメ自動録画');
+        await expect(rule).toContainText('テストアニメ');
         await expect(rule).toContainText('有効');
         await expect(rule.getByTestId('rule-cmcut-badge')).toContainText('CM: カット');
 
         // 偽Mirakurunは同じ番組名を周期的に返すので、ルール作成と同時に予約が立つ
         await goto(page, '/');
-        const fromRule = page.getByTestId('reservation-row').filter({ hasText: 'テストアニメ自動録画' });
+        const fromRule = page.getByTestId('reservation-row').filter({ hasText: 'テストアニメ' });
         await expect(fromRule.first()).toBeVisible();
 
         // 無効化しても既存の予約は残る(意図せず録り逃さないため)
@@ -48,6 +49,36 @@ test.describe('自動予約ルール', () => {
             if ((await buttons.count()) === 0) break;
             await buttons.first().click();
             await page.waitForTimeout(200);
+        }
+    });
+
+    test('追加する前に、その条件で何が録れるか確認できる', async ({ page, request }) => {
+        await syncEpg(request);
+        await goto(page, '/rules');
+
+        await page.getByTestId('rule-keyword').fill('テストアニメ');
+        await page.getByTestId('rule-preview').click();
+
+        const preview = page.getByTestId('preview');
+        await expect(preview).toContainText('対象は');
+        await expect(page.getByTestId('preview-row').first()).toContainText('テストアニメ');
+        // 見ただけではルールは作られない
+        await expect(page.getByTestId('rule-row')).toHaveCount(0);
+    });
+
+    test('地上波/BS/CS 単位でも指定できる', async ({ page, request }) => {
+        await syncEpg(request);
+        await goto(page, '/rules');
+
+        await page.getByTestId('channel-summary').click();
+        await page.getByTestId('rule-types').locator('input[value="BS"]').check();
+        await page.getByTestId('rule-preview').click();
+
+        // 偽MirakurunのBSはBS11だけなので、対象も全部BS11になる
+        const rows = page.getByTestId('preview-row');
+        await expect(rows.first()).toBeVisible();
+        for (const row of await rows.all()) {
+            await expect(row).toContainText('BS11イレブン');
         }
     });
 });

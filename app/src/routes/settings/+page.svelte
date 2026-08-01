@@ -40,7 +40,7 @@
     </div>
 {/if}
 
-<div class="grid gap-6 lg:grid-cols-2">
+<div class="grid items-start gap-6 lg:grid-cols-2">
     <section class="card bg-base-100 shadow">
         <div class="card-body">
             <h2 class="card-title">Jellyfin 接続</h2>
@@ -64,8 +64,8 @@
             </div>
 
             <form method="POST" action="?/issue" use:enhance class="space-y-3">
-                <label class="form-control">
-                    <span class="label-text">Jellyfin のURL</span>
+                <label class="flex flex-col gap-1">
+                    <span class="text-sm font-medium">Jellyfin のURL</span>
                     <input
                         name="jellyfinUrl"
                         value={data.jellyfinUrl}
@@ -75,16 +75,16 @@
                     />
                 </label>
                 <div class="grid gap-3 sm:grid-cols-2">
-                    <label class="form-control">
-                        <span class="label-text">管理者ID</span>
+                    <label class="flex flex-col gap-1">
+                        <span class="text-sm font-medium">管理者ID</span>
                         <input
                             name="username"
                             class="input input-bordered w-full"
                             data-testid="jellyfin-user"
                         />
                     </label>
-                    <label class="form-control">
-                        <span class="label-text">パスワード</span>
+                    <label class="flex flex-col gap-1">
+                        <span class="text-sm font-medium">パスワード</span>
                         <input
                             type="password"
                             name="password"
@@ -100,8 +100,8 @@
 
             <form method="POST" action="?/save" use:enhance class="space-y-3">
                 <input type="hidden" name="jellyfinUrl" value={data.jellyfinUrl} />
-                <label class="form-control">
-                    <span class="label-text">APIキーを直接貼る</span>
+                <label class="flex flex-col gap-1">
+                    <span class="text-sm font-medium">APIキーを直接貼る</span>
                     <input
                         name="jellyfinApiKey"
                         class="input input-bordered w-full"

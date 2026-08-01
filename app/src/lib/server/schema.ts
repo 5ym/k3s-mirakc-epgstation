@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS rules (
     keyword TEXT NOT NULL DEFAULT '',
     ignore_keyword TEXT NOT NULL DEFAULT '',
     service_ids TEXT,                 -- JSON 配列。NULL は全チャンネル対象
+    service_types TEXT,               -- JSON 配列 (GR/BS/CS)。個別チャンネルとのORで効く
     genres TEXT,                      -- JSON 配列 (lv1)。NULL は全ジャンル
     free_only INTEGER NOT NULL DEFAULT 1,
     enabled INTEGER NOT NULL DEFAULT 1,

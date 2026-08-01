@@ -3,10 +3,20 @@
     <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <link rel="icon" href="data:," />
+        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+        <title>denpa</title>
         <script>
-            // ハイドレーションを待つと一瞬ダークで表示されてしまうので、ここで当てる
-            document.documentElement.dataset.theme = localStorage.getItem('theme') || 'dark';
+            // ハイドレーションを待つと一瞬ちがう色で表示されてしまうので、ここで当てる。
+            // 保存が無ければ端末の設定に従う
+            (() => {
+                const saved = localStorage.getItem('theme');
+                const mode = saved === 'light' || saved === 'dark' ? saved : 'system';
+                const dark =
+                    mode === 'dark' ||
+                    (mode === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+                document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+                document.documentElement.dataset.themeMode = mode;
+            })();
         </script>
         %sveltekit.head%
     </head>

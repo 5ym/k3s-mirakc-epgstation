@@ -1,5 +1,5 @@
 import type { Program, Rule } from '../types';
-import { database, now } from './db';
+import { database, now, queryAll } from './db';
 import { toHalfWidth } from './title';
 
 function parseList(json: string | null): number[] | null {
@@ -17,11 +17,29 @@ function haystack(program: Pick<Program, 'name' | 'description'>): string {
     return toHalfWidth(`${program.name} ${program.description}`).toLowerCase();
 }
 
-export function matches(rule: Rule, program: Program): boolean {
+/** JSON配列の文字列版。種別(GR/BS/CS)の絞り込みに使う */
+function parseStrings(json: string | null): string[] | null {
+    if (json === null || json === '') return null;
+    try {
+        const v = JSON.parse(json);
+        return Array.isArray(v) && v.length > 0 ? v.map(String) : null;
+    } catch {
+        return null;
+    }
+}
+
+export function matches(rule: Rule, program: Program, serviceType?: string): boolean {
     if (rule.free_only && !program.is_free) return false;
 
+    // チャンネルの条件は「種別」と「個別チャンネル」のOR。
+    // 「地上波全部 + BS11だけ」のような指定ができるようにするため
     const services = parseList(rule.service_ids);
-    if (services !== null && !services.includes(program.service_id)) return false;
+    const types = parseStrings(rule.service_types);
+    if (services !== null || types !== null) {
+        const byService = services !== null && services.includes(program.service_id);
+        const byType = types !== null && serviceType !== undefined && types.includes(serviceType);
+        if (!byService && !byType) return false;
+    }
 
     const genres = parseList(rule.genres);
     if (genres !== null) {
@@ -41,7 +59,7 @@ export function matches(rule: Rule, program: Program): boolean {
     if (ignores.some((k) => text.includes(k))) return false;
 
     // 全条件が空のルールは全番組にマッチしてしまうので無効扱いにする
-    return keywords.length > 0 || services !== null || genres !== null;
+    return keywords.length > 0 || services !== null || types !== null || genres !== null;
 }
 
 /**
@@ -54,9 +72,13 @@ export function applyRules(): number {
     if (rules.length === 0) return 0;
 
     const at = now();
-    const programs = database()
-        .prepare('SELECT * FROM programs WHERE start_at > ? ORDER BY start_at')
-        .all(at) as Program[];
+    // 種別(GR/BS/CS)でも絞り込めるよう、番組にチャンネル種別を添えて取る
+    const programs = queryAll<Program & { service_type: string }>(
+        `SELECT p.*, s.type AS service_type FROM programs p
+         JOIN services s ON s.id = p.service_id
+         WHERE p.start_at > ? ORDER BY p.start_at`,
+        at,
+    );
 
     const insert = database().prepare(`
         INSERT OR IGNORE INTO reservations
@@ -69,7 +91,7 @@ export function applyRules(): number {
     const tx = database().transaction(() => {
         for (const program of programs) {
             for (const rule of rules) {
-                if (!matches(rule, program)) continue;
+                if (!matches(rule, program, program.service_type)) continue;
                 const res = insert.run(
                     program.id,
                     rule.id,

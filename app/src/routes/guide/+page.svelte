@@ -12,8 +12,8 @@
 {/if}
 
 <form method="GET" class="mb-4 flex flex-wrap items-end gap-2" data-testid="guide-filter">
-    <label class="form-control">
-        <span class="label-text">チャンネル</span>
+    <label class="flex flex-col gap-1">
+        <span class="text-sm font-medium">チャンネル</span>
         <select name="service" class="select select-bordered" data-testid="filter-service">
             <option value="">すべて</option>
             {#each data.services as service (service.id)}
@@ -23,8 +23,8 @@
             {/each}
         </select>
     </label>
-    <label class="form-control">
-        <span class="label-text">キーワード</span>
+    <label class="flex flex-col gap-1">
+        <span class="text-sm font-medium">キーワード</span>
         <input
             type="search"
             name="q"

@@ -48,6 +48,7 @@ export interface Rule {
     keyword: string;
     ignore_keyword: string;
     service_ids: string | null;
+    service_types: string | null;
     genres: string | null;
     free_only: number;
     enabled: number;

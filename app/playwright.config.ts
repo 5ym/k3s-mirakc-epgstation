@@ -20,6 +20,8 @@ export default defineConfig({
     globalSetup: './tests/global-setup.ts',
     use: {
         baseURL: `http://127.0.0.1:${APP_PORT}`,
+        // 「端末に合わせる」がダークになる前提でテストする
+        colorScheme: 'dark',
         trace: 'retain-on-failure',
     },
     webServer: [

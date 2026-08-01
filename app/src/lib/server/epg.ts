@@ -70,6 +70,10 @@ export function syncPrograms(programs: mirakurun.MirakurunProgram[]): number {
                               name, description, extended, genres, is_free, audio_type, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
+            -- service_id も上書きする。ここを更新しないと、一度おかしな値で入った行が
+            -- 取り込み直しても直らない(番組表が空のままになる)
+            service_id = excluded.service_id,
+            network_id = excluded.network_id,
             start_at = excluded.start_at,
             end_at = excluded.end_at,
             name = excluded.name,
