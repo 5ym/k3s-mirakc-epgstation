@@ -1,18 +1,22 @@
+# recisdb は既定で ARIB STD-B25 を復号する(--no-decode で無効化)。
+# ただしカードが開けないときは黙って復号せずに素通しするので、-e を付けて
+# その場で失敗させる。付けないと「録画は成功しているのに全部スクランブル」
+# という分かりにくい壊れ方をする。
 - name: adapter0
   types:
     - BS
     - CS
-  command: recisdb tune --device /dev/dvb/adapter0/frontend0 --channel <channel> -
+  command: recisdb tune -e --device /dev/dvb/adapter0/frontend0 --channel <channel> -
 - name: adapter1
   types:
     - GR
-  command: recisdb tune --device /dev/dvb/adapter1/frontend0 --channel <channel> -
+  command: recisdb tune -e --device /dev/dvb/adapter1/frontend0 --channel <channel> -
 - name: adapter2
   types:
     - BS
     - CS
-  command: recisdb tune --device /dev/dvb/adapter2/frontend0 --channel <channel> -
+  command: recisdb tune -e --device /dev/dvb/adapter2/frontend0 --channel <channel> -
 - name: adapter3
   types:
     - GR
-  command: recisdb tune --device /dev/dvb/adapter3/frontend0 --channel <channel> -
+  command: recisdb tune -e --device /dev/dvb/adapter3/frontend0 --channel <channel> -

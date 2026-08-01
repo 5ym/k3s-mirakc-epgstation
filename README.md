@@ -326,6 +326,31 @@ k3sホストの初期構築やクラスタ共通のアドオン類は別の(プ�
   `ghcr.io/danything/denpa` をpullできること
   (imagePullSecrets未設定のため publicパッケージである前提)。
 
+## B-CASカードとデスクランブル
+
+`recisdb` は**既定で ARIB STD-B25 を復号します**(`--no-decode` で無効化)。
+ただし**カードが開けないときは黙って復号せずに素通しします**。
+
+これに一度はまりました。録画は成功してファイルサイズもそれらしいのに、中身が
+全部スクランブルされていて ffmpeg が1フレームも取り出せない、という壊れ方をします。
+エンコードのログには音声フィルタのエラーしか出ないので、原因が見えません。
+
+原因は **`pcscd` が起動していないこと**でした。カードは PC/SC 経由で読むので、
+デーモンが居ないとリーダーが見つかりません(`pcsc_scan -r` が `No reader found`)。
+ベースイメージに `pcscd` は入っていますが起動されないので、
+`mirakurun/entrypoint.sh` で先に立ち上げてから Mirakurun を起動します。
+
+あわせて `tuners.yml` の recisdb に `-e` (`--exit-on-card-error`) を付けました。
+カードが読めないときはその場で失敗させます。付けないと上記の
+「録れているのに全部スクランブル」を静かに量産します。
+
+確認のしかた:
+
+```sh
+kubectl -n epg exec deploy/mirakurun -- pcsc_scan -r     # リーダーが見えるか
+kubectl -n epg exec deploy/denpa -- sh -c '...'          # 録画TSのスクランブル率
+```
+
 ## チャンネルスキャン
 
 - Mirakurunの Web UI (`http://<host>:40772/`) → 「チャンネル設定」画面右上の

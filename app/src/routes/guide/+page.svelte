@@ -110,7 +110,25 @@
 </script>
 
 <div class="mb-4 flex flex-wrap items-center justify-between gap-2">
-    <h1 class="text-2xl font-bold">番組表</h1>
+    <div class="flex flex-wrap items-center gap-2">
+        <h1 class="text-2xl font-bold">番組表</h1>
+        <div
+            class="badge badge-lg {data.mirakurun.ok ? 'badge-success' : 'badge-error'}"
+            data-testid="status"
+        >
+            Mirakurun {data.mirakurun.ok ? (data.mirakurun.version ?? 'OK') : 'NG'}
+        </div>
+        <div class="badge badge-lg badge-ghost">番組 {data.counts.programs} / 局 {data.counts.services}</div>
+        <!-- 番組表が古いと気づくのはこの画面なので、取り直すのもここに置く -->
+        <form method="POST" action="?/sync" use:submitting>
+            <button class="btn btn-sm" data-testid="sync-button">EPGを今すぐ取得</button>
+        </form>
+        {#if form?.sync}
+            <span class="text-sm" data-testid="sync-result">
+                局 {form.sync.services} / 番組 {form.sync.programs} / 新規予約 {form.sync.reserved}
+            </span>
+        {/if}
+    </div>
     <!--
         検索と条件の編集はルール画面に寄せてある。条件を2箇所で書けるようにすると
         判定がずれるので、ここは番組表の閲覧だけにする
@@ -128,22 +146,6 @@
         </label>
         <button class="btn btn-primary" type="submit">検索</button>
     </form>
-</div>
-
-<div class="mb-3 flex flex-wrap items-center gap-2">
-    <div class="badge badge-lg {data.mirakurun.ok ? 'badge-success' : 'badge-error'}" data-testid="status">
-        Mirakurun {data.mirakurun.ok ? (data.mirakurun.version ?? 'OK') : 'NG'}
-    </div>
-    <div class="badge badge-lg badge-ghost">番組 {data.counts.programs} / 局 {data.counts.services}</div>
-    <!-- 番組表が古いと気づくのはこの画面なので、取り直すのもここに置く -->
-    <form method="POST" action="?/sync" use:submitting>
-        <button class="btn btn-sm" data-testid="sync-button">EPGを今すぐ取得</button>
-    </form>
-    {#if form?.sync}
-        <span class="text-sm" data-testid="sync-result">
-            局 {form.sync.services} / 番組 {form.sync.programs} / 新規予約 {form.sync.reserved}
-        </span>
-    {/if}
 </div>
 
 {#if form?.message}
