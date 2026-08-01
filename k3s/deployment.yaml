@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: mirakurun
-          image: ghcr.io/danything/mirakurun:sha-362b05e09c5b
+          image: ghcr.io/danything/mirakurun:sha-1d45ee205176
           imagePullPolicy: IfNotPresent
           securityContext:
             privileged: true
@@ -108,7 +108,7 @@ spec:
     spec:
       containers:
         - name: denpa
-          image: ghcr.io/danything/denpa:sha-0854d9cb8ee6
+          image: ghcr.io/danything/denpa:sha-1d45ee205176
           imagePullPolicy: IfNotPresent
           env:
             - name: TZ
