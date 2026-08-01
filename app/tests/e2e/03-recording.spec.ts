@@ -49,7 +49,8 @@ test.describe('録画とエンコード', () => {
         await expect(recording).toContainText('.mkv');
 
         // CM検出が走り、既定のチャプター付与として記録されていること
-        await expect(recording.getByTestId('cm-info')).toContainText('CM チャプター');
+        // 出るのは検出した区間。設定そのものは全体設定なので一覧には出さない
+        await expect(recording.getByTestId('cm-info')).toContainText('CM 5:00-6:00');
 
         // .nfo を読むプレイヤー(Kodi など)向けに、サイドカーが揃っていること
         const videoPath = ((await recording.locator('span.font-mono').first().textContent()) ?? '').trim();
@@ -106,7 +107,7 @@ test.describe('CMの実カット', () => {
 
         await goto(page, '/');
         const recording = page.locator(recordingRow);
-        await expect(recording.getByTestId('cm-info')).toContainText('CM カット');
+        await expect(recording.getByTestId('cm-info')).toContainText('CM 5:00-6:00');
 
         // 字幕はエンコードの前にTSを切ることで残している。
         // フィルタで切っていた頃は -sn で落とすしかなかった

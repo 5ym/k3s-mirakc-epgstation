@@ -27,6 +27,33 @@ test.describe('配信とベーシック認証', () => {
     });
 });
 
+test.describe('設定画面からの認証', () => {
+    test.use({ httpCredentials: CREDENTIALS });
+
+    test('設定画面から認証を変えられる', async ({ page }) => {
+        await goto(page, '/settings');
+        await expect(page.getByTestId('auth-user')).toHaveValue('denpa');
+        // env から来ている間は「設定済み」とだけ出す
+        await expect(page.getByTestId('auth-password')).toHaveAttribute('placeholder', /設定済み/);
+
+        await page.getByTestId('auth-scope').selectOption('all');
+        await page.getByTestId('save-auth').click();
+        await expect(page.getByTestId('saved-result')).toBeVisible();
+
+        // 保存されていること
+        await goto(page, '/settings');
+        await expect(page.getByTestId('auth-scope')).toHaveValue('all');
+
+        await page.getByTestId('auth-scope').selectOption('files');
+        await page.getByTestId('save-auth').click();
+        await expect(page.getByTestId('saved-result')).toBeVisible();
+        await goto(page, '/settings');
+        await expect(page.getByTestId('auth-scope')).toHaveValue('files');
+        // この範囲だと画面が素通しになるので、その旨を出す
+        await expect(page.getByTestId('auth-warning')).toBeVisible();
+    });
+});
+
 test.describe('WebDAV', () => {
     test.use({ httpCredentials: CREDENTIALS });
 

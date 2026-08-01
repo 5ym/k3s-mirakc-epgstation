@@ -2,7 +2,7 @@ import { fail } from '@sveltejs/kit';
 import { queryAll, queryOne } from '$lib/server/db';
 import { sync } from '$lib/server/epg';
 import { ping } from '$lib/server/mirakurun';
-import { reserve } from '$lib/server/reservations';
+import { cancel, reserve } from '$lib/server/reservations';
 import { settings } from '$lib/server/settings';
 import type { ChannelType, Program, Service } from '$lib/types';
 
@@ -78,6 +78,20 @@ export const actions = {
     /** 番組表が古いときに取り直す。番組表の追従と新規予約もここで走る */
     sync: async () => {
         return { success: true, sync: await sync() };
+    },
+
+    /** 番組表から予約を止める。予約一覧まで行かずに済むように */
+    cancel: async ({ request }) => {
+        const form = await request.formData();
+        const programId = Number(form.get('programId'));
+        if (!Number.isFinite(programId)) return fail(400, { message: '番組IDが不正です' });
+        const reservation = queryOne<{ id: number }>(
+            `SELECT id FROM reservations WHERE program_id = ? AND state != 'canceled'`,
+            programId,
+        );
+        if (reservation === undefined) return fail(404, { message: '予約が見つかりません' });
+        await cancel(reservation.id);
+        return { success: true };
     },
 
     reserve: async ({ request }) => {

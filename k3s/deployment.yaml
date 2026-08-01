@@ -131,23 +131,6 @@ spec:
               value: av1
             - name: ENCODE_CONCURRENCY
               value: '2'
-            # mpv も Kodi も forward-auth のリダイレクトを扱えないので、
-            # ファイルを取りに来る口だけベーシック認証にする。
-            # 画面(dp.doany.io)は今までどおり前段の認証に任せる
-            - name: BASIC_AUTH_SCOPE
-              value: files
-            - name: BASIC_AUTH_USER
-              valueFrom:
-                secretKeyRef:
-                  name: denpa-secrets
-                  key: basic-auth-user
-                  optional: true
-            - name: BASIC_AUTH_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: denpa-secrets
-                  key: basic-auth-password
-                  optional: true
             # EPGStation からの引き継ぎ。設定画面から実行する。
             # 引き継ぎが済んで EPGStation を畳んだら、この3つと
             # epgstation-recorded のマウントごと消してよい

@@ -24,7 +24,12 @@ EPGStation は**停止済み**です。MariaDB だけは引き継ぎ(ルール�
 | コンポーネント | 役割 | URL |
 | --- | --- | --- |
 | Mirakurun | チューナー制御・EPG・TS配信 | `m.doany.io` |
-| denpa | 予約・録画・CM検出・エンコード・ライブラリ管理 | `dp.doany.io` |
+| denpa | 予約・録画・CM検出・エンコード・録画の配信 | `dp.doany.io` / `dp.home.arpa` |
+
+`dp.home.arpa` は LAN 内(`10.10.0.0/16`)専用の口です。`dp.doany.io` は forward-auth を
+通していますが、mpv も Kodi も OIDC のリダイレクトを扱えません。こちらは forward-auth を
+通さず、denpa 自身のベーシック認証に任せます。自己署名だとプレイヤーが弾くことがあるので
+平文で出しています。
 
 denpa 自体の詳細(状態遷移・環境変数・テスト)は [app/README.md](app/README.md) を参照。
 
@@ -181,9 +186,12 @@ Kodi からは `/dav` を **WebDAV サーバー**として追加すると、フ�
 mpv も Kodi も、画面の前段に置く forward-auth のようなリダイレクト型の認証を扱えません。
 そこで**ファイルを取りに来る口だけ**にベーシック認証をかけられるようにしてあります。
 
-- `BASIC_AUTH_USER` と `BASIC_AUTH_PASSWORD` の**両方**が入っているときだけ有効
-- `BASIC_AUTH_SCOPE=files`(既定)… `/api/recordings/<id>/file` と `/dav` だけ。画面は素通し
-- `BASIC_AUTH_SCOPE=all` … 画面も含めて全部
+**設定画面から入れます。** 環境変数 (`BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` /
+`BASIC_AUTH_SCOPE`) は初期値としても使えますが、画面で入れた値が勝ちます。
+
+- ユーザー名とパスワードの**両方**が入っているときだけ有効
+- 適用範囲「配信と WebDAV だけ」(既定)… `/api/recordings/<id>/file` と `/dav`。画面は素通し
+- 適用範囲「画面も含めて全部」… すべてのパス
 
 再生リンクの URL には資格情報を埋め込みます(`http://user:pass@.../file`)。
 mpv も Infuse も認証ダイアログを出さないためです。

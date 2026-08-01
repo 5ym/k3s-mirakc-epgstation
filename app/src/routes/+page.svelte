@@ -2,16 +2,7 @@
     import { submitting } from '$lib/actions';
     import { liveUpdates } from '$lib/live-updates.svelte';
     import { detectPlatform, type Platform, playLinks } from '$lib/play';
-    import {
-        badgeClass,
-        CM_LABEL,
-        cmRanges,
-        dateTime,
-        duration,
-        percent,
-        size,
-        stateLabel,
-    } from '$lib/format';
+    import { badgeClass, cmRanges, dateTime, duration, percent, size, stateLabel, time } from '$lib/format';
 
     let { data, form } = $props();
 
@@ -102,7 +93,7 @@
                             data-program-id={res.program_id}
                         >
                             <td class="whitespace-nowrap">
-                                {dateTime(res.start_at)}
+                                {dateTime(res.start_at)} 〜 {time(res.end_at)}
                                 <span class="text-base-content/60 text-xs">
                                     ({duration(res.start_at, res.end_at)})
                                 </span>
@@ -118,22 +109,8 @@
                                 <div class="whitespace-nowrap">
                                     {res.manual ? '手動' : (res.rule_name ?? 'ルール')}
                                 </div>
-                                <!-- 番組ごとに変えられるので、何で録るのかは一覧から分かるようにする -->
                                 <div class="mt-0.5 flex flex-wrap gap-1">
-                                    {#if res.encode}
-                                        <span
-                                            class="badge badge-ghost badge-sm"
-                                            data-testid="reservation-codec"
-                                        >
-                                            {res.codec.toUpperCase()}
-                                        </span>
-                                        <span
-                                            class="badge badge-ghost badge-sm"
-                                            data-testid="reservation-cmcut"
-                                        >
-                                            CM: {CM_LABEL[res.cm_cut] ?? res.cm_cut}
-                                        </span>
-                                    {:else}
+                                    {#if !res.encode}
                                         <span class="badge badge-ghost badge-sm">TSのみ</span>
                                     {/if}
                                     {#if res.keep_original}
@@ -296,13 +273,13 @@
                                         {rec.error}
                                     </div>
                                 {/if}
-                                <div class="text-base-content/60 text-xs" data-testid="cm-info">
-                                    {rec.codec.toUpperCase()}
-                                    {#if rec.cm_cut !== 'off'}
-                                        ・CM {CM_LABEL[rec.cm_cut]}
-                                        {#if cmRanges(rec.cm_ranges)}・{cmRanges(rec.cm_ranges)}{/if}
-                                    {/if}
-                                </div>
+                                {#if rec.cm_cut !== 'off' && cmRanges(rec.cm_ranges)}
+                                    <!-- 何を検出したかは録画ごとに違うので出す。
+                                         コーデックとCMの設定そのものは全体設定なので出さない -->
+                                    <div class="text-base-content/60 text-xs" data-testid="cm-info">
+                                        CM {cmRanges(rec.cm_ranges)}
+                                    </div>
+                                {/if}
                             </td>
                             <td class="whitespace-nowrap">{size(rec.ts_size)}</td>
                             <td class="whitespace-nowrap">
@@ -310,51 +287,53 @@
                                     {stateLabel(rec.state)}
                                 </span>
                             </td>
-                            <td class="flex flex-wrap gap-2">
-                                {#if rec.deleted_at === null}
-                                    {#if rec.state === 'available' && platform !== null}
-                                        <!--
+                            <td>
+                                <div class="flex flex-wrap items-center gap-2">
+                                    {#if rec.deleted_at === null}
+                                        {#if rec.state === 'available' && platform !== null}
+                                            <!--
                                     ブラウザは MPEG-2 も AV1+Opus の mkv も素直には再生できない。
                                     端末に入っているプレイヤーに URL を渡して開かせる
                                 -->
-                                        {#each playLinks(fileUrl(rec.id), rec.name, platform, data.credentials) as link (link.href)}
+                                            {#each playLinks(fileUrl(rec.id), rec.name, platform, data.credentials) as link (link.href)}
+                                                <a
+                                                    class="btn btn-sm btn-primary"
+                                                    href={link.href}
+                                                    data-testid="play-link"
+                                                    title={link.note ?? ''}
+                                                >
+                                                    {link.label}
+                                                </a>
+                                            {/each}
                                             <a
-                                                class="btn btn-sm btn-primary"
-                                                href={link.href}
-                                                data-testid="play-link"
-                                                title={link.note ?? ''}
+                                                class="btn btn-sm btn-ghost"
+                                                href={`/api/recordings/${rec.id}/file`}
+                                                download
+                                                data-testid="download-link"
                                             >
-                                                {link.label}
+                                                保存
                                             </a>
-                                        {/each}
-                                        <a
-                                            class="btn btn-sm btn-ghost"
-                                            href={`/api/recordings/${rec.id}/file`}
-                                            download
-                                            data-testid="download-link"
-                                        >
-                                            保存
-                                        </a>
-                                    {/if}
-                                    <!-- 録画中・エンコード中は生TSがまだ書かれている最中なので触らせない -->
-                                    {#if rec.ts_path && rec.state !== 'recording' && rec.state !== 'encoding'}
-                                        <form method="POST" action="?/reencode" use:submitting>
+                                        {/if}
+                                        <!-- 録画中・エンコード中は生TSがまだ書かれている最中なので触らせない -->
+                                        {#if rec.ts_path && rec.state !== 'recording' && rec.state !== 'encoding'}
+                                            <form method="POST" action="?/reencode" use:submitting>
+                                                <input type="hidden" name="id" value={rec.id} />
+                                                <button class="btn btn-sm" data-testid="reencode-button"
+                                                    >再エンコード</button
+                                                >
+                                            </form>
+                                        {/if}
+                                        <form method="POST" action="?/delete" use:submitting>
                                             <input type="hidden" name="id" value={rec.id} />
-                                            <button class="btn btn-sm" data-testid="reencode-button"
-                                                >再エンコード</button
+                                            <button
+                                                class="btn btn-sm btn-error btn-outline"
+                                                data-testid="delete-button"
                                             >
+                                                削除
+                                            </button>
                                         </form>
                                     {/if}
-                                    <form method="POST" action="?/delete" use:submitting>
-                                        <input type="hidden" name="id" value={rec.id} />
-                                        <button
-                                            class="btn btn-sm btn-error btn-outline"
-                                            data-testid="delete-button"
-                                        >
-                                            削除
-                                        </button>
-                                    </form>
-                                {/if}
+                                </div>
                             </td>
                         </tr>
                     {:else}

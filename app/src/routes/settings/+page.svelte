@@ -68,6 +68,56 @@
     </div>
 </section>
 
+<section class="card bg-base-100 mb-6 shadow">
+    <div class="card-body">
+        <h2 class="card-title">ベーシック認証</h2>
+        <p class="text-base-content/70 text-sm">
+            mpv も Kodi も、画面の前段に置くリダイレクト型の認証を扱えません。
+            ファイルを取りに来る口だけにベーシック認証をかけられます。 ユーザー名とパスワードの<strong
+                >両方</strong
+            >が入っているときだけ有効です。
+        </p>
+        <form method="POST" action="?/saveAuth" use:submitting class="grid gap-4 sm:grid-cols-3">
+            <label class="flex flex-col gap-1">
+                <span class="text-sm font-medium">ユーザー名</span>
+                <input
+                    name="basicAuthUser"
+                    class="input input-bordered w-full"
+                    value={data.auth.user}
+                    data-testid="auth-user"
+                />
+            </label>
+            <label class="flex flex-col gap-1">
+                <span class="text-sm font-medium">パスワード</span>
+                <input
+                    type="password"
+                    name="basicAuthPassword"
+                    class="input input-bordered w-full"
+                    placeholder={data.auth.hasPassword ? '設定済み (変えるときだけ入力)' : ''}
+                    data-testid="auth-password"
+                />
+            </label>
+            <label class="flex flex-col gap-1">
+                <span class="text-sm font-medium">適用範囲</span>
+                <select name="basicAuthScope" class="select select-bordered w-full" data-testid="auth-scope">
+                    <option value="files" selected={data.auth.scope === 'files'}> 配信と WebDAV だけ </option>
+                    <option value="all" selected={data.auth.scope === 'all'}>画面も含めて全部</option>
+                </select>
+            </label>
+            <div class="sm:col-span-3">
+                {#if data.auth.scope === 'files' && data.auth.hasPassword}
+                    <div class="alert alert-warning mb-3" data-testid="auth-warning">
+                        この範囲だと録画一覧の画面には認証がかかりません。再生リンクのURLに
+                        パスワードを埋めているので、画面を開ければパスワードも見えます。
+                        画面の前段に別の認証がある前提の設定です。
+                    </div>
+                {/if}
+                <button class="btn btn-primary" data-testid="save-auth">保存</button>
+            </div>
+        </form>
+    </div>
+</section>
+
 <section class="card bg-base-100 shadow">
     <div class="card-body">
         <h2 class="card-title">通知</h2>

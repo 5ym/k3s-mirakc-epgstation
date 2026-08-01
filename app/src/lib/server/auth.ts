@@ -1,4 +1,4 @@
-import { config } from './config';
+import { settings } from './settings';
 
 /**
  * ベーシック認証。
@@ -12,12 +12,13 @@ import { config } from './config';
 const FILE_PATHS = [/^\/api\/recordings\/\d+\/file$/, /^\/dav(\/|$)/];
 
 export function enabled(): boolean {
-    return config.basicAuthUser !== '' && config.basicAuthPassword !== '';
+    const { basicAuthUser, basicAuthPassword } = settings();
+    return basicAuthUser !== '' && basicAuthPassword !== '';
 }
 
 export function protects(pathname: string): boolean {
     if (!enabled()) return false;
-    if (config.basicAuthScope === 'all') return true;
+    if (settings().basicAuthScope === 'all') return true;
     return FILE_PATHS.some((pattern) => pattern.test(pathname));
 }
 
@@ -46,7 +47,8 @@ export function authorized(header: string | null): boolean {
     if (at < 0) return false;
     const user = decoded.slice(0, at);
     const password = decoded.slice(at + 1);
-    return sameSecret(user, config.basicAuthUser) && sameSecret(password, config.basicAuthPassword);
+    const current = settings();
+    return sameSecret(user, current.basicAuthUser) && sameSecret(password, current.basicAuthPassword);
 }
 
 export function challenge(): Response {

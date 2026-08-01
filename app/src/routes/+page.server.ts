@@ -1,11 +1,11 @@
 import { fail } from '@sveltejs/kit';
 import { enabled as authEnabled } from '$lib/server/auth';
-import { config } from '$lib/server/config';
 import { database, now, queryAll, queryOne } from '$lib/server/db';
 import { cancel as cancelEncode, enqueue, pump } from '$lib/server/encoder';
 import { deleteRecordingFiles, reconcile } from '$lib/server/files';
 import { cancel } from '$lib/server/reservations';
 import { resolveConflicts } from '$lib/server/scheduler';
+import { settings } from '$lib/server/settings';
 import type { EncodeJob, Recording, Reservation } from '$lib/types';
 
 interface JobRow extends EncodeJob {
@@ -88,7 +88,7 @@ export function load({ url }) {
          * パスワードも見える。画面の前段に別の認証を置いている前提の設定。
          */
         credentials: authEnabled()
-            ? { user: config.basicAuthUser, password: config.basicAuthPassword }
+            ? { user: settings().basicAuthUser, password: settings().basicAuthPassword }
             : undefined,
     };
 }

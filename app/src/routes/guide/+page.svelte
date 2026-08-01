@@ -320,13 +320,28 @@
             {/each}
 
             {#if selected.reservation_state}
-                <div class="modal-action">
+                <div class="modal-action items-center">
                     <span class="badge badge-info" data-testid="detail-state">
                         {stateLabel(selected.reservation_state)}
                     </span>
                     <button class="btn" onclick={() => (selected = null)} data-testid="detail-close">
                         閉じる
                     </button>
+                    <!-- 予約したあと番組表から止められないと、わざわざ予約一覧まで行くことになる -->
+                    <form
+                        method="POST"
+                        action="?/cancel"
+                        use:submitting={() =>
+                            async ({ update }) => {
+                                await update();
+                                selected = null;
+                            }}
+                    >
+                        <input type="hidden" name="programId" value={selected.id} />
+                        <button class="btn btn-error btn-outline" data-testid="detail-cancel">
+                            予約を取り消す
+                        </button>
+                    </form>
                 </div>
             {:else}
                 <form

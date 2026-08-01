@@ -51,3 +51,26 @@ spec:
       services:
         - name: denpa
           port: 3000
+---
+# LAN からプレイヤー(mpv / Kodi / VLC)で開くための口。
+#
+# dp.doany.io は forward-auth を通しているが、プレイヤーは OIDC のリダイレクトを
+# 扱えない。こちらは forward-auth を通さず、denpa 自身のベーシック認証に任せる。
+# LAN 内(10.10.0.0/16)からしか通さない。
+#
+# 自己署名だとプレイヤーが証明書で弾くことがあるので平文で出す。
+# 中身は録画ファイルなので、LAN 内であればこれで足りる。
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: denpa-home-arpa
+  namespace: epg
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`dp.home.arpa`) && ClientIP(`10.10.0.0/16`)
+      kind: Rule
+      services:
+        - name: denpa
+          port: 3000

@@ -1,5 +1,6 @@
 import { fail } from '@sveltejs/kit';
 import { isCmMode } from '$lib/server/cm';
+import { config } from '$lib/server/config';
 import { database, now, queryAll, queryOne } from '$lib/server/db';
 import { isVideoCodec } from '$lib/server/encoder';
 import { available as migrateAvailable, source, start, status } from '$lib/server/migrate';
@@ -8,8 +9,16 @@ import { send, type Webhook } from '$lib/server/webhook';
 import { EVENTS } from '$lib/webhook-events';
 
 export function load() {
+    const current = settings();
     return {
-        recording: settings(),
+        recording: current,
+        auth: {
+            user: current.basicAuthUser,
+            // パスワードそのものは返さない。設定済みかどうかだけ分かればよい
+            hasPassword: current.basicAuthPassword !== '',
+            scope: current.basicAuthScope,
+            fromEnv: !isStored('basicAuthPassword') && config.basicAuthPassword !== '',
+        },
         fromEnv: { codec: !isStored('codec'), cmCut: !isStored('cmCut') },
         webhooks: queryAll<Webhook>('SELECT * FROM webhooks ORDER BY id'),
         events: EVENTS,
@@ -22,6 +31,30 @@ export function load() {
 }
 
 export const actions = {
+    /**
+     * ベーシック認証。mpv も Kodi もリダイレクト型の認証を扱えないので、
+     * ファイルを取りに来る口だけにかけられるようにしてある。
+     */
+    saveAuth: async ({ request }) => {
+        const form = await request.formData();
+        const user = String(form.get('basicAuthUser') ?? '').trim();
+        const password = String(form.get('basicAuthPassword') ?? '');
+        const scope = String(form.get('basicAuthScope') ?? 'files');
+        if (scope !== 'files' && scope !== 'all') {
+            return fail(400, { message: '適用範囲の指定が不正です' });
+        }
+        if (user !== '' && password === '' && settings().basicAuthPassword === '') {
+            return fail(400, { message: 'パスワードを入力してください' });
+        }
+        // パスワード欄が空なら今のものを変えない(URLだけ直したいことがある)
+        saveSettings(
+            password === ''
+                ? { basicAuthUser: user, basicAuthScope: scope }
+                : { basicAuthUser: user, basicAuthPassword: password, basicAuthScope: scope },
+        );
+        return { success: true, saved: true };
+    },
+
     /** 録画のしかた。番組ごとに変えたくなることが実際にはほとんど無いので全体で1つ */
     saveRecording: async ({ request }) => {
         const form = await request.formData();

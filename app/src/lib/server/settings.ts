@@ -17,6 +17,11 @@ export interface Settings {
     codec: VideoCodec;
     /** CMの扱い。off / chapter / cut */
     cmCut: CmMode;
+    /** ベーシック認証。両方入っているときだけ有効 */
+    basicAuthUser: string;
+    basicAuthPassword: string;
+    /** 認証をかける範囲。files … 配信とWebDAVだけ / all … 画面も含めて全部 */
+    basicAuthScope: 'files' | 'all';
 }
 
 function stored(key: string): string | undefined {
@@ -26,9 +31,13 @@ function stored(key: string): string | undefined {
 export function settings(): Settings {
     const codec = stored('codec');
     const cmCut = stored('cmCut');
+    const scope = stored('basicAuthScope') ?? config.basicAuthScope;
     return {
         codec: isVideoCodec(codec) ? codec : config.encodeCodec,
         cmCut: isCmMode(cmCut) ? cmCut : config.cmCutDefault,
+        basicAuthUser: stored('basicAuthUser') ?? config.basicAuthUser,
+        basicAuthPassword: stored('basicAuthPassword') ?? config.basicAuthPassword,
+        basicAuthScope: scope === 'all' ? 'all' : 'files',
     };
 }
 
