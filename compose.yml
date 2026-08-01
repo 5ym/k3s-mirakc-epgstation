@@ -66,7 +66,7 @@ services:
             - '40772:40772'
 
     jellyfin:
-        image: docker.io/jellyfin/jellyfin:10.11.7
+        image: docker.io/jellyfin/jellyfin:10.11.11
         environment:
             TZ: Asia/Tokyo
         volumes:
