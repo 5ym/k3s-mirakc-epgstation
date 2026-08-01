@@ -1,0 +1,12 @@
+# 開発用composeの上書き
+.env
+
+# アプリのビルド成果物とテスト出力
+app/node_modules/
+app/build/
+app/.svelte-kit/
+app/test-results/
+app/playwright-report/
+app/*.db
+app/*.db-wal
+app/*.db-shm

@@ -1,0 +1,86 @@
+# denpa (録画・エンコード管理アプリ)
+
+Mirakurun から EPG と TS を受け取り、予約・録画・エンコード・ライブラリ配置までを行う。
+出来上がった mkv は Jellyfin が読むライブラリに置かれ、Jellyfin で見終わったものは
+自動的に消える。EPGStation の置き換えを目指したもので、`enc.js` のエンコード設定は
+そのまま移植してある。
+
+## 構成
+
+| ファイル | 役割 |
+| --- | --- |
+| `src/lib/server/mirakurun.ts` | Mirakurun の API クライアント |
+| `src/lib/server/epg.ts` | 番組表の取り込みと予約時刻の追従 |
+| `src/lib/server/rules.ts` | キーワードルールから予約を作る |
+| `src/lib/server/conflict.ts` | チューナー割り当てと競合判定 (純粋関数) |
+| `src/lib/server/scheduler.ts` | 予約 → 録画の状態遷移 |
+| `src/lib/server/recorder.ts` | TS の受信とファイル書き出し |
+| `src/lib/server/cm.ts` | CM検出 (無音 + CM尺) |
+| `src/lib/server/cm-jls.ts` | CM検出 (join_logo_scp。任意) |
+| `src/lib/server/encoder.ts` | 録画のエンコード (AV1 / H.264) |
+| `src/lib/server/live.ts` | ライブ中継のエンコードとセッション管理 |
+| `src/lib/server/iptv.ts` | Jellyfin に渡す M3U / XMLTV |
+| `src/lib/server/library.ts` | Jellyfin 向けのファイル配置 |
+| `src/lib/server/metadata.ts` | Jellyfin 向けの .nfo とサムネイル |
+| `src/lib/server/jellyfin.ts` | ライブラリの実体とDBの突き合わせ |
+| `src/lib/server/runtime.ts` | 常駐処理の起動 (hooks.server.ts から呼ばれる) |
+
+## 状態遷移
+
+```
+予約 scheduled ─(開始時刻)→ recording ─→ done
+      └(チューナー不足)→ conflict
+
+録画 recording ─→ recorded ─(エンコード)→ encoding ─→ available ─(Jellyfinで削除)→ 削除済み
+```
+
+DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema.ts`。
+
+## 環境変数
+
+| 変数 | 既定値 | 説明 |
+| --- | --- | --- |
+| `MIRAKURUN_URL` | `http://mirakurun:40772` | Mirakurun |
+| `JELLYFIN_URL` / `JELLYFIN_API_KEY` | (空) | 任意。設定すると新規録画時に再スキャンを促す |
+| `RECONCILE_INTERVAL` | `300000` | ライブラリの実体とDBを突き合わせる間隔(ms) |
+| `JELLYFIN_TIMER_INTERVAL` | `30000` | Jellyfin の録画タイマーを取り込む間隔(ms) |
+| `WRITE_NFO` | `1` | Jellyfin 向けの `.nfo` を書くか |
+| `THUMBNAIL_POSITION` / `THUMBNAIL_WIDTH` | `120` / `480` | サムネイルの切り出し位置(秒)と幅 |
+| `DENPA_DB` | `/app/data/denpa.db` | SQLite の置き場 |
+| `RECORDED_DIR` | `/app/recorded` | 生TSの作業領域 |
+| `LIBRARY_DIR` | `/library` | Jellyfin が読むライブラリ |
+| `FFMPEG` / `FFPROBE` | `/usr/local/bin/...` | 開発時は偽物に差し替える |
+| `ENCODE_CONCURRENCY` | `1` | 録画エンコードの同時実行数。ライブ配信の本数とは無関係 |
+| `ENCODE_CODEC` | `av1` | 録画の既定コーデック (`av1` / `h264`) |
+| `ENCODE_H264_PRESET` / `ENCODE_H264_CRF` | `medium` / `22` | H.264 のときの品質 |
+| `LIVE_PROFILE` | `h264` | M3U に載せる既定プロファイル |
+| `LIVE_PRESET` / `LIVE_CRF` | `veryfast` / `23` | ライブの x264 設定 |
+| `LIVE_AV1_PRESET` | `10` | ライブの SVT-AV1 プリセット (大きいほど速い) |
+| `LIVE_IDLE_TIMEOUT` | `30000` | 読まれなくなった中継を切るまで(ms) |
+| `IPTV_ORIGIN` | (空) | M3U に書く denpa のURL。空ならリクエスト元から決める |
+| `START_MARGIN` / `END_MARGIN` | `10000` / `15000` | 録画の前後マージン(ms) |
+| `EPG_SYNC_INTERVAL` | `600000` | EPG取得の間隔(ms) |
+| `SCHEDULER_TICK` | `5000` | 予約チェックの間隔(ms) |
+| `CM_CUT_DEFAULT` | `chapter` | `off` / `chapter` / `cut` |
+| `CM_DETECTOR` | `silence` | `silence` / `jls` |
+| `CM_SILENCE_NOISE` | `-50dB` | 無音とみなす音量 |
+| `CM_SILENCE_DURATION` | `0.4` | 無音とみなす最短の長さ(秒) |
+| `CM_TOLERANCE` | `0.6` | 「15秒の倍数」判定の許容誤差(秒) |
+| `CM_MIN_BLOCK` | `30` | CMブロックとして採用する最短の長さ(秒) |
+| `CM_JLS_COMMAND` | `/opt/jls/JoinLogoScpTrial.sh {input}` | jls検出器の起動コマンド |
+| `DENPA_AUTOSTART` | `1` | `0` で常駐処理を止める |
+
+## テスト
+
+E2E を主、単体テストは純粋関数の境界条件だけ、という方針。
+
+```sh
+docker compose run --rm unit                # bun test
+docker compose run --rm e2e                 # Playwright
+docker compose run --rm unit bun run lint   # Biome + Prettier
+docker compose run --rm unit bun run format # 整形を適用
+```
+
+E2E は偽Mirakurun・偽Jellyfin・偽ffmpeg を立てて、予約から録画・CM検出・エンコード・
+ライブラリ配置・視聴済み削除までを実際に通す (`tests/fake/`)。偽Mirakurunは1番組10秒に
+してあるので、録画完了まで待っても30秒で終わる。

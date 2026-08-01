@@ -1,0 +1,26 @@
+/** 偽Mirakurunが返す局。テスト側からもIDを参照するのでここに置く */
+export interface FakeService {
+    id: number;
+    serviceId: number;
+    networkId: number;
+    name: string;
+    type: 'GR' | 'BS';
+    channel: string;
+}
+
+export const SERVICES: FakeService[] = [
+    {
+        id: 3239123608,
+        serviceId: 23608,
+        networkId: 32391,
+        name: 'ＴＯＫＹＯ　ＭＸ',
+        type: 'GR',
+        channel: 'T16',
+    },
+    { id: 3274301064, serviceId: 1064, networkId: 32743, name: 'フジテレビ', type: 'GR', channel: 'T21' },
+    { id: 400211, serviceId: 211, networkId: 4, name: 'ＢＳ１１イレブン', type: 'BS', channel: 'BS11_0' },
+];
+
+export const MX = SERVICES[0];
+export const FUJI = SERVICES[1];
+export const BS11 = SERVICES[2];

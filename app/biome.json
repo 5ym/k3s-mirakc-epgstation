@@ -1,0 +1,33 @@
+{
+    "$schema": "https://biomejs.dev/schemas/2.5.6/schema.json",
+    "files": {
+        "includes": ["**", "!build", "!.svelte-kit", "!test-results", "!playwright-report", "!**/*.svelte"]
+    },
+    "formatter": {
+        "enabled": true,
+        "indentStyle": "space",
+        "indentWidth": 4,
+        "lineWidth": 110
+    },
+    "linter": {
+        "enabled": true,
+        "rules": {
+            "preset": "recommended",
+            "style": {
+                "noNonNullAssertion": "off"
+            }
+        }
+    },
+    "javascript": {
+        "formatter": {
+            "quoteStyle": "single",
+            "trailingCommas": "all",
+            "semicolons": "always"
+        }
+    },
+    "css": {
+        "parser": {
+            "tailwindDirectives": true
+        }
+    }
+}

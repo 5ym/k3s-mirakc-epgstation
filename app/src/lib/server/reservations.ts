@@ -1,0 +1,85 @@
+import type { CmMode, Program, Recording, Reservation, VideoCodec } from '../types';
+import { isCmMode } from './cm';
+import { config } from './config';
+import { db, now, queryOne } from './db';
+import { isVideoCodec } from './encoder';
+import { stopRecording } from './recorder';
+import { resolveConflicts } from './scheduler';
+
+/** 手動予約。ルール由来の予約が既にあれば手動扱いに昇格させて優先度を上げる */
+export async function reserve(
+    programId: number,
+    options: {
+        priority?: number;
+        encode?: boolean;
+        keepOriginal?: boolean;
+        cmCut?: CmMode;
+        codec?: VideoCodec;
+    } = {},
+): Promise<Reservation> {
+    const program = queryOne<Program>('SELECT * FROM programs WHERE id = ?', programId);
+    if (program === undefined) throw new Error(`番組 ${programId} が見つかりません`);
+
+    const at = now();
+    const priority = options.priority ?? 3;
+    const encode = options.encode === false ? 0 : 1;
+    const keepOriginal = options.keepOriginal === true ? 1 : 0;
+    const cmCut = isCmMode(options.cmCut) ? options.cmCut : config.cmCutDefault;
+    const codec = isVideoCodec(options.codec) ? options.codec : config.encodeCodec;
+
+    db.prepare(
+        `INSERT INTO reservations
+            (program_id, rule_id, service_id, name, description, start_at, end_at,
+             priority, manual, encode, keep_original, cm_cut, codec, state, created_at, updated_at)
+         VALUES (?, NULL, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 'scheduled', ?, ?)
+         ON CONFLICT(program_id) DO UPDATE SET
+            manual = 1,
+            priority = excluded.priority,
+            encode = excluded.encode,
+            keep_original = excluded.keep_original,
+            cm_cut = excluded.cm_cut,
+            codec = excluded.codec,
+            state = CASE WHEN reservations.state = 'canceled' THEN 'scheduled' ELSE reservations.state END,
+            updated_at = excluded.updated_at`,
+    ).run(
+        program.id,
+        program.service_id,
+        program.name,
+        program.description,
+        program.start_at,
+        program.end_at,
+        priority,
+        encode,
+        keepOriginal,
+        cmCut,
+        codec,
+        at,
+        at,
+    );
+
+    await resolveConflicts();
+    return queryOne<Reservation>('SELECT * FROM reservations WHERE program_id = ?', programId)!;
+}
+
+/**
+ * 予約の取り消し。録画中なら止めて、そこまでの分は録画済みとして残す
+ * (途中まででも見たいことがあるのでファイルは捨てない)。
+ */
+export async function cancel(reservationId: number): Promise<void> {
+    const reservation = queryOne<Reservation>('SELECT * FROM reservations WHERE id = ?', reservationId);
+    if (reservation === undefined) return;
+
+    if (reservation.state === 'recording') {
+        const recording = queryOne<Pick<Recording, 'id'>>(
+            `SELECT id FROM recordings WHERE reservation_id = ? AND state = 'recording'`,
+            reservationId,
+        );
+        if (recording !== undefined) stopRecording(recording.id);
+    }
+
+    db.prepare(`UPDATE reservations SET state = 'canceled', updated_at = ? WHERE id = ?`).run(
+        now(),
+        reservationId,
+    );
+    await resolveConflicts();
+}

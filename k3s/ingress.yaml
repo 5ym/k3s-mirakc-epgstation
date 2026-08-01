@@ -95,4 +95,44 @@ spec:
         - name: https-redirect
       services:
         - name: epgstation
-          port: 8888
+          port: 8888---
+# Jellyfin は forward-auth を挟まない。TV・スマホのネイティブアプリが
+# OIDCのリダイレクトを扱えず接続できなくなるため、Jellyfin自身のログインに任せる
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: jellyfin
+  namespace: epg
+spec:
+  entryPoints:
+    - websecure
+  tls:
+    certResolver: mydnschallenge
+  routes:
+    - match: Host(`j.doany.io`)
+      kind: Rule
+      priority: 50
+      services:
+        - name: jellyfin
+          port: 8096
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: denpa
+  namespace: epg
+spec:
+  entryPoints:
+    - websecure
+  tls:
+    certResolver: mydnschallenge
+  routes:
+    - match: Host(`d.doany.io`)
+      kind: Rule
+      priority: 50
+      middlewares:
+        - name: forward-auth
+          namespace: auth
+      services:
+        - name: denpa
+          port: 3000

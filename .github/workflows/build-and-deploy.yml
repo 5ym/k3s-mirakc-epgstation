@@ -9,6 +9,7 @@ on:
       - 'epgstation/Dockerfile'
       - 'epgstation/*.js'
       - 'epgstation/*.yml'
+      - 'app/**'
       - '.github/workflows/build-and-deploy.yml'
   workflow_dispatch: {}
 
@@ -75,6 +76,20 @@ jobs:
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/epgstation:${{ steps.tag.outputs.tag }}
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/epgstation:latest
 
+      - name: Build and push denpa image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./app
+          target: runtime
+          platforms: linux/amd64
+          push: true
+          pull: true
+          cache-from: type=gha,scope=denpa
+          cache-to: type=gha,mode=max,scope=denpa
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/denpa:${{ steps.tag.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/denpa:latest
+
       - name: Rewrite image tags in manifests
         run: |
           set -eu
@@ -84,6 +99,7 @@ jobs:
 
           sed -i -E "s#image: [^[:space:]]*/mirakurun:[^[:space:]]*#image: ${{ env.REGISTRY }}/${OWNER}/mirakurun:${TAG}#g" ${FILES}
           sed -i -E "s#image: [^[:space:]]*/epgstation:[^[:space:]]*#image: ${{ env.REGISTRY }}/${OWNER}/epgstation:${TAG}#g" ${FILES}
+          sed -i -E "s#image: [^[:space:]]*/denpa:[^[:space:]]*#image: ${{ env.REGISTRY }}/${OWNER}/denpa:${TAG}#g" ${FILES}
 
       - name: Commit and push manifest updates
         run: |

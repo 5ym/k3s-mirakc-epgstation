@@ -141,3 +141,139 @@ spec:
         - name: recorded
           persistentVolumeClaim:
             claimName: epgstation-recorded
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jellyfin
+  namespace: epg
+spec:
+  replicas: 1
+  # ライブラリPVCがReadWriteOnceなので、入れ替え中に2Podが同時に掴まないようにする
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: jellyfin
+  template:
+    metadata:
+      labels:
+        app: jellyfin
+    spec:
+      containers:
+        - name: jellyfin
+          image: docker.io/jellyfin/jellyfin:10.11.7
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: TZ
+              value: Asia/Tokyo
+            # クライアントに教える外部URL。逆プロキシ配下では自動検出が効かない
+            - name: JELLYFIN_PublishedServerUrl
+              value: https://j.doany.io
+          ports:
+            - containerPort: 8096
+          volumeMounts:
+            - name: jellyfin-config
+              mountPath: /config
+            - name: jellyfin-cache
+              mountPath: /cache
+            # Jellyfin の UI から録画を削除するので読み書きで渡す。
+            # 削除を許可するには Jellyfin 側のユーザー設定で
+            # 「メディアの削除を許可」を有効にする必要がある
+            - name: library
+              mountPath: /library
+      volumes:
+        - name: jellyfin-config
+          persistentVolumeClaim:
+            claimName: jellyfin-config
+        - name: jellyfin-cache
+          persistentVolumeClaim:
+            claimName: jellyfin-cache
+        - name: library
+          persistentVolumeClaim:
+            claimName: denpa-library
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: denpa
+  namespace: epg
+spec:
+  replicas: 1
+  # 録画とエンコードを抱えるので、新旧2Podが同時に走らないようにする
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: denpa
+  template:
+    metadata:
+      labels:
+        app: denpa
+    spec:
+      containers:
+        - name: denpa
+          image: ghcr.io/danything/denpa:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: TZ
+              value: Asia/Tokyo
+            - name: MIRAKURUN_URL
+              value: http://mirakurun:40772
+            - name: JELLYFIN_URL
+              value: http://jellyfin:8096
+            # 任意。設定すると新しい録画を置いたときに Jellyfin へ再スキャンを促す。
+            # 未設定でも Jellyfin 自身の監視で拾われるので、無くても支障はない
+            - name: JELLYFIN_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: denpa-secrets
+                  key: jellyfin-api-key
+                  optional: true
+            - name: DENPA_DB
+              value: /app/data/denpa.db
+            - name: RECORDED_DIR
+              value: /app/recorded
+            - name: LIBRARY_DIR
+              value: /library
+            # CMは既定ではチャプターを打つだけ。実カットは番組ごとにUIで選ぶ
+            - name: CM_CUT_DEFAULT
+              value: chapter
+            - name: CM_DETECTOR
+              value: silence
+            # 録画のコーデック。非力なノードでは h264 にする
+            - name: ENCODE_CODEC
+              value: av1
+            # Jellyfin のライブTVに登録する M3U に書き込むURL。
+            # Jellyfin Pod から解決できる必要がある
+            - name: IPTV_ORIGIN
+              value: http://denpa:3000
+            - name: LIVE_PROFILE
+              value: av1
+            - name: ENCODE_CONCURRENCY
+              value: '2'
+          ports:
+            - containerPort: 3000
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          volumeMounts:
+            - name: denpa-data
+              mountPath: /app/data
+            - name: denpa-recorded
+              mountPath: /app/recorded
+            - name: library
+              mountPath: /library
+      volumes:
+        - name: denpa-data
+          persistentVolumeClaim:
+            claimName: denpa-data
+        - name: denpa-recorded
+          persistentVolumeClaim:
+            claimName: denpa-recorded
+        - name: library
+          persistentVolumeClaim:
+            claimName: denpa-library
