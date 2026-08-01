@@ -162,7 +162,7 @@ spec:
     spec:
       containers:
         - name: jellyfin
-          image: docker.io/jellyfin/jellyfin:10.11.7
+          image: docker.io/jellyfin/jellyfin:10.11.11
           imagePullPolicy: IfNotPresent
           env:
             - name: TZ

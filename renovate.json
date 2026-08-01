@@ -2,5 +2,14 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "github>5ym/renovate-config"
+  ],
+  "packageRules": [
+    {
+      "description": "svelte-check が TypeScript 7 (tsgo) に未対応で、上げると型チェックが丸ごと落ちる。対応が入るまで5系に留める",
+      "matchPackageNames": [
+        "typescript"
+      ],
+      "allowedVersions": "<6"
+    }
   ]
 }
