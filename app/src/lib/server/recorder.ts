@@ -152,6 +152,14 @@ async function openWithRetry(serviceId: number, signal: AbortSignal): Promise<Re
     throw new Error(`チューナーを ${OPEN_RETRIES} 回試して掴めませんでした: ${last}`);
 }
 
+/** 実際に録れた長さを足す。再開したぶんも合算するので加算にする */
+function addDuration(recordingId: number, ms: number): void {
+    if (ms <= 0) return;
+    database()
+        .prepare('UPDATE recordings SET duration_ms = COALESCE(duration_ms, 0) + ? WHERE id = ?')
+        .run(ms, recordingId);
+}
+
 async function pump(recording: Recording, controller: AbortController): Promise<void> {
     const path = recording.ts_path!;
     mkdirSync(dirname(path), { recursive: true });
@@ -162,12 +170,17 @@ async function pump(recording: Recording, controller: AbortController): Promise<
         // 追記で開く。再起動をまたいで録画を再開したときに、それまでの分を消さないため
         // (MPEG-TS は 188 バイトのパケットの並びなので、そのまま繋げても読める)
         const sink = createWriteStream(path, { flags: 'a' });
+        // 実際に受け取っていた時間を測る。番組表の尺は予定でしかなく、
+        // 途中で止めたときや掴むのに手間取ったときは実物と合わない。
+        // 再開したときは足していく(ファイルも追記なので合計が実物になる)
+        const from = Date.now();
         try {
             for await (const chunk of chunks(stream)) {
                 written += chunk.byteLength;
                 if (!sink.write(chunk)) await once(sink, 'drain');
             }
         } finally {
+            addDuration(recording.id, Date.now() - from);
             await new Promise<void>((resolve, reject) => {
                 sink.end((error?: Error | null) => (error ? reject(error) : resolve()));
             });

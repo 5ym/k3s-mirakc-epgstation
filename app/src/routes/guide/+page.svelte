@@ -137,7 +137,13 @@
             <!-- 日本の番組表の慣習で、1日は4時から翌4時まで -->
             {dayLabel(data.start)} <span class="text-base-content/60">(4:00〜翌4:00)</span>
         </span>
-        <a class="btn btn-sm" href={href({ start: String(data.start + data.hours * HOUR) })}>翌日 →</a>
+        <a
+            class="btn btn-sm"
+            href={href({ start: String(data.start + data.hours * HOUR) })}
+            data-testid="next-day"
+        >
+            翌日 →
+        </a>
         <a class="btn btn-sm" href={href({})}>今日</a>
     </div>
 </div>

@@ -20,12 +20,32 @@ export function dateTime(ms: number): string {
     return `${d.getMonth() + 1}/${d.getDate()}(${WEEKDAYS[d.getDay()]}) ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-export function duration(startAt: number, endAt: number): string {
-    const min = Math.round((endAt - startAt) / 60000);
+export function durationMs(ms: number): string {
+    const min = Math.round(ms / 60000);
     if (min < 60) return `${min}分`;
     const rest = min % 60;
     // 「24時間0分」のような書き方は読みにくいので、端数が無いときは時間だけ出す
     return rest === 0 ? `${Math.floor(min / 60)}時間` : `${Math.floor(min / 60)}時間${rest}分`;
+}
+
+export function duration(startAt: number, endAt: number): string {
+    return durationMs(endAt - startAt);
+}
+
+/**
+ * 録画の長さ。実際に録れた長さがあればそちらを出す。
+ *
+ * 番組表の尺 (end_at - start_at) は予定でしかなく、途中で止めたときや
+ * CMを切ったときは出来上がりと合わない。取れていない古い行は予定で代用する。
+ */
+export function recordedDuration(recording: {
+    duration_ms: number | null;
+    start_at: number;
+    end_at: number;
+}): string {
+    return recording.duration_ms != null && recording.duration_ms > 0
+        ? durationMs(recording.duration_ms)
+        : duration(recording.start_at, recording.end_at);
 }
 
 export function size(bytes: number): string {

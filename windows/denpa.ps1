@@ -83,7 +83,11 @@ function Find-Mpv {
     $onPath = Get-Command 'mpv.exe' -ErrorAction SilentlyContinue
     if ($onPath) { return $onPath.Source }
 
+    # 配布元によって置き場所も名前も揺れる。よくあるところを順に見る
     $candidates = @(
+        "$env:ProgramFiles\MPV Player\mpv.exe",
+        "$env:LOCALAPPDATA\Microsoft\WinGet\Links\mpv.exe",
+        "${env:ProgramFiles(x86)}\MPV Player\mpv.exe",
         "$env:USERPROFILE\scoop\apps\mpv\current\mpv.exe",
         "$env:LOCALAPPDATA\Programs\mpv\mpv.exe",
         "$env:ProgramFiles\mpv\mpv.exe",
@@ -91,6 +95,14 @@ function Find-Mpv {
     )
     foreach ($candidate in $candidates) {
         if (Test-Path $candidate) { return (Resolve-Path $candidate).Path }
+    }
+
+    # それでも見つからなければ、よく置く場所を少しだけ掘る
+    foreach ($base in @($env:ProgramFiles, ${env:ProgramFiles(x86)}, "$env:LOCALAPPDATA\Programs")) {
+        if (-not $base -or -not (Test-Path $base)) { continue }
+        $hit = Get-ChildItem -Path $base -Filter 'mpv.exe' -Recurse -Depth 2 -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($hit) { return $hit.FullName }
     }
 
     throw @'

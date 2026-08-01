@@ -61,6 +61,13 @@ test.describe('録画とエンコード', () => {
         // 出るのは検出した区間。設定そのものは全体設定なので一覧には出さない
         await expect(recording.getByTestId('cm-info')).toContainText('CM 5:00-6:00');
 
+        // 実際に録れた長さが記録されていること。番組表の尺は予定でしかなく、
+        // 途中で止めたときは実物と合わない
+        const recorded = Number(await recording.getAttribute('data-duration-ms'));
+        expect(recorded).toBeGreaterThan(0);
+        // 番組表の尺(BSの偽番組は10秒)から大きく外れていないこと
+        expect(recorded).toBeLessThan(5 * 60_000);
+
         // .nfo を読むプレイヤー(Kodi など)向けに、サイドカーが揃っていること
         const base = videoPath.replace(/\.mkv$/, '');
         expect(existsSync(`${base}.nfo`)).toBe(true);

@@ -19,6 +19,8 @@ export const ADDED_COLUMNS: { table: string; column: string; definition: string 
     { table: 'recordings', column: 'codec', definition: "TEXT NOT NULL DEFAULT 'av1'" },
     { table: 'recordings', column: 'cm_ranges', definition: 'TEXT' },
     { table: 'recordings', column: 'acknowledged_at', definition: 'INTEGER' },
+    // 実際に録れた長さ。番組表の尺とは途中で止めた分だけずれる
+    { table: 'recordings', column: 'duration_ms', definition: 'INTEGER' },
     // 番組詳細に出すためだけの情報。録画の判断には使わない
     { table: 'programs', column: 'video_type', definition: 'TEXT' },
     { table: 'programs', column: 'video_resolution', definition: 'TEXT' },
@@ -164,6 +166,9 @@ CREATE TABLE IF NOT EXISTS recordings (
     cm_cut TEXT NOT NULL DEFAULT 'chapter',
     codec TEXT NOT NULL DEFAULT 'av1',
     cm_ranges TEXT,   -- 検出したCM区間の JSON。UIでの確認用
+    -- 実際に録れた長さ。番組表の尺 (end_at - start_at) は予定でしかなく、
+    -- 途中で止めたときやCMを切ったときは実物と合わない
+    duration_ms INTEGER,
     -- 消した時刻(denpa から、または外から)。行は履歴として残す
     deleted_at INTEGER,
     -- 失敗をユーザーが確認した時刻。以降ダッシュボードの通知に出さない

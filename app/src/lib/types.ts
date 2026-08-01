@@ -134,6 +134,8 @@ export interface Recording {
     cm_cut: CmMode;
     codec: VideoCodec;
     cm_ranges: string | null;
+    /** 実際に録れた長さ。取れていなければ null (古い行) */
+    duration_ms: number | null;
     deleted_at: number | null;
     acknowledged_at: number | null;
     created_at: number;

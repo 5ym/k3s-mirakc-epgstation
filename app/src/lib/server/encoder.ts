@@ -289,6 +289,8 @@ async function runFfmpeg(
     procs.set(job.id, proc);
 
     let durationSec = NaN;
+    // 出力し終えた時点の位置。CMを切ると入力より短くなるので、出来上がりの長さはこちら
+    let outTimeUs = NaN;
     let percent = 0;
     let log = '';
     let lastWrite = 0;
@@ -325,14 +327,17 @@ async function runFfmpeg(
                 block[line.slice(0, eq)] = line.slice(eq + 1).trim();
                 if (block.progress === undefined) continue;
 
+                const at = Number(block.out_time_us);
+                if (Number.isFinite(at) && at > 0) outTimeUs = at;
+
                 const p = parseProgressBlock(block, durationSec, percent);
                 percent = p.percent;
                 log = p.log;
                 block = {};
 
-                const at = Date.now();
-                if (at - lastWrite >= PROGRESS_INTERVAL) {
-                    lastWrite = at;
+                const wroteAt = Date.now();
+                if (wroteAt - lastWrite >= PROGRESS_INTERVAL) {
+                    lastWrite = wroteAt;
                     updateProgress.run(percent, log, job.id);
                 }
             }
@@ -342,7 +347,7 @@ async function runFfmpeg(
     const [code] = await Promise.all([proc.exited, readStdout, readStderr]);
     procs.delete(job.id);
     updateProgress.run(code === 0 ? 1 : percent, log, job.id);
-    return { code, stderrTail: failureReason(stderrTail) };
+    return { code, stderrTail: failureReason(stderrTail), outTimeUs };
 }
 
 /**
@@ -521,6 +526,13 @@ async function runJob(jobId: number): Promise<void> {
         size = statSync(output).size;
     } catch {
         // 取れなくても致命的ではない
+    }
+
+    // 出来上がりの長さで上書きする。CMを切っていれば元のTSより短い
+    if (Number.isFinite(result.outTimeUs) && result.outTimeUs > 0) {
+        database()
+            .prepare('UPDATE recordings SET duration_ms = ? WHERE id = ?')
+            .run(Math.round(result.outTimeUs / 1000), recording.id);
     }
 
     // 番組名・概要・放送日・サムネイルをサイドカーに書く。動画を置いた直後に作る

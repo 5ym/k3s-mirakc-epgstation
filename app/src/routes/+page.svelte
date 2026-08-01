@@ -10,6 +10,7 @@
         dateTime,
         duration,
         percent,
+        recordedDuration,
         size,
         stateLabel,
         time,
@@ -296,6 +297,7 @@
                             data-recording-id={rec.id}
                             data-program-id={rec.program_id}
                             data-library-path={rec.library_path}
+                            data-duration-ms={rec.duration_ms}
                             class="hover cursor-pointer"
                             tabindex="0"
                             onclick={(event) => rowClick(event, rec.program_id, rec)}
@@ -303,8 +305,10 @@
                         >
                             <td class="whitespace-nowrap">
                                 {dateTime(rec.start_at)}
+                                <!-- 番組表の尺ではなく実際に録れた長さ。
+                                     途中で止めたときやCMを切ったときは合わない -->
                                 <span class="text-base-content/60 text-xs">
-                                    ({duration(rec.start_at, rec.end_at)})
+                                    ({recordedDuration(rec)})
                                 </span>
                             </td>
                             <!-- max-w-0 は truncate を効かせるため -->

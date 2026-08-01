@@ -31,7 +31,7 @@ export interface Cell {
  * グリッドは日本の慣習どおり4時から24時間ぶんを出すので、先頭は「もう終わった番組」。
  * 位置で選ぶと過去の番組を予約してしまい、いつまでも録画が始まらない。
  */
-export async function upcoming(page: Page): Promise<Cell[]> {
+async function cellsOn(page: Page): Promise<Cell[]> {
     const cells = await page.getByTestId('grid-program').evaluateAll((nodes) =>
         nodes.map((node) => ({
             programId: node.getAttribute('data-program-id') ?? '',
@@ -39,9 +39,20 @@ export async function upcoming(page: Page): Promise<Cell[]> {
             startAt: Number(node.getAttribute('data-start-at')),
         })),
     );
-    const soon = cells
+    return cells
         .filter((c) => c.startAt > Date.now())
         .sort((a, b) => a.startAt - b.startAt || Number(a.serviceId) - Number(b.serviceId));
+}
+
+export async function upcoming(page: Page): Promise<Cell[]> {
+    let soon = await cellsOn(page);
+    if (soon.length === 0) {
+        // 放送日の終わり際(深夜3時台など)は、この日にこれから始まる番組が
+        // 1つも残っていない。翌日に送って探す
+        await page.getByTestId('next-day').click();
+        await page.locator('[data-hydrated="true"]').waitFor();
+        soon = await cellsOn(page);
+    }
     expect(soon.length).toBeGreaterThan(0);
     return soon;
 }
