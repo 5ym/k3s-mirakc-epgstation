@@ -1,8 +1,14 @@
 <script lang="ts">
+    import { page } from '$app/state';
     import { dragScroll, submitting } from '$lib/actions';
     import { dateTime, duration, stateLabel, time } from '$lib/format';
 
     let { data, form } = $props();
+
+    // 検索条件はURLに持たせる。そのままルールにできるようにするため
+    const exclude = $derived(page.url.searchParams.get('exclude') ?? '');
+    const types = $derived((page.url.searchParams.get('types') ?? '').split(',').filter(Boolean));
+    const free = $derived(page.url.searchParams.get('free') === '1');
 
     /** クリックした番組。詳細を出してから予約するかどうか決める */
     let selected = $state<(typeof data.programs)[number] | null>(null);
@@ -70,7 +76,7 @@
             />
         </label>
         <button class="btn btn-primary" type="submit">検索</button>
-        {#if data.keyword}
+        {#if data.mode === 'list'}
             <a class="btn" href={href({})} data-testid="clear-keyword">番組表に戻る</a>
         {/if}
     </form>
@@ -190,6 +196,67 @@
         </div>
     {/if}
 {:else}
+    <div class="card bg-base-100 mb-4 shadow">
+        <div class="card-body gap-3 p-4">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <span class="font-bold" data-testid="search-total">
+                    条件に合う番組は {data.total} 件
+                </span>
+                <form method="POST" action="?/createRule" use:submitting data-testid="to-rule">
+                    <input type="hidden" name="q" value={data.keyword} />
+                    <input type="hidden" name="exclude" value={exclude} />
+                    <input type="hidden" name="types" value={types.join(',')} />
+                    <input type="hidden" name="free" value={free ? '1' : '0'} />
+                    <button class="btn btn-sm btn-primary" data-testid="create-rule">
+                        この条件でルールを作る
+                    </button>
+                </form>
+            </div>
+
+            <!-- ルールと同じ条件で絞り込む。ここで見えているものが、そのまま録れるものになる -->
+            <form method="GET" class="flex flex-wrap items-end gap-3" data-testid="search-conditions">
+                <input type="hidden" name="q" value={data.keyword} />
+                <label class="flex flex-col gap-1">
+                    <span class="text-sm font-medium">除外キーワード</span>
+                    <input
+                        name="exclude"
+                        value={exclude}
+                        class="input input-bordered input-sm"
+                        data-testid="filter-exclude"
+                    />
+                </label>
+                <div class="flex flex-col gap-1">
+                    <span class="text-sm font-medium">種別</span>
+                    <div class="flex gap-3" data-testid="filter-types">
+                        {#each ['GR', 'BS', 'CS'] as t (t)}
+                            <label class="flex cursor-pointer items-center gap-1">
+                                <input
+                                    type="checkbox"
+                                    name="types"
+                                    value={t}
+                                    checked={types.includes(t)}
+                                    class="checkbox checkbox-sm"
+                                />
+                                <span class="text-sm">{TYPE_LABEL[t]}</span>
+                            </label>
+                        {/each}
+                    </div>
+                </div>
+                <label class="flex cursor-pointer items-center gap-2">
+                    <input
+                        type="checkbox"
+                        name="free"
+                        value="1"
+                        checked={free}
+                        class="checkbox checkbox-sm"
+                    />
+                    <span class="text-sm">無料放送のみ</span>
+                </label>
+                <button class="btn btn-sm">絞り込む</button>
+            </form>
+        </div>
+    </div>
+
     <div class="rounded-box bg-base-100 overflow-x-auto shadow">
         <table class="table-zebra table">
             <thead>

@@ -3,9 +3,9 @@ import { isCmMode } from '$lib/server/cm';
 import { config } from '$lib/server/config';
 import { database, now, queryAll } from '$lib/server/db';
 import { isVideoCodec } from '$lib/server/encoder';
-import { applyRules, matches } from '$lib/server/rules';
+import { applyRules } from '$lib/server/rules';
 import { resolveConflicts } from '$lib/server/scheduler';
-import type { Program, Rule, Service } from '$lib/types';
+import type { Rule, Service } from '$lib/types';
 
 interface Row extends Rule {
     reservations: number;
@@ -59,76 +59,12 @@ function ruleName(keyword: string, types: string | null, ids: string | null, ser
         : `${parts.slice(0, 3).join('・')}${parts.length > 3 ? ' ほか' : ''}`;
 }
 
-/** 入力中の条件で、これから何が録れるのかを見せる */
-function previewFor(rule: Rule, limit = 30): { total: number; programs: PreviewRow[] } {
-    const programs = queryAll<Program & { service_type: string; service_name: string }>(
-        `SELECT p.*, s.type AS service_type, s.name AS service_name FROM programs p
-         JOIN services s ON s.id = p.service_id
-         WHERE p.start_at > ? ORDER BY p.start_at`,
-        now(),
-    );
-    const hits = programs.filter((p) => matches(rule, p, p.service_type));
-    return {
-        total: hits.length,
-        programs: hits.slice(0, limit).map((p) => ({
-            id: p.id,
-            name: p.name,
-            service_name: p.service_name,
-            start_at: p.start_at,
-            end_at: p.end_at,
-        })),
-    };
-}
-
-export interface PreviewRow {
-    id: number;
-    name: string;
-    service_name: string;
-    start_at: number;
-    end_at: number;
-}
-
-/** プレビュー用に、保存していないルールをフォームから組み立てる */
-function formToRule(form: FormData): Rule | null {
-    const keyword = String(form.get('keyword') ?? '').trim();
-    const ids = serviceIds(form);
-    const types = serviceTypes(form);
-    if (keyword === '' && ids === null && types === null) return null;
-    return {
-        id: 0,
-        name: '',
-        keyword,
-        ignore_keyword: String(form.get('ignoreKeyword') ?? '').trim(),
-        service_ids: ids,
-        service_types: types,
-        genres: null,
-        free_only: form.get('freeOnly') === 'on' ? 1 : 0,
-        enabled: 1,
-        priority: 2,
-        encode: 1,
-        keep_original: 0,
-        cm_cut: 'chapter',
-        codec: 'av1',
-        created_at: 0,
-    };
-}
-
 async function reapply(): Promise<void> {
     applyRules();
     await resolveConflicts();
 }
 
 export const actions = {
-    /** 追加せずに、いまの条件で何が録れるかだけ見る */
-    preview: async ({ request }) => {
-        const form = await request.formData();
-        const rule = formToRule(form);
-        if (rule === null) {
-            return fail(400, { message: 'キーワードかチャンネルのどちらかは指定してください' });
-        }
-        return { success: true, preview: previewFor(rule) };
-    },
-
     create: async ({ request }) => {
         const form = await request.formData();
         const keyword = String(form.get('keyword') ?? '').trim();

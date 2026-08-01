@@ -128,4 +128,40 @@ test.describe('ダッシュボードと画面遷移', () => {
             .poll(async () => await page.evaluate(() => (window as unknown as { seen: string[] }).seen))
             .toContain('reservations');
     });
+
+    test('番組表の検索はルールと同じ条件で、そのままルールにできる', async ({ page, request }) => {
+        await syncEpg(request);
+        await goto(page, '/guide?q=テストアニメ');
+
+        await expect(page.getByTestId('search-total')).toContainText('件');
+        const rows = page.getByTestId('program-row');
+        await expect(rows.first()).toBeVisible();
+        for (const row of await rows.all()) {
+            await expect(row).toContainText('テストアニメ');
+        }
+
+        // 種別で絞り込める(ルールの条件と同じもの)
+        await page.getByTestId('filter-types').locator('input[value="BS"]').check();
+        await page.getByRole('button', { name: '絞り込む' }).click();
+        await page.waitForURL(/types=BS/);
+        for (const row of await page.getByTestId('program-row').all()) {
+            await expect(row).toContainText('BS11イレブン');
+        }
+
+        // その条件をそのままルールにできる
+        await page.getByTestId('create-rule').click();
+        await page.waitForURL('**/rules');
+        await expect(page.getByTestId('rule-row').first()).toContainText('テストアニメ');
+
+        // 作ったルールは大量に予約を作るので、後続に影響しないよう片付ける
+        await page.getByTestId('rule-row').first().getByTestId('rule-delete').click();
+        await expect(page.getByTestId('rule-row')).toHaveCount(0);
+        await goto(page, '/');
+        for (let i = 0; i < 60; i++) {
+            const buttons = page.getByTestId('cancel-button');
+            if ((await buttons.count()) === 0) break;
+            await buttons.first().click();
+            await page.waitForTimeout(100);
+        }
+    });
 });

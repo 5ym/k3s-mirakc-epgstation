@@ -51,34 +51,4 @@ test.describe('自動予約ルール', () => {
             await page.waitForTimeout(200);
         }
     });
-
-    test('追加する前に、その条件で何が録れるか確認できる', async ({ page, request }) => {
-        await syncEpg(request);
-        await goto(page, '/rules');
-
-        await page.getByTestId('rule-keyword').fill('テストアニメ');
-        await page.getByTestId('rule-preview').click();
-
-        const preview = page.getByTestId('preview');
-        await expect(preview).toContainText('対象は');
-        await expect(page.getByTestId('preview-row').first()).toContainText('テストアニメ');
-        // 見ただけではルールは作られない
-        await expect(page.getByTestId('rule-row')).toHaveCount(0);
-    });
-
-    test('地上波/BS/CS 単位でも指定できる', async ({ page, request }) => {
-        await syncEpg(request);
-        await goto(page, '/rules');
-
-        await page.getByTestId('channel-summary').click();
-        await page.getByTestId('rule-types').locator('input[value="BS"]').check();
-        await page.getByTestId('rule-preview').click();
-
-        // 偽MirakurunのBSはBS11だけなので、対象も全部BS11になる
-        const rows = page.getByTestId('preview-row');
-        await expect(rows.first()).toBeVisible();
-        for (const row of await rows.all()) {
-            await expect(row).toContainText('BS11イレブン');
-        }
-    });
 });

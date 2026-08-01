@@ -1,7 +1,12 @@
-import { fail } from '@sveltejs/kit';
-import { queryAll } from '$lib/server/db';
+import { fail, redirect } from '@sveltejs/kit';
+import { isCmMode } from '$lib/server/cm';
+import { config } from '$lib/server/config';
+import { database, now, queryAll } from '$lib/server/db';
+import { isVideoCodec } from '$lib/server/encoder';
 import { reserve } from '$lib/server/reservations';
-import type { ChannelType, Program, Service } from '$lib/types';
+import { applyRules, matches } from '$lib/server/rules';
+import { resolveConflicts } from '$lib/server/scheduler';
+import type { ChannelType, Program, Rule, Service } from '$lib/types';
 
 const HOUR = 60 * 60 * 1000;
 /**
@@ -26,6 +31,47 @@ interface GridProgram extends Program {
 
 interface ListProgram extends GridProgram {
     service_name: string;
+    service_type: string;
+}
+
+/**
+ * 検索条件から、保存していないルールを組み立てる。
+ *
+ * 番組表の検索とルールの条件を同じものにしておくための要。
+ * 別々に書くと「検索で出たもの」と「ルールで録れるもの」がずれる(実際ずれていた)。
+ */
+function conditionsFrom(params: URLSearchParams | FormData): Rule | null {
+    const get = (key: string) => String(params.get(key) ?? '').trim();
+    // チェックボックスは types=GR&types=BS、隠しフィールドは types=GR,BS で来る
+    const list = (key: string) =>
+        params
+            .getAll(key)
+            .flatMap((value) => String(value).split(','))
+            .map((value) => value.trim())
+            .filter(Boolean);
+
+    const keyword = get('q');
+    const services = list('services').map(Number).filter(Number.isFinite);
+    const types = list('types');
+    if (keyword === '' && services.length === 0 && types.length === 0) return null;
+
+    return {
+        id: 0,
+        name: '',
+        keyword,
+        ignore_keyword: get('exclude'),
+        service_ids: services.length === 0 ? null : JSON.stringify(services),
+        service_types: types.length === 0 ? null : JSON.stringify(types),
+        genres: null,
+        free_only: get('free') === '1' ? 1 : 0,
+        enabled: 1,
+        priority: 2,
+        encode: 1,
+        keep_original: 0,
+        cm_cut: config.cmCutDefault,
+        codec: config.encodeCodec,
+        created_at: 0,
+    };
 }
 
 /**
@@ -42,19 +88,28 @@ export function load({ url }) {
     const start = broadcastDayStart(Number.isFinite(requested) && requested > 0 ? requested : Date.now());
     const end = start + WINDOW_HOURS * HOUR;
 
-    if (keyword !== '') {
-        const programs = queryAll<ListProgram>(
-            `SELECT p.*, s.name AS service_name, r.state AS reservation_state
+    const conditions = conditionsFrom(url.searchParams);
+    if (conditions !== null) {
+        // ルールと同じ判定を通す。ここが違うと「検索で出た番組がルールでは録れない」が起きる
+        const all = queryAll<ListProgram>(
+            `SELECT p.*, s.name AS service_name, s.type AS service_type, r.state AS reservation_state
              FROM programs p
              JOIN services s ON s.id = p.service_id
              LEFT JOIN reservations r ON r.program_id = p.id AND r.state != 'canceled'
-             WHERE p.end_at > ? AND (p.name LIKE ? OR p.description LIKE ?)
-             ORDER BY p.start_at LIMIT 300`,
+             WHERE p.end_at > ? ORDER BY p.start_at`,
             Date.now(),
-            `%${keyword}%`,
-            `%${keyword}%`,
         );
-        return { mode: 'list' as const, keyword, type, start, hours: WINDOW_HOURS, programs, services: [] };
+        const hits = all.filter((p) => matches(conditions, p, p.service_type));
+        return {
+            mode: 'list' as const,
+            keyword,
+            type,
+            start,
+            hours: WINDOW_HOURS,
+            total: hits.length,
+            programs: hits.slice(0, 300),
+            services: queryAll<Service>('SELECT * FROM services ORDER BY type, channel'),
+        };
     }
 
     const services = queryAll<Service>('SELECT * FROM services WHERE type = ? ORDER BY channel', type);
@@ -70,7 +125,16 @@ export function load({ url }) {
         start,
     );
 
-    return { mode: 'grid' as const, keyword, type, start, hours: WINDOW_HOURS, programs, services };
+    return {
+        mode: 'grid' as const,
+        keyword,
+        type,
+        start,
+        hours: WINDOW_HOURS,
+        total: programs.length,
+        programs,
+        services,
+    };
 }
 
 export const actions = {
@@ -84,5 +148,43 @@ export const actions = {
             return fail(400, { message: String(error) });
         }
         return { success: true };
+    },
+
+    /**
+     * いま見ている検索条件をそのままルールにする。
+     * 「気に入った検索を保存する」という流れにしておけば、条件を2度入力しなくて済む
+     */
+    createRule: async ({ request }) => {
+        const form = await request.formData();
+        const conditions = conditionsFrom(form);
+        if (conditions === null) {
+            return fail(400, { message: 'キーワードかチャンネルのどちらかは指定してください' });
+        }
+
+        const cmCut = form.get('cmCut');
+        const codec = form.get('codec');
+        const name = conditions.keyword !== '' ? conditions.keyword : '番組表からのルール';
+        database()
+            .prepare(
+                `INSERT INTO rules (name, keyword, ignore_keyword, service_ids, service_types, genres,
+                                    free_only, enabled, priority, encode, keep_original, cm_cut, codec, created_at)
+                 VALUES (?, ?, ?, ?, ?, NULL, ?, 1, ?, 1, 0, ?, ?, ?)`,
+            )
+            .run(
+                name,
+                conditions.keyword,
+                conditions.ignore_keyword,
+                conditions.service_ids,
+                conditions.service_types,
+                conditions.free_only,
+                Number(form.get('priority') ?? 2) || 2,
+                isCmMode(cmCut) ? cmCut : config.cmCutDefault,
+                isVideoCodec(codec) ? codec : config.encodeCodec,
+                now(),
+            );
+
+        applyRules();
+        await resolveConflicts();
+        redirect(303, '/rules');
     },
 };

@@ -1,6 +1,6 @@
 <script lang="ts">
     import { submitting } from '$lib/actions';
-    import { CM_LABEL, dateTime } from '$lib/format';
+    import { CM_LABEL } from '$lib/format';
 
     let { data, form } = $props();
 
@@ -181,41 +181,13 @@
                 </div>
             </fieldset>
 
-            <div class="flex flex-wrap gap-2">
-                <button class="btn" formaction="?/preview" data-testid="rule-preview">
-                    この条件で何が録れるか見る
-                </button>
-                <button class="btn btn-primary" formaction="?/create" data-testid="rule-submit">追加</button>
-            </div>
+            <button class="btn btn-primary" formaction="?/create" data-testid="rule-submit">追加</button>
+            <p class="text-base-content/60 text-sm">
+                何が録れるか先に確かめたいときは
+                <a class="link" href="/guide" data-testid="to-guide">番組表の検索</a>
+                を使ってください。同じ条件で絞り込めて、そのままルールにできます
+            </p>
         </form>
-
-        {#if form?.preview}
-            <div class="mt-4" data-testid="preview">
-                <h3 class="font-bold">
-                    対象は {form.preview.total} 件
-                    {#if form.preview.total > form.preview.programs.length}
-                        <span class="text-base-content/60 text-sm font-normal">
-                            (先頭 {form.preview.programs.length} 件を表示)
-                        </span>
-                    {/if}
-                </h3>
-                {#if form.preview.total === 0}
-                    <p class="text-base-content/60 text-sm">
-                        いまの番組表では1件も当たりません。条件を緩めてください。
-                    </p>
-                {:else}
-                    <ul class="mt-2 space-y-1" data-testid="preview-list">
-                        {#each form.preview.programs as program (program.id)}
-                            <li class="text-sm" data-testid="preview-row">
-                                <span class="text-base-content/60">{dateTime(program.start_at)}</span>
-                                <span class="text-base-content/60">{program.service_name}</span>
-                                {program.name}
-                            </li>
-                        {/each}
-                    </ul>
-                {/if}
-            </div>
-        {/if}
     </div>
 </div>
 
