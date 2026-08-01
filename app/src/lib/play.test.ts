@@ -23,10 +23,16 @@ describe('base64Url', () => {
     });
 });
 
+/** mpv-handler://play/<ここ>/?... を取り出す */
+function mpvUrl(href: string): string {
+    return href.replace('mpv-handler://play/', '').replace(/\/\?.*$/, '');
+}
+
 describe('playLinks', () => {
     test('Windows は mpv-handler のスキームで開く', () => {
         const [link] = playLinks(URL, TITLE, 'windows');
-        expect(link.href).toBe(`mpv://play/${base64Url(URL)}/`);
+        // mpv:// は 0.3 までの古い名前。いま渡してもどこにも届かない
+        expect(link.href).toBe(`mpv-handler://play/${base64Url(URL)}/?v_title=${base64Url(TITLE)}`);
         // 入っていないと開けないので、それが分かるようにしておく
         expect(link.note).toContain('mpv-handler');
     });
@@ -61,9 +67,7 @@ describe('ベーシック認証つきのURL', () => {
 
     test('mpv には資格情報を埋めたURLを渡す', () => {
         const [link] = playLinks(URL, TITLE, 'windows', cred);
-        const decoded = atob(
-            link.href.replace('mpv://play/', '').replace(/\/$/, '').replace(/-/g, '+').replace(/_/g, '/'),
-        );
+        const decoded = atob(mpvUrl(link.href).replace(/-/g, '+').replace(/_/g, '/'));
         expect(decoded).toBe('http://denpa:p%40ss%20word@denpa.local/api/recordings/12/file');
     });
 
@@ -78,6 +82,6 @@ describe('ベーシック認証つきのURL', () => {
 
     test('資格情報が無ければ素のURLのまま', () => {
         const [link] = playLinks(URL, TITLE, 'windows');
-        expect(atob(link.href.replace('mpv://play/', '').replace(/\/$/, ''))).toBe(URL);
+        expect(atob(mpvUrl(link.href))).toBe(URL);
     });
 });

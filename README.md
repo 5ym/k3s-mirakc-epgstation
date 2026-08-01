@@ -91,14 +91,19 @@ docker compose run --rm unit bun run format # フォーマット適用
 
 | 端末 | 渡し方 | 必要なもの |
 | --- | --- | --- |
-| Windows | `mpv://play/<base64url>/` | [mpv-handler](https://github.com/akiirui/mpv-handler) — 登録は [windows/mpv-handler.ps1](windows/mpv-handler.ps1) |
+| Windows | `mpv-handler://play/<base64url>/?v_title=<base64url>` | [mpv-handler](https://github.com/akiirui/mpv-handler) — 登録は [windows/mpv-handler.ps1](windows/mpv-handler.ps1) |
 | Android | `intent://...action=VIEW;type=video/*` | 動画が再生できるアプリ(端末が選択画面を出す) |
 | iOS | `vlc-x-callback://` / `infuse://` | VLC または Infuse |
 | その他 | 素のURL | 好きなプレイヤーに貼る |
 
 Android はアプリを名指ししません。入っていないときに何も起きないうえ好みも人それぞれ
-なので、端末に選ばせます。番組名を渡せるもの(Android の `S.title`、Infuse の `name`)
-には渡しています。
+なので、端末に選ばせます。番組名を渡せるもの(Android の `S.title`、Infuse の `name`、
+mpv-handler の `v_title`)には渡しています。
+
+> Windows で押しても何も起きないときは、まず**スキームが `mpv-handler://` であること**を
+> 確認してください。`mpv://` は mpv-handler 0.3 までの古い名前で、いまのものは受け付けません。
+> 次に `mpv-handler.exe` と同じフォルダの **`config.toml` に mpv の場所**が書いてあること。
+> `windows\mpv-handler.ps1 -Test` を使うと、コンソールを出したまま開いて理由が見えます。
 
 配信は `/api/recordings/<id>/file`。Range に対応しているのでプレイヤー側から早送り
 できます。エンコード済みがあればそれを、無ければ生TSを返します。

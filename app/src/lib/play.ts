@@ -63,10 +63,13 @@ export function playLinks(
     const encodedTitle = encodeURIComponent(title);
 
     if (platform === 'windows') {
+        // mpv-handler://PLUGINS/ENCODED_URL/?PARAMETERS=VALUES
+        // URL もタイトルもパディング無しの base64url。スキームは mpv-handler で、
+        // mpv:// は 0.3 までの古い名前(いま渡しても何も起きない)
         return [
             {
                 label: 'mpv で再生',
-                href: `mpv://play/${base64Url(withCredentials)}/`,
+                href: `mpv-handler://play/${base64Url(withCredentials)}/?v_title=${base64Url(title)}`,
                 note: 'mpv-handler が必要',
             },
         ];
