@@ -83,42 +83,6 @@ spec:
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
-  name: epgstation-home-arpa-redirect
-  namespace: epg
-spec:
-  entryPoints:
-    - web
-  routes:
-    - match: Host(`e.home.arpa`) && ClientIP(`10.10.0.0/16`)
-      kind: Rule
-      middlewares:
-        - name: https-redirect
-      services:
-        - name: epgstation
-          port: 8888---
-# Jellyfin は forward-auth を挟まない。TV・スマホのネイティブアプリが
-# OIDCのリダイレクトを扱えず接続できなくなるため、Jellyfin自身のログインに任せる
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
-  name: jellyfin
-  namespace: epg
-spec:
-  entryPoints:
-    - websecure
-  tls:
-    certResolver: mydnschallenge
-  routes:
-    - match: Host(`j.doany.io`)
-      kind: Rule
-      priority: 50
-      services:
-        - name: jellyfin
-          port: 8096
----
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
   name: denpa
   namespace: epg
 spec:

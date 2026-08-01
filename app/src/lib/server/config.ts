@@ -1,5 +1,5 @@
 /**
- * 設定は全て環境変数から読む。テスト(E2E)では偽の Mirakurun / Jellyfin / ffmpeg を
+ * 設定は全て環境変数から読む。テスト(E2E)では偽の Mirakurun / ffmpeg を
  * 指すよう差し替えて同じコードパスを通せるようにするため、パスや間隔も含めて
  * ハードコードせず全部ここに集約する。
  */
@@ -30,17 +30,10 @@ const MIN = 60 * SEC;
 export const config = {
     mirakurunUrl: str('MIRAKURUN_URL', 'http://mirakurun:40772').replace(/\/+$/, ''),
 
-    /**
-     * 録画の削除は Jellyfin の UI から直接行うので、連携は任意。
-     * 設定しておくと、新しい録画を置いたときに Jellyfin へ再スキャンを促せる。
-     */
-    jellyfinUrl: str('JELLYFIN_URL', '').replace(/\/+$/, ''),
-    jellyfinApiKey: str('JELLYFIN_API_KEY', ''),
-
     dbPath: str('DENPA_DB', '/app/data/denpa.db'),
     /** 生TSの置き場。エンコード後は(keep_original でなければ)消える作業領域 */
     recordedDir: str('RECORDED_DIR', '/app/recorded'),
-    /** Jellyfin が読むライブラリ。エンコード済みだけがここに入る */
+    /** エンコード済みの置き場。プレイヤーにはここのファイルを配る */
     libraryDir: str('LIBRARY_DIR', '/library'),
 
     ffmpeg: str('FFMPEG', '/usr/local/bin/ffmpeg'),
@@ -81,24 +74,9 @@ export const config = {
     cmMinBlock: num('CM_MIN_BLOCK', 30),
 
     /**
-     * M3U に書き込む denpa 自身のURL。Jellyfin から解決できる形にする
-     * (同じクラスタなら `http://denpa:3000`)。空ならリクエストのオリジンを使う
+     * 番組情報の .nfo を書くか。
+     * denpa の画面には要らないが、Kodi など .nfo を読むプレイヤー向けに残してある
      */
-    /** Jellyfin に渡す既定のプロファイル。h264 / av1 */
-    /** H.264 側の x264 プリセット。実時間に間に合わないときは速い側へ */
-    /**
-     * AV1 側の SVT-AV1 プリセット(0〜13、大きいほど速い)。
-     * 録画のバッチエンコードと違い実時間で回す必要があるので、既定はかなり速い側に振ってある。
-     * それでもソフトウェアエンコードでHDを実時間で回すのは厳しい(README参照)。
-     */
-    /** 誰も読まなくなったストリームを切ってチューナーを解放するまでの時間(ms) */
-
-    /**
-     * Jellyfin に作るライブラリの名前。
-     * ライブTVのタイルと並ぶので、中身が分かる名前にしておく
-     */
-    jellyfinLibraryName: str('JELLYFIN_LIBRARY_NAME', '録画'),
-    /** Jellyfin 向けの .nfo を書くか */
     writeNfo: bool('WRITE_NFO', true),
     /** サムネイルを切り出す位置(秒)。頭は提供表示やCMのことが多いので少し進める */
     thumbnailPosition: num('THUMBNAIL_POSITION', 120),
@@ -110,9 +88,8 @@ export const config = {
 
     epgSyncInterval: num('EPG_SYNC_INTERVAL', 10 * MIN),
     schedulerTick: num('SCHEDULER_TICK', 5 * SEC),
-    /** ライブラリの実体とDBを突き合わせる間隔。Jellyfin 側での削除をここで拾う */
+    /** ライブラリの実体とDBを突き合わせる間隔。外から消されたものをここで拾う */
     reconcileInterval: num('RECONCILE_INTERVAL', 5 * MIN),
-    /** Jellyfin の録画タイマーを取り込む間隔。押してから反映されるまでの待ち時間になる */
     /** 終了した番組情報をDBに残しておく期間。番組表の遡り表示にしか使わないので短くてよい */
     programRetention: num('PROGRAM_RETENTION', 24 * 60 * MIN),
 

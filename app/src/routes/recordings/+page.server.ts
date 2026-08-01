@@ -1,7 +1,7 @@
 import { fail } from '@sveltejs/kit';
 import { database, now, queryAll, queryOne } from '$lib/server/db';
 import { cancel as cancelEncode, enqueue, pump } from '$lib/server/encoder';
-import { deleteRecordingFiles, reconcile, refreshLibrary } from '$lib/server/jellyfin';
+import { deleteRecordingFiles, reconcile } from '$lib/server/files';
 import type { EncodeJob, Recording } from '$lib/types';
 
 interface JobRow extends EncodeJob {
@@ -45,8 +45,6 @@ export const actions = {
         const recording = target(await request.formData());
         if (recording === undefined) return fail(400, { message: '録画が見つかりません' });
         deleteRecordingFiles(recording, '手動削除');
-        // 待たないと Jellyfin 側に消えたはずの録画が残り続ける
-        await refreshLibrary();
         return { success: true };
     },
 
@@ -107,7 +105,7 @@ export const actions = {
     },
 
     reconcile: () => {
-        // 「ライブラリを照合」ボタン。Jellyfin で消した分をすぐ一覧に反映したいとき用
+        // 「ライブラリを照合」ボタン。外から消した分をすぐ一覧に反映したいとき用
         return { success: true, reconcile: reconcile() };
     },
 };

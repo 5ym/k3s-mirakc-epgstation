@@ -36,7 +36,7 @@ export const SCHEMA = `
 -- (単一ノード・単一プロセスの個人用途なのでマイグレーションツールは持たない)。
 
 -- 画面から変えられる設定。環境変数を初期値として、ここにあれば上書きする。
--- Jellyfin のURLとAPIキーは「起動前に用意しておく」のが現実的でないのでここに置く。
+-- いまは使っていないが、画面から変えたい設定が出たときのために残してある。
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
@@ -147,7 +147,7 @@ CREATE TABLE IF NOT EXISTS recordings (
     service_id INTEGER NOT NULL,
     service_name TEXT NOT NULL DEFAULT '',
     name TEXT NOT NULL,
-    series TEXT NOT NULL DEFAULT '',   -- Jellyfin 上でシリーズとしてまとめる単位
+    series TEXT NOT NULL DEFAULT '',   -- ライブラリ上でシリーズとしてまとめる単位
     subtitle TEXT NOT NULL DEFAULT '',
     description TEXT NOT NULL DEFAULT '',
     start_at INTEGER NOT NULL,
@@ -164,7 +164,7 @@ CREATE TABLE IF NOT EXISTS recordings (
     cm_cut TEXT NOT NULL DEFAULT 'chapter',
     codec TEXT NOT NULL DEFAULT 'av1',
     cm_ranges TEXT,   -- 検出したCM区間の JSON。UIでの確認用
-    -- Jellyfin 側で消された、または denpa から消した時刻。行は履歴として残す
+    -- 消した時刻(denpa から、または外から)。行は履歴として残す
     deleted_at INTEGER,
     -- 失敗をユーザーが確認した時刻。以降ダッシュボードの通知に出さない
     acknowledged_at INTEGER,

@@ -5,7 +5,7 @@ import { config } from './config';
 import { removeIfExists } from './fsx';
 
 /**
- * Jellyfin 向けのメタデータ(NFO)とサムネイルを、動画の隣にサイドカーとして置く。
+ * メタデータ(NFO)とサムネイルを、動画の隣にサイドカーとして置く。
  *
  * 日本の放送番組は TheTVDB / TMDB に載っていないものがほとんどで、Jellyfin の
  * インターネット取得に任せるとタイトルだけの一覧になってしまう。番組名・概要・

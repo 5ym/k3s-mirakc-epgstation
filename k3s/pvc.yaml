@@ -91,37 +91,6 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: jellyfin-config
-  namespace: epg
-  annotations:
-    argocd.argoproj.io/sync-options: Prune=false,Delete=false
-spec:
-  accessModes:
-    - ReadWriteOnce
-  storageClassName: local-path-retain
-  resources:
-    requests:
-      storage: 5Gi
----
-# Jellyfin のメタデータキャッシュとトランスコード一時領域。消えても再生成される
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: jellyfin-cache
-  namespace: epg
-  annotations:
-    argocd.argoproj.io/sync-options: Prune=false,Delete=false
-spec:
-  accessModes:
-    - ReadWriteOnce
-  storageClassName: local-path-retain
-  resources:
-    requests:
-      storage: 20Gi
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
   name: denpa-data
   namespace: epg
   annotations:
@@ -150,9 +119,7 @@ spec:
     requests:
       storage: 300Gi
 ---
-# Jellyfin が読むライブラリ。エンコード済みだけが入る。
-# denpa が書き、Jellyfin は読むだけ(削除は denpa 側でやる)。
-# ReadWriteOnce なので denpa と jellyfin は同じノードに載る必要がある。
+# エンコード済みの置き場。denpa がここから配り、削除も denpa がやる。
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

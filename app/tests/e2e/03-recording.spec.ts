@@ -42,7 +42,7 @@ test.describe('録画とエンコード', () => {
         const recordingRow = `[data-testid="recording-row"][data-program-id="${programId}"]`;
         await waitForRowState(page, '/recordings', recordingRow, 'recording-state', '視聴可能');
 
-        // ライブラリ上のパスが決まっていること。Jellyfin はこのパスで突き合わせる
+        // ライブラリ上のパスが決まっていること。実体との突き合わせにこのパスを使う
         await goto(page, '/recordings');
         const recording = page.locator(recordingRow);
         await expect(recording).toContainText('/tmp/denpa-e2e/library/');
@@ -51,7 +51,7 @@ test.describe('録画とエンコード', () => {
         // CM検出が走り、既定のチャプター付与として記録されていること
         await expect(recording.getByTestId('cm-info')).toContainText('CM チャプター');
 
-        // Jellyfin が番組情報とサムネイルを読めるよう、サイドカーが揃っていること
+        // .nfo を読むプレイヤー(Kodi など)向けに、サイドカーが揃っていること
         const videoPath = ((await recording.locator('span.font-mono').first().textContent()) ?? '').trim();
         const base = videoPath.replace(/\.mkv$/, '');
         expect(existsSync(`${base}.nfo`)).toBe(true);
@@ -61,5 +61,19 @@ test.describe('録画とエンコード', () => {
         expect(nfo).toContain('<episodedetails>');
         expect(nfo).toContain('<studio>BS11イレブン</studio>');
         expect(nfo).toContain('<aired>');
+
+        // 外部プレイヤーに渡す再生リンクが出ていること
+        await expect(recording.getByTestId('play-link').first()).toBeVisible();
+
+        // ファイルは Range で取りに行ける。mpv も VLC もこれでシークするので、
+        // 対応していないと全部落とし終わるまで早送りできない
+        const id = await recording.getAttribute('data-recording-id');
+        expect(id).toBeTruthy();
+        const part = await request.get(`/api/recordings/${id}/file`, {
+            headers: { Range: 'bytes=0-99' },
+        });
+        expect(part.status()).toBe(206);
+        expect(part.headers()['content-range']).toMatch(/^bytes 0-99\/\d+$/);
+        expect((await part.body()).byteLength).toBe(100);
     });
 });

@@ -18,136 +18,11 @@
 {#if form?.message}
     <div class="alert alert-error mb-4" data-testid="settings-error">{form.message}</div>
 {/if}
-{#if form?.issued}
-    <div class="alert alert-success mb-4" data-testid="issued-result">
-        APIキーを発行して保存しました。パスワードは保存していません。
-    </div>
-{/if}
 {#if form?.migrate}
     <div class="alert alert-info mb-4" data-testid="migrate-started">{form.migrate}</div>
 {/if}
-{#if form?.saved}
-    <div class="alert alert-success mb-4" data-testid="saved-result">保存しました。</div>
-{/if}
-{#if form?.setup}
-    <div class="alert alert-success mb-4" data-testid="setup-result">
-        <div>
-            <div>
-                ライブラリ「{form.setup.library.name}」を{form.setup.library.created
-                    ? '追加'
-                    : form.setup.library.renamed
-                      ? '名前を変更して更新'
-                      : '既存のまま更新'}しました
-            </div>
-            <div>
-                削除を許可: {form.setup.granted.length === 0
-                    ? '変更なし(既に許可済み)'
-                    : form.setup.granted.join(', ')}
-            </div>
-        </div>
-    </div>
-{/if}
 
-<div class="grid items-start gap-6 lg:grid-cols-2">
-    <section class="card bg-base-100 shadow">
-        <div class="card-body">
-            <h2 class="card-title">Jellyfin 接続</h2>
-            <p class="text-base-content/70 text-sm">
-                APIキーは Jellyfin のセットアップを終えてからでないと作れないので、ここで発行します。
-                管理者のIDとパスワードは発行にだけ使い、<strong>パスワードは保存しません</strong>。
-            </p>
-
-            <div class="my-2 flex flex-wrap items-center gap-2">
-                <span
-                    class="badge {data.enabled ? 'badge-success' : 'badge-error'}"
-                    data-testid="jellyfin-state"
-                >
-                    {data.enabled ? '連携済み' : '未設定'}
-                </span>
-                {#if data.hasApiKey}
-                    <span class="badge badge-ghost" data-testid="key-source">
-                        APIキー: {data.fromEnv.apiKey ? '環境変数から' : 'この画面で設定'}
-                    </span>
-                {/if}
-            </div>
-
-            <form method="POST" action="?/issue" use:submitting class="space-y-3">
-                <label class="flex flex-col gap-1">
-                    <span class="text-sm font-medium">Jellyfin のURL</span>
-                    <input
-                        name="jellyfinUrl"
-                        value={data.jellyfinUrl}
-                        placeholder="http://jellyfin:8096"
-                        class="input input-bordered w-full"
-                        data-testid="jellyfin-url"
-                    />
-                </label>
-                <div class="grid gap-3 sm:grid-cols-2">
-                    <label class="flex flex-col gap-1">
-                        <span class="text-sm font-medium">管理者ID</span>
-                        <input
-                            name="username"
-                            class="input input-bordered w-full"
-                            data-testid="jellyfin-user"
-                        />
-                    </label>
-                    <label class="flex flex-col gap-1">
-                        <span class="text-sm font-medium">パスワード</span>
-                        <input
-                            type="password"
-                            name="password"
-                            class="input input-bordered w-full"
-                            data-testid="jellyfin-password"
-                        />
-                    </label>
-                </div>
-                <button class="btn btn-primary" data-testid="issue-key">APIキーを発行して保存</button>
-            </form>
-
-            <div class="divider text-xs">既にAPIキーがある場合</div>
-
-            <form method="POST" action="?/save" use:submitting class="space-y-3">
-                <input type="hidden" name="jellyfinUrl" value={data.jellyfinUrl} />
-                <label class="flex flex-col gap-1">
-                    <span class="text-sm font-medium">APIキーを直接貼る</span>
-                    <input
-                        name="jellyfinApiKey"
-                        class="input input-bordered w-full"
-                        placeholder={data.hasApiKey ? '設定済み (空欄なら変更しない)' : ''}
-                        data-testid="jellyfin-apikey"
-                    />
-                </label>
-                <button class="btn" data-testid="save-key">保存</button>
-            </form>
-        </div>
-    </section>
-
-    <section class="card bg-base-100 shadow">
-        <div class="card-body">
-            <h2 class="card-title">Jellyfin 側のセットアップ</h2>
-            <p class="text-base-content/70 text-sm">
-                Jellyfin の管理画面で手作業する内容を、まとめて設定します。何度押しても重複しません。
-            </p>
-            <ul class="list-disc space-y-1 pl-5 text-sm">
-                <li>
-                    <code>{data.libraryDir}</code> を「番組(Shows)」としてライブラリに追加
-                </li>
-                <li>メタデータを .nfo から読ませ、インターネット取得を無効化</li>
-                <li>管理者に「メディアの削除を許可」を付与</li>
-            </ul>
-            <form method="POST" action="?/setup" use:submitting class="mt-2">
-                <button class="btn btn-primary" disabled={!data.enabled} data-testid="run-setup">
-                    Jellyfin をセットアップ
-                </button>
-            </form>
-            {#if !data.enabled}
-                <p class="text-base-content/60 text-sm">先に接続設定を済ませてください。</p>
-            {/if}
-        </div>
-    </section>
-</div>
-
-<section class="card bg-base-100 mt-6 shadow">
+<section class="card bg-base-100 shadow">
     <div class="card-body">
         <h2 class="card-title">通知</h2>
         <p class="text-base-content/70 text-sm">
@@ -266,8 +141,7 @@
         <h2 class="card-title">EPGStation からの引き継ぎ</h2>
         <p class="text-base-content/70 text-sm">
             EPGStation のデータベースを読み、<strong>自動予約ルール・手で入れた予約・録画</strong>を
-            取り込みます。録画はライブラリの並びに置き直し、番組情報とサムネイルもここで作るので Jellyfin
-            からそのまま見られます。何度実行しても取り込み済みのものは飛ばします。
+            取り込みます。録画はライブラリの並びに置き直し、番組情報とサムネイルもここで作ります。何度実行しても取り込み済みのものは飛ばします。
             ルール由来の予約は、ルールを取り込んだあと denpa が自分で立て直します。
         </p>
 

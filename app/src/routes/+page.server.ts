@@ -1,7 +1,6 @@
 import { fail } from '@sveltejs/kit';
 import { database, queryAll, queryOne } from '$lib/server/db';
 import { sync } from '$lib/server/epg';
-import { enabled as jellyfinEnabled } from '$lib/server/jellyfin';
 import { ping } from '$lib/server/mirakurun';
 import { cancel } from '$lib/server/reservations';
 import { resolveConflicts } from '$lib/server/scheduler';
@@ -68,7 +67,6 @@ export async function load({ url }) {
         stats,
         failures,
         mirakurun: await ping(),
-        jellyfin: jellyfinEnabled(),
     };
 }
 

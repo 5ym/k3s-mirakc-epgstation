@@ -3,14 +3,14 @@ import { expect, test } from '@playwright/test';
 import { goto } from './helpers';
 
 /**
- * Jellyfin の UI から録画を消したときに、denpa の一覧からも消えることを確認する。
- * Jellyfin はライブラリを読み書きでマウントしてファイルを直接消すので、
+ * ライブラリのファイルを denpa の外から消したときに、一覧からも消えることを確認する。
+ * ファイルマネージャや別のマシンから消されることがあるので、
  * ここでも同じようにファイルを消して、denpa の照合がそれを拾えるかを見る。
  *
  * 03 のテストがライブラリに入れた1本をそのまま使う。
  */
-test.describe('Jellyfin 側での削除の反映', () => {
-    test('Jellyfinで消した録画が一覧から消え、削除済みとして残る', async ({ page }) => {
+test.describe('ライブラリから外で消された録画の反映', () => {
+    test('外で消した録画が一覧から消え、削除済みとして残る', async ({ page }) => {
         await goto(page, '/recordings');
         const recording = page.getByTestId('recording-row').first();
         await expect(recording).toBeVisible();
@@ -24,7 +24,7 @@ test.describe('Jellyfin 側での削除の反映', () => {
         await expect(page.getByTestId('reconcile-result')).toContainText('削除済み 0 件');
         await expect(page.locator(`[data-recording-id="${recordingId}"]`)).toHaveCount(1);
 
-        // Jellyfin が消したのと同じことをする
+        // 外から消されたのと同じことをする
         rmSync(libraryPath);
 
         await page.getByTestId('reconcile-button').click();
@@ -36,7 +36,7 @@ test.describe('Jellyfin 側での削除の反映', () => {
 
         await goto(page, '/recordings?deleted=1');
         await expect(page.locator(`[data-recording-id="${recordingId}"]`)).toContainText(
-            'Jellyfin 側で削除されました',
+            'ライブラリから消えていました',
         );
     });
 });

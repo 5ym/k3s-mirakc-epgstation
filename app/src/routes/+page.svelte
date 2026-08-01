@@ -14,10 +14,6 @@
 <div class="mb-4 flex flex-wrap items-center justify-between gap-2">
     <h1 class="text-2xl font-bold">ダッシュボード</h1>
     <div class="flex flex-wrap gap-2">
-        {#if !data.jellyfin}
-            <a class="btn btn-sm btn-warning" href="/settings" data-testid="jellyfin-unset">Jellyfin 未設定</a
-            >
-        {/if}
         <div class="flex items-center gap-2" data-testid="status">
             <div class="badge badge-lg {data.mirakurun.ok ? 'badge-success' : 'badge-error'}">
                 Mirakurun {data.mirakurun.ok ? (data.mirakurun.version ?? 'OK') : 'NG'}

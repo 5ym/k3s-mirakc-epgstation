@@ -2,14 +2,14 @@ import { defineConfig } from '@playwright/test';
 
 const APP_PORT = 4173;
 const MIRAKURUN_PORT = 40772;
-const JELLYFIN_PORT = 8096;
+const WEBHOOK_PORT = 8096;
 
 /** テスト用の作業領域。global-setup で毎回まっさらにする */
 export const TEST_ROOT = '/tmp/denpa-e2e';
 export const LIBRARY_DIR = `${TEST_ROOT}/library`;
 /** EPGStation の引き継ぎ元。マウント前後の見え方を試すので、あえて作らずに始める */
 export const EPGSTATION_DIR = `${TEST_ROOT}/epgstation-recorded`;
-export const JELLYFIN_URL = `http://127.0.0.1:${JELLYFIN_PORT}`;
+export const WEBHOOK_URL = `http://127.0.0.1:${WEBHOOK_PORT}`;
 
 export default defineConfig({
     testDir: 'tests/e2e',
@@ -40,12 +40,12 @@ export default defineConfig({
             },
         },
         {
-            command: `bun tests/fake/jellyfin.ts`,
-            url: `${JELLYFIN_URL}/__control/state`,
+            command: `bun tests/fake/webhook.ts`,
+            url: `${WEBHOOK_URL}/__control/state`,
             reuseExistingServer: false,
             stdout: 'pipe',
             stderr: 'pipe',
-            env: { FAKE_JELLYFIN_PORT: String(JELLYFIN_PORT) },
+            env: { FAKE_WEBHOOK_PORT: String(WEBHOOK_PORT) },
         },
         {
             command: `bun run dev --port ${APP_PORT} --host 127.0.0.1 --strictPort`,
@@ -64,8 +64,6 @@ export default defineConfig({
                 FFMPEG: './tests/fake/ffmpeg.sh',
                 FAKE_FFMPEG_FAIL_FILE: `${TEST_ROOT}/fail-encode`,
                 MIRAKURUN_URL: `http://127.0.0.1:${MIRAKURUN_PORT}`,
-                JELLYFIN_URL,
-                JELLYFIN_API_KEY: 'e2e',
                 // 定期処理は止め、テストからボタン/APIで明示的に走らせる(タイミング依存を避ける)
                 RECONCILE_INTERVAL: '86400000',
                 EPG_SYNC_INTERVAL: '86400000',

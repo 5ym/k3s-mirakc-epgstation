@@ -4,12 +4,14 @@
 
 ## 全体構成と移行状況
 
-最終形は **Mirakurun + denpa(自前の録画/エンコード管理) + Jellyfin** です。
+最終形は **Mirakurun + denpa(自前の録画/エンコード管理)** です。
+視聴用のメディアサーバは置きません。denpa がファイルをそのまま配り、
+再生は端末のプレイヤー(mpv / VLC / Infuse)に任せます。
 現在は移行の途中で、EPGStation と denpa が並走しています。
 
 ```text
 チューナー ── Mirakurun ─┬─ EPGStation (従来。まだ現役)
-                          └─ denpa ── ライブラリ(mkv) ── Jellyfin
+                          └─ denpa ── ライブラリ(mkv) ─→ mpv / VLC / Infuse
 ```
 
 denpa が実機で録れることを確認するまで EPGStation は残してあります。切り替えは
@@ -22,7 +24,6 @@ IngressRoute を消す」の順で行ってください。PVC は `Prune=false,D
 | --- | --- | --- |
 | Mirakurun | チューナー制御・EPG・TS配信 | `m.doany.io` |
 | denpa | 予約・録画・CM検出・エンコード・ライブラリ管理 | `dp.doany.io` |
-| Jellyfin | 視聴 | `j.doany.io` |
 | EPGStation | 従来の録画基盤(移行完了後に撤去) | `e.doany.io` |
 
 denpa 自体の詳細(状態遷移・環境変数・テスト)は [app/README.md](app/README.md) を参照。
@@ -33,7 +34,7 @@ denpa 自体の詳細(状態遷移・環境変数・テスト)は [app/README.md
 
 - [ ] **denpa 自前のライブ視聴と追っかけ録画** (下記「ライブ視聴」)
       視聴中は生TSをバッファに書いておき、「ここから録る」で番組の頭から確定する。
-      Jellyfin をライブのフロントにする案は撤回済み。
+      Jellyfin をフロントにする案は撤回済み(コードごと削除済み)。
       考えどころは、視聴用の変換済みストリームとは別に Mirakurun へもう1本繋いで生TSを
       書くこと(同じチャンネルなのでチューナーは共有される)、バッファの容量上限、
       番組をまたいで観たときの切り出し、再起動で取り残されたバッファの回収。
@@ -43,7 +44,7 @@ denpa 自体の詳細(状態遷移・環境変数・テスト)は [app/README.md
       実行して結果を保存できるようにする。
 - [ ] **視聴のついでに局ロゴと番組表を貯める**
       Mirakurun がやっている「ストリームを流している間に EIT と局ロゴを拾う」を denpa 側でも行う。
-      局ロゴは Jellyfin のチャンネル画像に使えるほか、CM検出を `join_logo_scp` に
+      局ロゴは番組表に出すほか、CM検出を `join_logo_scp` に
       切り替えるときのロゴデータの元にもなる(下記「CM カット」)。
 - [ ] **mirakc に乗り換える**
       上記3つが denpa 側に揃えば、Mirakurun に残る役割はチューナー制御とTS配信だけになる。
@@ -73,7 +74,7 @@ kubectl -n epg logs -f job/denpa-migrate
 # 実際に取り込む: migrate-job.yaml の args を ["--apply"] にして applyし直す
 ```
 
-- **既定はコピー**です。取り込んだ結果を Jellyfin で確かめてから EPGStation 側の
+- **既定はコピー**です。取り込んだ結果を確かめてから EPGStation 側の
   PVCを消せます。容量が足りないときは `["--apply", "--move"]`
 - **何度実行しても同じ結果**になります。取り込み済みは EPGStation 側のIDで判別して飛ばします
 - エンコード済みと生TSが両方ある録画は**エンコード済みを取ります**
@@ -103,7 +104,7 @@ kubectl -n epg logs -f job/denpa-migrate
 **ホストに bun は入れません。全部コンテナの中で動かします。**
 
 ```sh
-docker compose up                          # 開発サーバ(:5173) + 偽Mirakurun(:40772) + Jellyfin(:8096)
+docker compose up                          # 開発サーバ(:5173) + 偽Mirakurun(:40772)
 docker compose run --rm unit               # 単体テスト
 docker compose run --rm e2e                # E2E (Playwright)
 docker compose run --rm unit bun run lint  # リント + フォーマット確認
@@ -132,9 +133,6 @@ bun のバージョンは `app/Dockerfile` の `FROM oven/bun:` から読むの�
   ビルドに数十分かかるため、実エンコードを試したいときだけ `app/Dockerfile` の
   `runtime` ステージを使ってください。
 - ホストの 5173 が埋まっている場合は `DENPA_PORT=5174 docker compose up`。
-- Jellyfin 連携を開発中に試すには、`http://localhost:8096` で初期設定 →
-  ライブラリに `/library` を「番組(Shows)」として追加 → APIキーを発行し、
-  リポジトリ直下の `.env` に `JELLYFIN_API_KEY=...` を書いて `docker compose up -d app`。
 
 ## ライブラリのファイル配置
 
@@ -150,30 +148,35 @@ denpa はエンコード済み mkv とメタデータを次のように置きま
         └── テストアニメ - 2026-08-01 - 2130 決戦-thumb.jpg ← サムネイル
 ```
 
-日本の番組は話数が無い/リセットされるものが多く SxxExx に落とせないため、Jellyfin が
-解釈できる**日付ベースのエピソード**として並べています。
+日本の番組は話数が無い/リセットされるものが多く SxxExx に落とせないため、
+**日付ベースのエピソード**として並べています。
 
-### Jellyfin 側の設定
+### 視聴
 
-**denpa の設定画面の「Jellyfin をセットアップ」ボタンで全部やります。**
-Jellyfin 側で手作業するのは初回ウィザード(言語と管理ユーザーの作成)だけです。
-ボタンが設定するのは以下で、何度押しても重複しません。
+**メディアサーバは置きません。** denpa が録画ファイルをそのまま配り、
+再生は端末に入っているプレイヤーに任せます。ブラウザは MPEG-2 も AV1+Opus の mkv も
+素直には再生できないので、ライブラリ画面のボタンから外部プレイヤーを起動します。
 
-1. `/library` を **番組(Shows)** としてライブラリに追加(名前は `JELLYFIN_LIBRARY_NAME`、既定「録画」)
-2. **メタデータ保存形式に「Nfo」**、**インターネットのメタデータ取得は無効**。
-   日本の放送番組は TheTVDB / TMDB にほぼ載っておらず、有効なままだと denpa が
-   書いた `.nfo` が空の検索結果で上書きされます
-3. 管理者に **「メディアの削除を許可」**(ライブラリは読み書きでマウントしてあります)。
-   全ユーザーに配ると事故るので管理者だけです
+| 端末 | 渡し方 | 必要なもの |
+| --- | --- | --- |
+| Windows | `mpv://play/<base64url>/` | [mpv-handler](https://github.com/akiirui/mpv-handler) |
+| Android | `vlc://<url>` / `intent://...package=is.xyz.mpv` | VLC または mpv-android |
+| iOS | `vlc-x-callback://` / `infuse://` | VLC または Infuse |
+| その他 | 素のURL | 好きなプレイヤーに貼る |
+
+配信は `/api/recordings/<id>/file` です。Range に対応しているので、
+プレイヤー側から早送りできます。エンコード済みがあればそれを、無ければ生TSを返します。
+
+`.nfo` とサムネイルは動画の隣に置いたままにしてあります。denpa の画面には要りませんが、
+Kodi のように `.nfo` を読むプレイヤーでライブラリを開く場合にそのまま使えます。
 
 ### 削除の流れ
 
-- 削除は **Jellyfin の UI から**行います。denpa 側には自動削除はありません。
-- denpa は `RECONCILE_INTERVAL`(既定5分)ごとにライブラリの実体とDBを突き合わせ、
-  消えた録画を「削除済み」に倒して一覧から外し、残った `.nfo` / サムネイルと
-  空フォルダも片付けます。ライブラリ画面の「ライブラリを照合」で即座に走らせることも
-  できます。
-- denpa 側のライブラリ画面からも削除できます(生TSが残っていればそれも消します)。
+- 削除は **denpa のライブラリ画面から**行います。自動削除はありません。
+- ファイルマネージャなど外から消された場合も、`RECONCILE_INTERVAL`(既定5分)ごとに
+  ライブラリの実体とDBを突き合わせ、消えた録画を「削除済み」に倒して一覧から外します。
+  残った `.nfo` / サムネイルと空フォルダも片付けます。ライブラリ画面の
+  「ライブラリを照合」で即座に走らせることもできます。
 
 ## ライブ視聴
 
@@ -211,8 +214,6 @@ denpa でチャンネルを選ぶ
 - 同じチャンネルなので Mirakurun 側でチューナーは共有され、増えるのは
   ディスク書き込みだけです
 - 番組の頭までの余分はエンコード時に `-ss` で落とします
-
-Jellyfin は**録画済みを観るためだけ**に使います。
 
 ## 録画のエンコード
 
@@ -258,29 +259,15 @@ k3sホストの初期構築やクラスタ共通のアドオン類は別の(プ�
   ArgoCDへのwebhookが自動登録される運用。ArgoCD Application自体はクラスタの
   state.dbバックアップ/リストアで復元される前提のため、このリポジトリにも
   bootstrap側にもマニフェストとしては存在しない。
-- **DNS**: `m.doany.io` / `e.doany.io` / `dp.doany.io` / `j.doany.io` がTraefikの
+- **DNS**: `m.doany.io` / `e.doany.io` / `dp.doany.io` がTraefikの
   外部IPを指すこと。`e.home.arpa` はLAN内(`10.10.0.0/16`)専用で、
   `k3s/tls-secret.yaml` に同梱の自己署名証明書で処理される。
-  なお `j.doany.io` (Jellyfin) だけは forward-auth を通していない。TV・スマホの
-  Jellyfinアプリが OIDC のリダイレクトを扱えないため、Jellyfin自身のログインに任せている。
 - **チューナードライバ**: `k3s/deployment.yaml` の mirakurun は
   `privileged: true` かつ `/dev/bus`・`/dev/dvb` をhostPathでマウントする
   ため、ノード側にPT3/PX4系チューナーのドライバが読み込まれている必要がある。
 - **GHCRイメージの公開設定**: `ghcr.io/danything/mirakurun` /
   `ghcr.io/danything/epgstation` / `ghcr.io/danything/denpa` をpullできること
   (imagePullSecrets未設定のため publicパッケージである前提)。
-- **Jellyfin APIキー**: Jellyfin 連携の要。**denpa の設定画面から発行できる**ので
-  事前に用意する必要はない(APIキーは Jellyfin のセットアップを終えてからでないと
-  作れないため、そもそも事前に用意できない)。管理者のID/パスワードを一度入力すると
-  denpa がキーを発行してDBに保存し、パスワードは保存しない。
-  env や SealedSecret (`denpa-secrets` の `jellyfin-api-key`) で渡すこともでき、
-  その場合は設定画面の値が優先される。未設定でも Pod は起動し**録画とエンコードは動く**が、
-  以下が止まる:
-  - 「Jellyfin をセットアップ」ボタン(ライブラリ登録・削除許可)
-  - 新しい録画を置いたときの再スキャン要求(Jellyfin 自身の定期スキャン待ちになる)
-- **同一ノード配置**: `denpa-library` PVC は ReadWriteOnce のため、denpa と
-  Jellyfin は同じノードに載る必要がある。local-path の PV はノードアフィニティを
-  持つので、単一ノード構成なら特に指定は要らない。
 
 ## チャンネルスキャン
 

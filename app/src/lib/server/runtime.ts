@@ -1,17 +1,13 @@
 import { mkdirSync } from 'node:fs';
 import { config } from './config';
-import { now, queryOne } from './db';
 import { pump, requeueOrphanedJobs } from './encoder';
 import { sync } from './epg';
-import * as jellyfin from './jellyfin';
+import { reconcile } from './files';
 import { recoverOrphanedRecordings } from './recorder';
 import { tick } from './scheduler';
 
 let started = false;
 const timers: ReturnType<typeof setInterval>[] = [];
-
-/** 直前に Jellyfin へライブラリ更新を投げた時刻。これ以降に増えたファイルがあれば再度投げる */
-let lastLibraryRefresh = 0;
 
 async function guard(name: string, fn: () => Promise<unknown> | unknown): Promise<void> {
     try {
@@ -29,18 +25,6 @@ function every(ms: number, name: string, fn: () => Promise<unknown> | unknown): 
     timers.push(timer);
 }
 
-/** 新しくライブラリに置かれたファイルがあれば Jellyfin にスキャンさせる */
-async function refreshLibraryIfChanged(): Promise<void> {
-    const row = queryOne<{ n: number }>(
-        `SELECT COUNT(*) AS n FROM recordings
-         WHERE library_path IS NOT NULL AND deleted_at IS NULL AND updated_at > ?`,
-        lastLibraryRefresh,
-    );
-    if (row === undefined || row.n === 0) return;
-    lastLibraryRefresh = now();
-    await jellyfin.refreshLibrary();
-}
-
 export function start(): void {
     if (started) return;
     started = true;
@@ -56,7 +40,6 @@ export function start(): void {
                 `${recovered.failed} 件を失敗扱い / エンコード ${orphanedJobs} 件を再投入`,
         );
     }
-    lastLibraryRefresh = now();
     installShutdownHooks();
 
     if (!config.autostart) {
@@ -70,18 +53,11 @@ export function start(): void {
     every(config.schedulerTick, 'scheduler', async () => {
         await tick();
         pump();
-        await refreshLibraryIfChanged();
     });
 
-    // Jellyfin 側で消された録画を一覧から落とす
-    void guard('reconcile', jellyfin.reconcile);
-    every(config.reconcileInterval, 'reconcile', jellyfin.reconcile);
-
-    if (!jellyfin.enabled()) {
-        console.log(
-            '[boot] JELLYFIN_URL / JELLYFIN_API_KEY 未設定。新規録画の反映は Jellyfin 側のスキャン任せになります',
-        );
-    }
+    // ライブラリの実体とDBを突き合わせ、外から消されたものを一覧から落とす
+    void guard('reconcile', reconcile);
+    every(config.reconcileInterval, 'reconcile', reconcile);
 }
 
 export function stop(): void {

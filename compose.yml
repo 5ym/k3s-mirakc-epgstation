@@ -23,10 +23,6 @@ services:
             # 実エンコードを試したいときだけ FFMPEG=/usr/local/bin/ffmpeg にして runtime ステージで動かす
             FFMPEG: /app/tests/fake/ffmpeg.sh
             MIRAKURUN_URL: http://mirakurun:40772
-            JELLYFIN_URL: http://jellyfin:8096
-            # Jellyfin の初期設定後に発行した API キーを .env に書く。
-            # 無いと録画タイマーの取り込みもライブTV登録も動かない
-            JELLYFIN_API_KEY: ${JELLYFIN_API_KEY:-}
             RECONCILE_INTERVAL: '60000'
             EPG_SYNC_INTERVAL: '60000'
             SCHEDULER_TICK: '2000'
@@ -63,17 +59,6 @@ services:
         ports:
             - '40772:40772'
 
-    jellyfin:
-        image: docker.io/jellyfin/jellyfin:10.11.11
-        environment:
-            TZ: Asia/Tokyo
-        volumes:
-            - jellyfin-config:/config
-            - jellyfin-cache:/cache
-            # Jellyfin の UI から録画を削除するので読み書きで渡す
-            - denpa-library:/library
-        ports:
-            - '8096:8096'
 
     e2e:
         build:
@@ -106,5 +91,3 @@ volumes:
     denpa-data:
     denpa-recorded:
     denpa-library:
-    jellyfin-config:
-    jellyfin-cache:

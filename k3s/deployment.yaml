@@ -145,57 +145,6 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: jellyfin
-  namespace: epg
-spec:
-  replicas: 1
-  # ライブラリPVCがReadWriteOnceなので、入れ替え中に2Podが同時に掴まないようにする
-  strategy:
-    type: Recreate
-  selector:
-    matchLabels:
-      app: jellyfin
-  template:
-    metadata:
-      labels:
-        app: jellyfin
-    spec:
-      containers:
-        - name: jellyfin
-          image: docker.io/jellyfin/jellyfin:10.11.11
-          imagePullPolicy: IfNotPresent
-          env:
-            - name: TZ
-              value: Asia/Tokyo
-            # クライアントに教える外部URL。逆プロキシ配下では自動検出が効かない
-            - name: JELLYFIN_PublishedServerUrl
-              value: https://j.doany.io
-          ports:
-            - containerPort: 8096
-          volumeMounts:
-            - name: jellyfin-config
-              mountPath: /config
-            - name: jellyfin-cache
-              mountPath: /cache
-            # Jellyfin の UI から録画を削除するので読み書きで渡す。
-            # 削除を許可するには Jellyfin 側のユーザー設定で
-            # 「メディアの削除を許可」を有効にする必要がある
-            - name: library
-              mountPath: /library
-      volumes:
-        - name: jellyfin-config
-          persistentVolumeClaim:
-            claimName: jellyfin-config
-        - name: jellyfin-cache
-          persistentVolumeClaim:
-            claimName: jellyfin-cache
-        - name: library
-          persistentVolumeClaim:
-            claimName: denpa-library
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
   name: denpa
   namespace: epg
 spec:
@@ -220,17 +169,6 @@ spec:
               value: Asia/Tokyo
             - name: MIRAKURUN_URL
               value: http://mirakurun:40772
-            - name: JELLYFIN_URL
-              value: http://jellyfin:8096
-            # Jellyfin 連携の要。無いと Jellyfin の録画ボタンで作られたタイマーの
-            # 取り込み・ライブTVの登録・新規録画の即時反映がすべて止まる
-            # (録画とエンコード自体は動く)
-            - name: JELLYFIN_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: denpa-secrets
-                  key: jellyfin-api-key
-                  optional: true
             - name: DENPA_DB
               value: /app/data/denpa.db
             - name: RECORDED_DIR

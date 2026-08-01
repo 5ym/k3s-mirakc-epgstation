@@ -1,6 +1,7 @@
 <script lang="ts">
     import { submitting } from '$lib/actions';
     import { liveUpdates } from '$lib/live-updates.svelte';
+    import { detectPlatform, type Platform, playLinks } from '$lib/play';
     import {
         badgeClass,
         CM_LABEL,
@@ -16,6 +17,20 @@
 
     // サーバから通知が来たら読み直す
     liveUpdates(['recordings']);
+
+    /**
+     * どのプレイヤーに渡すかは端末で決まるので、サーバでは決められない。
+     * origin もブラウザでしか分からないので、判定できるまで再生リンクは出さない
+     */
+    let platform = $state<Platform | null>(null);
+    let origin = $state('');
+    $effect(() => {
+        platform = detectPlatform(navigator.userAgent);
+        origin = location.origin;
+    });
+
+    /** プレイヤーに渡すので絶対URLにする */
+    const fileUrl = (id: number) => `${origin}/api/recordings/${id}/file`;
 </script>
 
 <div class="mb-4 flex items-center justify-between">
@@ -147,6 +162,30 @@
                     </td>
                     <td class="flex flex-wrap gap-2">
                         {#if rec.deleted_at === null}
+                            {#if rec.state === 'available' && platform !== null}
+                                <!--
+                                    ブラウザは MPEG-2 も AV1+Opus の mkv も素直には再生できない。
+                                    端末に入っているプレイヤーに URL を渡して開かせる
+                                -->
+                                {#each playLinks(fileUrl(rec.id), platform) as link (link.href)}
+                                    <a
+                                        class="btn btn-sm btn-primary"
+                                        href={link.href}
+                                        data-testid="play-link"
+                                        title={link.note ?? ''}
+                                    >
+                                        {link.label}
+                                    </a>
+                                {/each}
+                                <a
+                                    class="btn btn-sm btn-ghost"
+                                    href={`/api/recordings/${rec.id}/file`}
+                                    download
+                                    data-testid="download-link"
+                                >
+                                    保存
+                                </a>
+                            {/if}
                             <!-- 録画中・エンコード中は生TSがまだ書かれている最中なので触らせない -->
                             {#if rec.ts_path && rec.state !== 'recording' && rec.state !== 'encoding'}
                                 <form method="POST" action="?/reencode" use:submitting>
