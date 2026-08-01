@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { EncodeJob, Recording, VideoCodec } from '../types';
 import { type CmDetection, chapterMetadata, detectCm, keepRanges, type Range } from './cm';
@@ -7,7 +7,8 @@ import { database, now, queryOne } from './db';
 import { emit } from './events';
 import { removeIfExists } from './fsx';
 import { libraryPath } from './library';
-import { removeSidecars, writeNfo, writeThumbnail } from './metadata';
+import { writeNfo, writeThumbnail } from './metadata';
+import { descramble, isScrambled } from './scramble';
 import { chunks } from './stream';
 import { notify } from './webhook';
 
@@ -357,15 +358,16 @@ async function runFfmpeg(
 async function prepareCm(
     jobId: number,
     recording: Recording,
+    input: string,
 ): Promise<EncodeOptions & { chaptersFile: string | null }> {
     const none = { keep: null, chaptersFile: null };
-    if (recording.cm_cut === 'off' || recording.ts_path === null) return none;
+    if (recording.cm_cut === 'off') return none;
 
     database().prepare('UPDATE encode_jobs SET log = ? WHERE id = ?').run('CM検出中...', jobId);
 
     let detection: CmDetection;
     try {
-        detection = await detectCm(recording.ts_path);
+        detection = await detectCm(input);
     } catch (error) {
         console.error(`[cm] 検出に失敗したためCM処理をスキップします: ${error}`);
         return none;
@@ -383,7 +385,7 @@ async function prepareCm(
         return { keep: keepRanges(detection.cm, detection.duration), chaptersFile: null };
     }
 
-    const chaptersFile = `${recording.ts_path}.chapters.txt`;
+    const chaptersFile = `${input}.chapters.txt`;
     writeFileSync(chaptersFile, chapterMetadata(detection.cm, detection.duration));
     return { keep: null, chaptersFile };
 }
@@ -426,11 +428,46 @@ async function trimCm(jobId: number, input: string, keep: Range[]): Promise<stri
     }
 }
 
+/**
+ * エンコードの元にできるファイル。
+ *
+ * 生TSがあればそれ。無ければ保存先にあるものを使う。引き継いだ録画は
+ * 生TSを持たず、中身がまだ生TSのまま「視聴可能」になっていることがある
+ * (EPGStation 側でエンコードが済んでいなかったもの)。
+ */
+export function encodeSource(recording: Recording): string | null {
+    return recording.ts_path ?? recording.library_path;
+}
+
+/** エンコードの失敗を記録して知らせる。理由はそのまま録画の行に出る */
+function fail(jobId: number, recording: Recording, reason: string): void {
+    database()
+        .prepare(`UPDATE encode_jobs SET state = 'failed', error = ?, finished_at = ? WHERE id = ?`)
+        .run(reason, now(), jobId);
+    database()
+        .prepare(`UPDATE recordings SET state = 'failed', error = ?, updated_at = ? WHERE id = ?`)
+        .run('エンコードに失敗しました', now(), recording.id);
+    emit('recordings');
+    notify({
+        event: 'encode.failed',
+        text: `エンコードに失敗しました: ${recording.name} (${recording.service_name})`,
+        recording: {
+            id: recording.id,
+            name: recording.name,
+            service: recording.service_name,
+            startAt: recording.start_at,
+            endAt: recording.end_at,
+        },
+        error: reason,
+    });
+}
+
 async function runJob(jobId: number): Promise<void> {
     const job = queryOne<EncodeJob>('SELECT * FROM encode_jobs WHERE id = ?', jobId)!;
     const recording = queryOne<Recording>('SELECT * FROM recordings WHERE id = ?', job.recording_id);
+    const input = recording === undefined ? null : encodeSource(recording);
 
-    if (recording === undefined || recording.ts_path === null) {
+    if (recording === undefined || input === null) {
         database()
             .prepare(`UPDATE encode_jobs SET state = 'failed', error = ?, finished_at = ? WHERE id = ?`)
             .run('元の録画ファイルが見つかりません', now(), jobId);
@@ -444,22 +481,49 @@ async function runJob(jobId: number): Promise<void> {
     const output = libraryPath(recording, '.mkv');
     mkdirSync(dirname(output), { recursive: true });
 
-    const encodeOptions = await prepareCm(jobId, recording);
+    /*
+     * いったん別名に書いてから置き換える。
+     * 引き継いだ録画を録り直すと入力と出力が同じ場所になることがあり、
+     * そのまま書くと元を壊す。失敗したときに元が消えないのも同じ理由
+     */
+    const working = `${output}.encoding`;
+
+    /*
+     * スクランブルが掛かったまま録れていたら、ここで解く。
+     *
+     * カードが読めないとき録画を止めてしまうと電波は二度と戻ってこないので、
+     * 録画自体は暗号のままでも残す方針にしてある。解くのはこの時点でよい。
+     */
+    let decoded: string | null = null;
+    if (isScrambled(input)) {
+        database().prepare('UPDATE encode_jobs SET log = ? WHERE id = ?').run('スクランブル解除中...', jobId);
+        const target = `${input}.decoded.ts`;
+        const result = await descramble(input, target);
+        if (!result.ok) {
+            removeIfExists(target);
+            fail(jobId, recording, `スクランブルを解除できませんでした: ${result.error}`);
+            return;
+        }
+        decoded = target;
+    }
+    const sourceTs = decoded ?? input;
+
+    const encodeOptions = await prepareCm(jobId, recording, sourceTs);
 
     // CMを実際に切る場合は、エンコードの前にTSの段階で切っておく。
     // エンコードのフィルタで切ると字幕のタイミングを追従させられず落とすことになる
-    let source = recording.ts_path;
+    let source = sourceTs;
     let trimmed: string | null = null;
     const keep = encodeOptions.keep ?? null;
     if (keep !== null && keep.length > 0) {
-        trimmed = await trimCm(jobId, recording.ts_path, keep);
+        trimmed = await trimCm(jobId, sourceTs, keep);
         if (trimmed !== null) source = trimmed;
     }
 
     let result = await runFfmpeg(
         job,
         source,
-        output,
+        working,
         recording.audio_type,
         null,
         recording.codec,
@@ -472,7 +536,7 @@ async function runJob(jobId: number): Promise<void> {
         result = await runFfmpeg(
             job,
             source,
-            output,
+            working,
             recording.audio_type,
             config.encodeRetrySeek,
             recording.codec,
@@ -481,12 +545,13 @@ async function runJob(jobId: number): Promise<void> {
     }
 
     removeIfExists(encodeOptions.chaptersFile);
-    // CMを切ったTSは作業用。元のTSは残したままなので、切り直したくなればやり直せる
+    // CMを切ったTSも解除したTSも作業用。元のTSは残したままなので、やり直せる
     removeIfExists(trimmed);
+    removeIfExists(decoded);
 
     if (canceled.has(jobId)) {
-        removeIfExists(output);
-        removeSidecars(output);
+        // 出来かけを捨てるだけ。元のファイルには触らない
+        removeIfExists(working);
         database()
             .prepare(`UPDATE encode_jobs SET state = 'canceled', finished_at = ? WHERE id = ?`)
             .run(now(), jobId);
@@ -497,29 +562,13 @@ async function runJob(jobId: number): Promise<void> {
     }
 
     if (result.code !== 0) {
-        removeIfExists(output);
-        removeSidecars(output);
-        database()
-            .prepare(`UPDATE encode_jobs SET state = 'failed', error = ?, finished_at = ? WHERE id = ?`)
-            .run(result.stderrTail, now(), jobId);
-        emit('recordings');
-        notify({
-            event: 'encode.failed',
-            text: `エンコードに失敗しました: ${recording.name} (${recording.service_name})`,
-            recording: {
-                id: recording.id,
-                name: recording.name,
-                service: recording.service_name,
-                startAt: recording.start_at,
-                endAt: recording.end_at,
-            },
-            error: result.stderrTail,
-        });
-        database()
-            .prepare(`UPDATE recordings SET state = 'failed', error = ?, updated_at = ? WHERE id = ?`)
-            .run('エンコードに失敗しました', now(), recording.id);
+        removeIfExists(working);
+        fail(jobId, recording, result.stderrTail);
         return;
     }
+
+    // ここで初めて本来の場所に置く。引き継いだ録画の録り直しでは元を上書きする
+    renameSync(working, output);
 
     let size = 0;
     try {
@@ -562,6 +611,7 @@ async function runJob(jobId: number): Promise<void> {
             )
             .run(output, size, now(), recording.id);
     } else {
+        // 生TSを持たない引き継ぎ分では消すものが無い
         removeIfExists(recording.ts_path);
         database()
             .prepare(

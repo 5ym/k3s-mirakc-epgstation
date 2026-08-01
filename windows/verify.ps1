@@ -34,8 +34,10 @@ foreach ($name in @('Build-Command', 'ConvertTo-Base64Url')) {
     Invoke-Expression $found[0].Extent.Text
 }
 
-$mpv = 'C:\Program Files\mpv\mpv.exe'
-$inner = Build-Command $mpv
+# Build-Command は $Player を見るので、両方ぶん確かめる
+$Player = 'vlc'
+$exe = 'C:\Program Files\VideoLAN\VLC\vlc.exe'
+$inner = Build-Command $exe
 
 # 起動はさせず、mpv に渡る引数だけ見る
 function Start-Process { param($p, $ArgumentList) $global:got = @{ path = $p; args = $ArgumentList } }
@@ -53,12 +55,26 @@ Invoke-Expression $inner.Replace('%1', $link)
 
 if (-not $global:got) { throw 'mpv が呼ばれませんでした' }
 $joined = $global:got.args -join ' '
-Write-Host "mpv:  $($global:got.path)"
+Write-Host "VLC:  $($global:got.path)"
 Write-Host "引数: $joined"
-if ($global:got.path -ne $mpv) { throw 'mpv のパスが違う' }
-if ($joined -notlike "*--force-media-title=$title*") { throw 'タイトルを復元できていない' }
+if ($global:got.path -ne $exe) { throw 'プレイヤーのパスが違う' }
+if ($joined -notlike "*--meta-title=$title*") { throw 'タイトルを復元できていない' }
 if ($joined -notlike "*$url*") { throw 'URLを復元できていない' }
-Write-Host '=> 復号して mpv に渡せている'
+Write-Host '=> 復号して VLC に渡せている'
+
+# mpv 側も同じリンクで通ること
+$Player = 'mpv'
+$mpvExe = 'C:\Program Files\MPV Player\mpv.exe'
+$global:got = $null
+Invoke-Expression ((Build-Command $mpvExe).Replace('%1', $link))
+if (-not $global:got) { throw 'mpv で開けませんでした' }
+$mpvArgs = $global:got.args -join ' '
+Write-Host "mpv:  $($global:got.path)"
+Write-Host "引数: $mpvArgs"
+if ($mpvArgs -notlike "*--force-media-title=$title*") { throw 'mpv にタイトルを渡せていない' }
+Write-Host '=> 復号して mpv にも渡せている'
+
+$Player = 'vlc'
 
 # --- 通してはいけないリンク -----------------------------------------------
 

@@ -4,7 +4,7 @@ import { WEBHOOK_URL } from '../../playwright.config';
 import { goto, reserveSoon, syncEpg, upcoming } from './helpers';
 
 /**
- * 録画→エンコード→ライブラリ入りまでを通しで確認する。
+ * 録画→エンコード→保存先に入るまでを通しで確認する。
  * 進行はサーバ側のタイマー任せなので、ページを読み直しながら状態が変わるのを待つ。
  */
 async function waitForRowState(
@@ -30,7 +30,7 @@ async function waitForRowState(
 }
 
 test.describe('録画とエンコード', () => {
-    test('予約した番組が録画され、エンコードされてライブラリに入る', async ({ page, request }) => {
+    test('予約した番組が録画され、エンコードされて保存先に入る', async ({ page, request }) => {
         test.setTimeout(180_000);
         await syncEpg(request);
 
@@ -49,7 +49,7 @@ test.describe('録画とエンコード', () => {
         const recordingRow = `[data-testid="recording-row"][data-program-id="${programId}"]`;
         await waitForRowState(page, '/', recordingRow, 'recording-state', '視聴可能');
 
-        // ライブラリ上のパスが決まっていること。実体との突き合わせにこのパスを使う。
+        // 保存先のパスが決まっていること。実体との突き合わせにこのパスを使う。
         // 画面には出さない(普段は見ないので)ので、行の属性から取る
         await goto(page, '/');
         const recording = page.locator(recordingRow);

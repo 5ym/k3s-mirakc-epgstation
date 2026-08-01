@@ -84,6 +84,19 @@
         if (res.ok && token === opened) detail = await res.json();
     }
 
+    /**
+     * 削除は2回押させる。1回目で聞き返し、2回目で本当に消す。
+     * 行のすぐ隣に並んでいるので、押し間違いで消えると取り返しがつかない。
+     * 少し置いたら元に戻す(押したことを忘れた頃に消えないように)
+     */
+    let armed = $state<number | null>(null);
+    let disarm: ReturnType<typeof setTimeout> | undefined;
+    function arm(id: number): void {
+        armed = id;
+        clearTimeout(disarm);
+        disarm = setTimeout(() => (armed = null), 5000);
+    }
+
     /** 行のどこを押しても開く。ただしボタンやリンクを押したときは邪魔しない */
     function rowClick(event: MouseEvent | KeyboardEvent, programId: number | null, row: Row): void {
         if (event instanceof KeyboardEvent && event.key !== 'Enter') return;
@@ -99,8 +112,11 @@
 {/if}
 
 <div class="grid gap-6 lg:grid-cols-5">
-    <!-- min-w-0 が無いと、中の表の幅にグリッドの列が引きずられてページごとはみ出す -->
-    <section class="min-w-0 lg:col-span-2">
+    <!--
+        min-w-0 が無いと、中の表の幅にグリッドの列が引きずられてページごとはみ出す。
+        1列に畳まれたときは録画を先に出す(見るのはたいてい録れたほうなので)
+    -->
+    <section class="order-2 min-w-0 lg:order-none lg:col-span-2">
         <div class="mb-2 flex min-h-8 flex-wrap items-center justify-between gap-2">
             <h2 class="text-lg font-bold">予約</h2>
             <div class="flex gap-2">
@@ -120,7 +136,6 @@
                         <th class="whitespace-nowrap">放送日時</th>
                         <!-- 番組名は省略せずそのまま出す。余りはこの列に寄せる -->
                         <th class="w-full sm:min-w-48">番組</th>
-                        <th class="hidden whitespace-nowrap sm:table-cell">種別</th>
                         <th class="whitespace-nowrap">状態</th>
                         <th></th>
                     </tr>
@@ -145,26 +160,29 @@
                                     ({duration(res.start_at, res.end_at)})
                                 </div>
                             </td>
-                            <!-- 局名は番組名の下に小さく。録画一覧と同じ出し方 -->
+                            <!-- 局名も種別も番組名の下に小さく。録画一覧と同じ出し方 -->
                             <td>
                                 <div class="font-medium">{res.name}</div>
                                 <div class="text-base-content/60 text-sm">{res.service_name}</div>
                                 {#if res.conflict_reason}
                                     <div class="text-error text-sm">{res.conflict_reason}</div>
                                 {/if}
-                            </td>
-                            <td class="hidden text-sm sm:table-cell">
-                                <div class="whitespace-nowrap">
-                                    {res.manual ? '手動' : (res.rule_name ?? 'ルール')}
-                                </div>
-                                <div class="mt-0.5 flex flex-wrap gap-1">
-                                    {#if !res.encode}
-                                        <span class="badge badge-ghost badge-sm">TSのみ</span>
-                                    {/if}
-                                    {#if res.keep_original}
-                                        <span class="badge badge-ghost badge-sm">生TSも残す</span>
-                                    {/if}
-                                </div>
+                                <!-- 手動なら何も出さない。既定と違うときだけ言う -->
+                                {#if !res.manual}
+                                    <div class="text-base-content/60 text-xs" data-testid="rule-name">
+                                        ルール: {res.rule_name ?? '(削除済み)'}
+                                    </div>
+                                {/if}
+                                {#if !res.encode || res.keep_original}
+                                    <div class="mt-0.5 flex flex-wrap gap-1">
+                                        {#if !res.encode}
+                                            <span class="badge badge-ghost badge-sm">TSのみ</span>
+                                        {/if}
+                                        {#if res.keep_original}
+                                            <span class="badge badge-ghost badge-sm">生TSも残す</span>
+                                        {/if}
+                                    </div>
+                                {/if}
                             </td>
                             <!-- 番組の列に幅を寄せているぶん、こちらは縦書きにならないよう畳ませない -->
                             <td class="whitespace-nowrap">
@@ -190,14 +208,14 @@
                             </td>
                         </tr>
                     {:else}
-                        <tr><td colspan="5" class="text-base-content/60">予約はありません</td></tr>
+                        <tr><td colspan="4" class="text-base-content/60">予約はありません</td></tr>
                     {/each}
                 </tbody>
             </table>
         </div>
     </section>
 
-    <section class="min-w-0 lg:col-span-3">
+    <section class="order-1 min-w-0 lg:order-none lg:col-span-3">
         <!-- 見出しの高さと下の余白は予約側と揃える。並べたときにずれて見えるため -->
         <div class="mb-2 flex min-h-8 flex-wrap items-center justify-between gap-2">
             <h2 class="text-lg font-bold">録画</h2>
@@ -383,8 +401,11 @@
                                                 ダウンロード
                                             </a>
                                         {/if}
-                                        <!-- 録画中・エンコード中は生TSがまだ書かれている最中なので触らせない -->
-                                        {#if rec.ts_path && rec.state !== 'recording' && rec.state !== 'encoding'}
+                                        <!--
+                                            録画中・エンコード中は元がまだ書かれている最中なので触らせない。
+                                            生TSが無くても保存先にあるものを元に録り直せる
+                                        -->
+                                        {#if (rec.ts_path || rec.library_path) && rec.state !== 'recording' && rec.state !== 'encoding'}
                                             <form method="POST" action="?/reencode" use:submitting>
                                                 <input type="hidden" name="id" value={rec.id} />
                                                 <button class="btn btn-sm" data-testid="reencode-button"
@@ -394,12 +415,23 @@
                                         {/if}
                                         <form method="POST" action="?/delete" use:submitting>
                                             <input type="hidden" name="id" value={rec.id} />
-                                            <button
-                                                class="btn btn-sm btn-error btn-outline"
-                                                data-testid="delete-button"
-                                            >
-                                                削除
-                                            </button>
+                                            {#if armed === rec.id}
+                                                <button
+                                                    class="btn btn-sm btn-error"
+                                                    data-testid="delete-confirm"
+                                                >
+                                                    本当に削除
+                                                </button>
+                                            {:else}
+                                                <button
+                                                    type="button"
+                                                    class="btn btn-sm btn-error btn-outline"
+                                                    onclick={() => arm(rec.id)}
+                                                    data-testid="delete-button"
+                                                >
+                                                    削除
+                                                </button>
+                                            {/if}
                                         </form>
                                     {/if}
                                 </div>

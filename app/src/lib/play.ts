@@ -19,7 +19,7 @@ export function detectPlatform(userAgent: string): Platform {
     return 'other';
 }
 
-/** mpv-handler が要求する base64url (パディング無し) */
+/** パディング無しの base64url (RFC 4648 §5)。denpa:// のリンクで使う */
 export function base64Url(value: string): string {
     const bytes = new TextEncoder().encode(value);
     let binary = '';
@@ -71,18 +71,18 @@ export function playLinks(
 
     if (platform === 'windows') {
         /*
-         * denpa 自前のスキーム。windows/denpa.ps1 で登録する。
+         * denpa 自前のスキーム。windows/denpa.ps1 で登録し、VLC (または mpv) に渡す。
          *
-         * 以前は mpv-handler に渡していたが、あちらは別途インストールと
-         * config.toml が要るうえ、こちらから渡せるのは向こうが決めた形だけ。
-         * mpv を起動するだけなら中継は要らないので、自分のスキームを持つ。
+         * Windows には Android の intent のような仕組みが無く、プレイヤーごとの
+         * スキームを直に叩くしかない。VLC は Windows 版にスキームを持たないので、
+         * こちらで1つ用意して、どのプレイヤーで開くかは登録時に決める。
          *
          * URL もタイトルもパディング無しの base64url にする。生のURLを
          * クエリに入れると、資格情報の @ や記号でブラウザ側の解釈がぶれる
          */
         return [
             {
-                label: 'mpv で再生',
+                label: '再生',
                 href: `denpa://play/${base64Url(authed)}/?title=${base64Url(title)}`,
                 note: 'windows/denpa.ps1 で登録が必要',
             },
@@ -90,9 +90,10 @@ export function playLinks(
     }
     if (platform === 'android') {
         // scheme は Intent 側に持たせるので、URL からは取り除いて渡す。
-        // S.title は VLC・mpv-android とも見てくれる
+        // 資格情報は authority の一部なので、取り除いたあとにも残る
+        // (user:pass@host/... の形)。S.title は VLC・mpv-android とも見てくれる
         const scheme = url.startsWith('https') ? 'https' : 'http';
-        const rest = url.replace(/^https?:\/\//, '');
+        const rest = authed.replace(/^https?:\/\//, '');
         return [
             {
                 label: '動画アプリで再生',

@@ -30,6 +30,7 @@ function mpvUrl(href: string): string {
 
 describe('playLinks', () => {
     test('Windows は denpa 自前のスキームで開く', () => {
+        // Windows には Android の intent のような仕組みが無い
         const [link] = playLinks(URL, TITLE, 'windows');
         expect(link.href).toBe(`denpa://play/${base64Url(URL)}/?title=${base64Url(TITLE)}`);
         // 登録しないと開けないので、それが分かるようにしておく
@@ -64,7 +65,14 @@ describe('playLinks', () => {
 describe('ベーシック認証つきのURL', () => {
     const cred = { user: 'denpa', password: 'p@ss word' };
 
-    test('mpv には資格情報を埋めたURLを渡す', () => {
+    test('Android の intent にも埋める', () => {
+        // 資格情報は authority の一部なので、scheme を外しても残る
+        const [link] = playLinks(URL, TITLE, 'android', cred);
+        expect(link.href).toContain('intent://denpa:p%40ss%20word@denpa.local/');
+        expect(link.href).toContain('scheme=http;');
+    });
+
+    test('Windows のスキームには資格情報を埋めたURLを渡す', () => {
         const [link] = playLinks(URL, TITLE, 'windows', cred);
         const decoded = atob(mpvUrl(link.href).replace(/-/g, '+').replace(/_/g, '/'));
         expect(decoded).toBe('http://denpa:p%40ss%20word@denpa.local/api/recordings/12/file');

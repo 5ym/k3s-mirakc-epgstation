@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { cellOf, goto, syncEpg, upcoming } from './helpers';
+import { cellOf, goto, past, syncEpg, upcoming } from './helpers';
 
 test.describe('手動予約', () => {
     test.beforeEach(async ({ request }) => {
@@ -24,7 +24,8 @@ test.describe('手動予約', () => {
             `[data-testid="reservation-row"][data-program-id="${target.programId}"]`,
         );
         await expect(reservation).toHaveCount(1);
-        await expect(reservation).toContainText('手動');
+        // 手で入れたものには種別を出さない。ルールで立ったときだけ名前を出す
+        await expect(reservation.getByTestId('rule-name')).toHaveCount(0);
         await expect(reservation.getByTestId('reservation-state')).toHaveText('予約済み');
 
         await reservation.getByTestId('cancel-button').click();
@@ -139,17 +140,9 @@ test.describe('予約の細かい指定', () => {
         // 番組表には過去の番組も並んでいる。予約できてしまうと、
         // 録れないものが予約一覧に残り続ける
         await goto(page, '/guide?type=GR');
-        const past = await page.getByTestId('grid-program').evaluateAll((nodes) =>
-            nodes
-                .map((node) => ({
-                    id: node.getAttribute('data-program-id') ?? '',
-                    at: Number(node.getAttribute('data-start-at')),
-                }))
-                .filter((c) => c.at < Date.now() - 60 * 60 * 1000),
-        );
-        expect(past.length).toBeGreaterThan(0);
+        const done = await past(page);
 
-        await cellOf(page, past[0].id).getByTestId('program-button').click();
+        await cellOf(page, done[0].programId).getByTestId('program-button').click();
         await page.getByTestId('detail-reserve').click();
 
         // 断る理由は詳細を開いたまま、その中に出す。番組表にインラインで足すと
@@ -162,7 +155,7 @@ test.describe('予約の細かい指定', () => {
 
         await goto(page, '/');
         await expect(
-            page.locator(`[data-testid="reservation-row"][data-program-id="${past[0].id}"]`),
+            page.locator(`[data-testid="reservation-row"][data-program-id="${done[0].programId}"]`),
         ).toHaveCount(0);
     });
 });

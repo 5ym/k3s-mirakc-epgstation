@@ -1,7 +1,7 @@
 # denpa (録画・エンコード管理アプリ)
 
-Mirakurun から EPG と TS を受け取り、予約・録画・エンコード・ライブラリ配置までを行う。
-出来上がった mkv はライブラリに置かれ、denpa が配って外部プレイヤーで見る。見終わったものは
+Mirakurun から EPG と TS を受け取り、予約・録画・エンコード・保存先への配置までを行う。
+出来上がった mkv は保存先に置かれ、denpa が配って外部プレイヤーで見る。見終わったものは
 自動的に消える。EPGStation の置き換えとして作ったもので、エンコード設定はそこから移した。
 
 ## 構成
@@ -19,10 +19,11 @@ Mirakurun から EPG と TS を受け取り、予約・録画・エンコード�
 | `src/lib/server/cm-jls.ts` | CM検出 (join_logo_scp。任意) |
 | `src/lib/server/encoder.ts` | 録画のエンコード (AV1 / H.264) |
 | `src/lib/play.ts` | 外部プレイヤーを開くURLの組み立て |
-| `src/lib/server/library.ts` | ライブラリ内のファイル配置 |
+| `src/lib/server/library.ts` | 保存先でのファイル配置 |
 | `src/lib/server/metadata.ts` | .nfo とサムネイル (Kodi など向け) |
 | `src/lib/server/files.ts` | 録画の削除と、実体とDBの突き合わせ |
 | `src/lib/server/serve.ts` | ファイルの配信 (Range 対応) |
+| `src/lib/server/scramble.ts` | スクランブルの検出と、recisdb での解除 |
 | `src/lib/server/dav.ts` | WebDAV (Kodi 向け) |
 | `src/lib/server/auth.ts` | ベーシック認証 |
 | `src/lib/server/events.ts` | 画面へ変化を知らせる (SSE。ポーリングの代わり) |
@@ -56,7 +57,7 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 | 変数 | 既定値 | 説明 |
 | --- | --- | --- |
 | `MIRAKURUN_URL` | `http://mirakurun:40772` | Mirakurun |
-| `RECONCILE_INTERVAL` | `300000` | ライブラリの実体とDBを突き合わせる間隔(ms) |
+| `RECONCILE_INTERVAL` | `300000` | 保存先の実体とDBを突き合わせる間隔(ms) |
 | `WRITE_NFO` | `1` | `.nfo` を書くか (Kodi など向け) |
 | `THUMBNAIL_POSITION` / `THUMBNAIL_WIDTH` | `120` / `480` | サムネイルの切り出し位置(秒)と幅 |
 | `DENPA_DB` | `/app/data/denpa.db` | SQLite の置き場 |
@@ -108,5 +109,5 @@ docker compose run --rm unit bun run format # 整形を適用
 ```
 
 E2E は偽Mirakurun・偽の通知先・偽ffmpeg を立てて、予約から録画・CM検出・エンコード・
-ライブラリ配置・視聴済み削除までを実際に通す (`tests/fake/`)。偽Mirakurunは1番組10秒に
+保存先への配置・視聴済み削除までを実際に通す (`tests/fake/`)。偽Mirakurunは1番組10秒に
 してあるので、録画完了まで待っても30秒で終わる。

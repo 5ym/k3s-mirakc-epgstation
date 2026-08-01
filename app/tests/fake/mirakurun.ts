@@ -57,8 +57,35 @@ function programsFor(service: FakeService) {
 }
 
 /** 録画の中身。本物のTSである必要はなく、止めるまで流れ続ければよい */
+/**
+ * 188バイトのパケットを並べる。
+ *
+ * 中身は本物である必要はないが、ヘッダだけは本物らしくしておく。
+ * 全部を 0x47 で埋めると 4バイト目の上位2ビットが立ち、denpa の
+ * スクランブル判定が「掛かっている」と誤って読む。
+ *
+ * FAKE_SCRAMBLED=1 のときは逆に、わざと掛かっている状態にする
+ * (エンコード前の自動解除を通しで見るため)。
+ */
+function packets(count: number, scrambled: boolean): Uint8Array {
+    const buffer = new Uint8Array(188 * count);
+    for (let i = 0; i < count; i++) {
+        const at = i * 188;
+        buffer[at] = 0x47;
+        buffer[at + 1] = 0x01;
+        buffer[at + 2] = 0x00;
+        // 上位2ビットが transport_scrambling_control、下位が adaptation/continuity
+        buffer[at + 3] = scrambled ? 0x90 : 0x10;
+        buffer.fill(0xff, at + 4, at + 188);
+    }
+    return buffer;
+}
+
+/** テストから切り替える。カードが読めていない状態を作るため */
+let scrambled = process.env.FAKE_SCRAMBLED === '1';
+
 function fakeStream(signal: AbortSignal): ReadableStream<Uint8Array> {
-    const chunk = new Uint8Array(188 * 20).fill(0x47);
+    const chunk = packets(20, scrambled);
     return new ReadableStream({
         start(controller) {
             const timer = setInterval(() => {
@@ -89,6 +116,11 @@ Bun.serve({
     fetch(request) {
         const url = new URL(request.url);
 
+        // テスト用。カードが読めていない状態(スクランブルされたまま)に切り替える
+        if (url.pathname === '/__control/scrambled' && request.method === 'POST') {
+            scrambled = new URL(request.url).searchParams.get('on') === '1';
+            return json({ scrambled });
+        }
         if (url.pathname === '/api/version') return json({ current: '3.9.0-fake', latest: '3.9.0-fake' });
         if (url.pathname === '/api/services') {
             return json(

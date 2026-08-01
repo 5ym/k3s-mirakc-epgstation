@@ -211,7 +211,7 @@ async function pump(recording: Recording, controller: AbortController): Promise<
     finish(recording.id, size);
 }
 
-/** 録画完了。エンコードするならキューに積み、しないならそのままライブラリに置く */
+/** 録画完了。エンコードするならキューに積み、しないならそのまま保存先に置く */
 export function finish(recordingId: number, size: number): void {
     const at = now();
     database()
@@ -245,7 +245,7 @@ export function finish(recordingId: number, size: number): void {
         return;
     }
 
-    // エンコードしない設定なら生TSをそのままライブラリへ移す
+    // エンコードしない設定なら生TSをそのまま保存先へ移す
     const dest = libraryPath(recording, '.m2ts');
     moveFile(recording.ts_path!, dest);
     writeNfo(recording, dest);

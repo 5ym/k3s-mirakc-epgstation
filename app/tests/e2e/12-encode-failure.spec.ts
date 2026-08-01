@@ -59,6 +59,15 @@ test.describe('エンコードの失敗', () => {
         await expect(failed.getByTestId('recording-state')).toHaveText('失敗');
         await expect(failed.getByTestId('recording-error')).toContainText('エンコードに失敗しました');
 
+        // 削除は2回押させる。1回目は聞き返すだけで、まだ消えない
+        await failed.getByTestId('delete-button').click();
+        await expect(failed.getByTestId('delete-confirm')).toBeVisible();
+        await expect(failed).toHaveCount(1);
+
+        const id = await failed.getAttribute('data-recording-id');
+        await failed.getByTestId('delete-confirm').click();
+        await expect(page.locator(`[data-recording-id="${id}"]`)).toHaveCount(0);
+
         rmSync(FAIL_MARKER);
     });
 });

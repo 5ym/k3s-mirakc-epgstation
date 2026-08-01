@@ -6,12 +6,12 @@ import { serveFile } from './serve';
 /**
  * WebDAV の PROPFIND を組み立てるところ。
  *
- * ライブラリのディレクトリをそのまま見せる。DBは見ない。
+ * 保存先のディレクトリをそのまま見せる。DBは見ない。
  * 実体がそのまま出るほうが、denpa 側の状態と食い違わない。
  */
 
 export interface Entry {
-    /** ライブラリからの相対パス。ルートは空文字 */
+    /** 保存先からの相対パス。ルートは空文字 */
     path: string;
     name: string;
     isDirectory: boolean;
@@ -30,8 +30,8 @@ const CONTENT_TYPES: Record<string, string> = {
 };
 
 /**
- * ライブラリの外に出ないようにする。
- * `..` を含むパスをそのまま繋ぐと、ライブラリの外のファイルを取られる
+ * 保存先の外に出ないようにする。
+ * `..` を含むパスをそのまま繋ぐと、保存先の外のファイルを取られる
  */
 function resolve(path: string): string | null {
     const cleaned = normalize(path).replace(/^(\.\.(\/|\\|$))+/, '');

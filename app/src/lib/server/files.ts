@@ -5,9 +5,9 @@ import { pruneEmptyDirs, removeIfExists } from './fsx';
 import { removeSidecars } from './metadata';
 
 /**
- * ライブラリの実体まわり。
+ * 録画ファイルの実体まわり。
  *
- * 録画の削除は denpa の画面から行う。外から(ファイルマネージャや別のマシンから)
+ * 削除は denpa の画面から行う。外から(ファイルマネージャや別のマシンから)
  * 消されることもあるので、DBと実体を突き合わせて消えたものを一覧から落とす仕組みも持つ。
  */
 
@@ -30,7 +30,7 @@ export function deleteRecordingFiles(recording: Recording, reason: string): void
 }
 
 /**
- * ライブラリの実体とDBを突き合わせる。
+ * 保存先の実体とDBを突き合わせる。
  *
  * ファイルマネージャなど外から録画を消すと、DBには実体の無い行だけが残る。それを削除済みに
  * 倒して一覧から外し、空になったシリーズ/シーズンのフォルダも畳む。
@@ -44,9 +44,9 @@ export function reconcile(): { checked: number; removed: number } {
     let removed = 0;
     for (const recording of recordings) {
         if (existsSync(recording.library_path!)) continue;
-        deleteRecordingFiles(recording, 'ライブラリから消えていました');
+        deleteRecordingFiles(recording, '保存先から消えていました');
         removed++;
-        console.log(`[files] ライブラリから消えていたので削除済みにしました: ${recording.name}`);
+        console.log(`[files] 保存先から消えていたので削除済みにしました: ${recording.name}`);
     }
 
     return { checked: recordings.length, removed };

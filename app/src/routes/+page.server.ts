@@ -1,7 +1,7 @@
 import { fail } from '@sveltejs/kit';
 import { enabled as authEnabled } from '$lib/server/auth';
 import { database, now, queryAll, queryOne } from '$lib/server/db';
-import { cancel as cancelEncode, enqueue, pump } from '$lib/server/encoder';
+import { cancel as cancelEncode, encodeSource, enqueue, pump } from '$lib/server/encoder';
 import { deleteRecordingFiles, reconcile } from '$lib/server/files';
 import { cancel } from '$lib/server/reservations';
 import { resolveConflicts } from '$lib/server/scheduler';
@@ -54,7 +54,7 @@ export function load({ url }) {
         )
         .all() as Recording[];
 
-    // エンコードは「ライブラリに入る途中の状態」なので録画側の上に出す。
+    // エンコードは「保存先に入る途中の状態」なので録画側の上に出す。
     // 終わったものは録画の行に出るので、ここは進行中と直近の失敗だけ
     const jobs = queryAll<JobRow>(
         `SELECT j.*, r.name AS recording_name
@@ -105,8 +105,10 @@ export const actions = {
     reencode: async ({ request }) => {
         const recording = target(await request.formData());
         if (recording === undefined) return fail(400, { message: '録画が見つかりません' });
-        if (recording.ts_path === null) {
-            return fail(400, { message: '生TSが残っていないため再エンコードできません' });
+        // 生TSが無くても、保存先にあるものを元に録り直せる。
+        // 引き継いだ録画は生TSを持たず、中身がまだ生TSのままのことがある
+        if (encodeSource(recording) === null) {
+            return fail(400, { message: '元のファイルが残っていないため再エンコードできません' });
         }
         enqueue(recording.id);
         pump();
@@ -128,12 +130,9 @@ export const actions = {
         const job = queryOne<EncodeJob>('SELECT * FROM encode_jobs WHERE id = ?', id);
         if (job === undefined) return fail(400, { message: 'ジョブが見つかりません' });
 
-        const source = queryOne<{ ts_path: string | null }>(
-            'SELECT ts_path FROM recordings WHERE id = ?',
-            job.recording_id,
-        );
-        if (source?.ts_path == null) {
-            return fail(400, { message: '生TSが残っていないためやり直せません' });
+        const source = queryOne<Recording>('SELECT * FROM recordings WHERE id = ?', job.recording_id);
+        if (source === undefined || encodeSource(source) === null) {
+            return fail(400, { message: '元のファイルが残っていないためやり直せません' });
         }
 
         database()
@@ -159,7 +158,7 @@ export const actions = {
     },
 
     reconcile: () => {
-        // 「ライブラリを照合」ボタン。外から消した分をすぐ一覧に反映したいとき用
+        // 「実体と照合」ボタン。外から消した分をすぐ一覧に反映したいとき用
         return { success: true, reconcile: reconcile() };
     },
 

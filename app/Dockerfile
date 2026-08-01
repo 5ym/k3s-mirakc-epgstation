@@ -81,10 +81,18 @@ ENV NODE_ENV=production \
     FFMPEG=/usr/local/bin/ffmpeg \
     FFPROBE=/usr/local/bin/ffprobe
 
+# recisdb はスクランブルが掛かったまま録れたTSを解くのに使う。カードは
+# Mirakurun 側の pcscd が握っているので、こちらは libpcsclite でその socket に繋ぐだけ
+# (/run/pcscd を両方の Pod で共有している)。チューナーには触らない
+ARG RECISDB_VERSION=1.2.4
 RUN apt-get update && \
     apt-get -y --no-install-recommends install \
       libopus0 libsvtav1enc2 libx264-164 libdav1d7 libfontconfig1 libfreetype6 \
-      fontconfig ca-certificates tzdata && \
+      fontconfig ca-certificates tzdata libpcsclite1 curl && \
+    curl -fsSLO https://github.com/kazuki0824/recisdb-rs/releases/download/${RECISDB_VERSION}/recisdb_${RECISDB_VERSION}-1_amd64.deb && \
+    apt-get -y --no-install-recommends install ./recisdb_${RECISDB_VERSION}-1_amd64.deb && \
+    rm -f recisdb_${RECISDB_VERSION}-1_amd64.deb && \
+    apt-get -y purge curl && apt-get -y autoremove && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # bun 本体。SvelteKit(adapter-node) の出力を bun で動かす
@@ -98,9 +106,6 @@ RUN ldconfig && fc-cache -f
 COPY --from=build /app/build ./build
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/package.json ./package.json
-# 使い捨ての移行スクリプト。src の型や関数をそのまま使うので一緒に入れる
-COPY --from=build /app/scripts ./scripts
-COPY --from=build /app/src ./src
 
 EXPOSE 3000
 CMD ["bun", "./build/index.js"]

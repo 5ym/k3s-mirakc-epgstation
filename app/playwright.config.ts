@@ -5,6 +5,7 @@ const MIRAKURUN_PORT = 40772;
 const WEBHOOK_PORT = 8096;
 
 /** テスト用の作業領域。global-setup で毎回まっさらにする */
+export const MIRAKURUN_URL = `http://127.0.0.1:${MIRAKURUN_PORT}`;
 export const TEST_ROOT = '/tmp/denpa-e2e';
 export const LIBRARY_DIR = `${TEST_ROOT}/library`;
 /** EPGStation の引き継ぎ元。マウント前後の見え方を試すので、あえて作らずに始める */
@@ -61,8 +62,9 @@ export default defineConfig({
                 RECORDED_DIR: `${TEST_ROOT}/recorded`,
                 LIBRARY_DIR,
                 FFMPEG: './tests/fake/ffmpeg.sh',
+                RECISDB: './tests/fake/recisdb.sh',
                 FAKE_FFMPEG_FAIL_FILE: `${TEST_ROOT}/fail-encode`,
-                MIRAKURUN_URL: `http://127.0.0.1:${MIRAKURUN_PORT}`,
+                MIRAKURUN_URL,
                 // 定期処理は止め、テストからボタン/APIで明示的に走らせる(タイミング依存を避ける)
                 RECONCILE_INTERVAL: '86400000',
                 EPG_SYNC_INTERVAL: '86400000',

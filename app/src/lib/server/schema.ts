@@ -149,7 +149,7 @@ CREATE TABLE IF NOT EXISTS recordings (
     service_id INTEGER NOT NULL,
     service_name TEXT NOT NULL DEFAULT '',
     name TEXT NOT NULL,
-    series TEXT NOT NULL DEFAULT '',   -- ライブラリ上でシリーズとしてまとめる単位
+    series TEXT NOT NULL DEFAULT '',   -- 保存先でシリーズとしてまとめる単位
     subtitle TEXT NOT NULL DEFAULT '',
     description TEXT NOT NULL DEFAULT '',
     start_at INTEGER NOT NULL,

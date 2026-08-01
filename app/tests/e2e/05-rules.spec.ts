@@ -30,6 +30,8 @@ test.describe('自動予約ルール', () => {
         // 偽Mirakurunは同じ番組名を周期的に返すので、ルール作成と同時に予約が立つ
         await goto(page, '/');
         const fromRule = page.getByTestId('reservation-row').filter({ hasText: 'テストアニメ' });
+        // ルールで立ったものは、どのルールから来たかを番組名の下に出す
+        await expect(fromRule.first().getByTestId('rule-name')).toContainText('テストアニメ');
         await expect(fromRule.first()).toBeVisible();
 
         // 無効化しても既存の予約は残る(意図せず録り逃さないため)

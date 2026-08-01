@@ -3,7 +3,7 @@ import { dirname } from 'node:path';
 import { config } from './config';
 
 /**
- * 生TSとライブラリは別PVCなので rename が EXDEV で失敗する。
+ * 生TSと保存先は別PVCなので rename が EXDEV で失敗する。
  * その場合だけコピー+削除にフォールバックする。
  */
 export function moveFile(from: string, to: string): void {

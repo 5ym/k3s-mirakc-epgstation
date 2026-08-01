@@ -55,7 +55,13 @@ export function start(): void {
         pump();
     });
 
-    // ライブラリの実体とDBを突き合わせ、外から消されたものを一覧から落とす
+    /*
+     * 実体とDBを突き合わせ、外から消されたものを一覧から落とす。
+     *
+     * inotify (fs.watch) で消した瞬間に拾えないか試したが、この構成では
+     * 最初の1件しかイベントが来ず当てにできなかったので定期実行にしてある。
+     * すぐ反映したいときは画面の「実体と照合」を押す。
+     */
     void guard('reconcile', reconcile);
     every(config.reconcileInterval, 'reconcile', reconcile);
 }

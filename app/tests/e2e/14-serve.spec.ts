@@ -64,7 +64,7 @@ test.describe('WebDAV', () => {
         expect(res.headers().allow).toContain('PROPFIND');
     });
 
-    test('PROPFIND でライブラリの中身を返す', async ({ request }) => {
+    test('PROPFIND で保存先の中身を返す', async ({ request }) => {
         const res = await request.fetch('/dav/', {
             method: 'PROPFIND',
             headers: { Depth: '1' },
@@ -77,7 +77,7 @@ test.describe('WebDAV', () => {
         expect(body).toContain('<D:href>');
     });
 
-    test('ライブラリの外は見せない', async ({ request }) => {
+    test('保存先の外は見せない', async ({ request }) => {
         const res = await request.fetch('/dav/../../etc/passwd', { method: 'PROPFIND' });
         expect([404, 405]).toContain(res.status());
     });

@@ -132,7 +132,13 @@
         {/each}
     </div>
     <div class="flex items-center gap-2">
-        <a class="btn btn-sm" href={href({ start: String(data.start - data.hours * HOUR) })}>← 前日</a>
+        <a
+            class="btn btn-sm"
+            href={href({ start: String(data.start - data.hours * HOUR) })}
+            data-testid="prev-day"
+        >
+            ← 前日
+        </a>
         <span class="text-sm" data-testid="window-label">
             <!-- 日本の番組表の慣習で、1日は4時から翌4時まで -->
             {dayLabel(data.start)} <span class="text-base-content/60">(4:00〜翌4:00)</span>

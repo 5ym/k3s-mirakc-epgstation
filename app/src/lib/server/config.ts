@@ -37,6 +37,8 @@ export const config = {
     libraryDir: str('LIBRARY_DIR', '/library'),
 
     ffmpeg: str('FFMPEG', '/usr/local/bin/ffmpeg'),
+    // スクランブルが掛かったまま録れてしまったTSを、エンコードの前に解くのに使う
+    recisdb: str('RECISDB', '/usr/bin/recisdb'),
     encodeConcurrency: num('ENCODE_CONCURRENCY', 1),
     /** 先頭が壊れていて初期化に失敗したときに頭を捨てて再試行する秒数 (enc.js 由来) */
     encodeRetrySeek: num('ENCODE_RETRY_SEEK', 0.2),
@@ -88,7 +90,7 @@ export const config = {
 
     epgSyncInterval: num('EPG_SYNC_INTERVAL', 10 * MIN),
     schedulerTick: num('SCHEDULER_TICK', 5 * SEC),
-    /** ライブラリの実体とDBを突き合わせる間隔。外から消されたものをここで拾う */
+    /** 保存先の実体とDBを突き合わせる間隔。外から消されたものをここで拾う */
     reconcileInterval: num('RECONCILE_INTERVAL', 5 * MIN),
     /** 終了した番組情報をDBに残しておく期間。番組表の遡り表示にしか使わないので短くてよい */
     programRetention: num('PROGRAM_RETENTION', 24 * 60 * MIN),

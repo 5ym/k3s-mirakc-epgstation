@@ -15,7 +15,7 @@ export interface LibraryNameInput {
 }
 
 /**
- * ライブラリ内での相対パスを組む。
+ * 保存先での相対パスを組む。
  *
  * Kodi など .nfo を読むプレイヤーが期待する `シリーズ名/Season 年/シリーズ名 - YYYY-MM-DD ...`
  * という日付ベースのエピソード命名を解釈できる。日本の放送番組は話数が付かないもの・
@@ -44,7 +44,7 @@ export function libraryPath(rec: LibraryNameInput, ext: string): string {
     return join(config.libraryDir, libraryRelPath(rec, ` [${rec.id}]${ext}`));
 }
 
-/** 生TSの置き場。ライブラリと違い人が見るものではないので平置きでよい */
+/** 生TSの置き場。保存先と違い人が見るものではないので平置きでよい */
 export function recordedPath(rec: LibraryNameInput): string {
     const d = new Date(rec.start_at);
     const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;

@@ -33,6 +33,10 @@ spec:
               mountPath: /dev/bus
             - name: dev-dvb
               mountPath: /dev/dvb
+            # pcscd がここに socket を作る。denpa からも同じものを見せて、
+            # スクランブルの解除だけカードを借りられるようにする
+            - name: pcscd
+              mountPath: /run/pcscd
       volumes:
         - name: mirakurun-data
           persistentVolumeClaim:
@@ -45,6 +49,10 @@ spec:
           hostPath:
             path: /dev/dvb
             type: Directory
+        - name: pcscd
+          hostPath:
+            path: /run/denpa-pcscd
+            type: DirectoryOrCreate
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -114,6 +122,9 @@ spec:
               mountPath: /app/recorded
             - name: library
               mountPath: /library
+            # Mirakurun 側の pcscd の socket。カードを直接は掴まない
+            - name: pcscd
+              mountPath: /run/pcscd
       volumes:
         - name: denpa-data
           persistentVolumeClaim:
@@ -124,3 +135,7 @@ spec:
         - name: library
           persistentVolumeClaim:
             claimName: denpa-library
+        - name: pcscd
+          hostPath:
+            path: /run/denpa-pcscd
+            type: DirectoryOrCreate

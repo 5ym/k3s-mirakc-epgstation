@@ -1,22 +1,25 @@
 # recisdb は既定で ARIB STD-B25 を復号する(--no-decode で無効化)。
-# ただしカードが開けないときは黙って復号せずに素通しするので、-e を付けて
-# その場で失敗させる。付けないと「録画は成功しているのに全部スクランブル」
-# という分かりにくい壊れ方をする。
+# ただしカードが開けないときは黙って復号せずに素通しする。
+#
+# -e (--exit-on-card-error) を付けるとその場で失敗させられるが、付けていない。
+# 電波は二度と戻ってこないので、スクランブルされたままでも録っておくほうがまし。
+# denpa はエンコードの前にスクランブルを見て、掛かったままならそこで解く
+# (app/src/lib/server/scramble.ts)。
 - name: adapter0
   types:
     - BS
     - CS
-  command: recisdb tune -e --device /dev/dvb/adapter0/frontend0 --channel <channel> -
+  command: recisdb tune --device /dev/dvb/adapter0/frontend0 --channel <channel> -
 - name: adapter1
   types:
     - GR
-  command: recisdb tune -e --device /dev/dvb/adapter1/frontend0 --channel <channel> -
+  command: recisdb tune --device /dev/dvb/adapter1/frontend0 --channel <channel> -
 - name: adapter2
   types:
     - BS
     - CS
-  command: recisdb tune -e --device /dev/dvb/adapter2/frontend0 --channel <channel> -
+  command: recisdb tune --device /dev/dvb/adapter2/frontend0 --channel <channel> -
 - name: adapter3
   types:
     - GR
-  command: recisdb tune -e --device /dev/dvb/adapter3/frontend0 --channel <channel> -
+  command: recisdb tune --device /dev/dvb/adapter3/frontend0 --channel <channel> -

@@ -3,13 +3,13 @@ import { expect, test } from '@playwright/test';
 import { goto } from './helpers';
 
 /**
- * ライブラリのファイルを denpa の外から消したときに、一覧からも消えることを確認する。
+ * 録画ファイルを denpa の外から消したときに、一覧からも消えることを確認する。
  * ファイルマネージャや別のマシンから消されることがあるので、
- * ここでも同じようにファイルを消して、denpa の照合がそれを拾えるかを見る。
+ * ここでも同じようにファイルを消して、denpa がそれを拾えるかを見る。
  *
- * 03 のテストがライブラリに入れた1本をそのまま使う。
+ * 03 のテストが保存した1本をそのまま使う。
  */
-test.describe('ライブラリから外で消された録画の反映', () => {
+test.describe('外で消された録画の反映', () => {
     test('外で消した録画が一覧から消え、削除済みとして残る', async ({ page }) => {
         await goto(page, '/');
         const recording = page.getByTestId('recording-row').first();
@@ -36,7 +36,7 @@ test.describe('ライブラリから外で消された録画の反映', () => {
 
         await goto(page, '/?deleted=1');
         await expect(page.locator(`[data-recording-id="${recordingId}"]`)).toContainText(
-            'ライブラリから消えていました',
+            '保存先から消えていました',
         );
     });
 });
