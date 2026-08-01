@@ -171,12 +171,16 @@
                                     {/if}
                                 </div>
                             </td>
-                            <td>
-                                <span class="badge {badgeClass(res.state)}" data-testid="reservation-state">
+                            <!-- 番組の列に幅を寄せているぶん、こちらは縦書きにならないよう畳ませない -->
+                            <td class="whitespace-nowrap">
+                                <span
+                                    class="badge whitespace-nowrap {badgeClass(res.state)}"
+                                    data-testid="reservation-state"
+                                >
                                     {stateLabel(res.state)}
                                 </span>
                             </td>
-                            <td>
+                            <td class="whitespace-nowrap">
                                 {#if active.includes(res.state)}
                                     <form method="POST" action="?/cancel" use:submitting>
                                         <input type="hidden" name="id" value={res.id} />
@@ -342,7 +346,10 @@
                             </td>
                             <td class="whitespace-nowrap">{size(rec.ts_size)}</td>
                             <td class="whitespace-nowrap">
-                                <span class="badge {badgeClass(rec.state)}" data-testid="recording-state">
+                                <span
+                                    class="badge whitespace-nowrap {badgeClass(rec.state)}"
+                                    data-testid="recording-state"
+                                >
                                     {stateLabel(rec.state)}
                                 </span>
                             </td>

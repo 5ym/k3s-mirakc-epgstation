@@ -119,10 +119,6 @@
     </form>
 </div>
 
-{#if form?.message}
-    <div class="alert alert-error mb-4" data-testid="guide-error">{form.message}</div>
-{/if}
-
 <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
     <div class="join" data-testid="type-tabs">
         {#each ['GR', 'BS', 'CS'] as type (type)}
@@ -261,6 +257,13 @@
         onclose={() => (selected = null)}
     >
         {#snippet actions()}
+            <!--
+                失敗の理由は詳細の中に出す。番組表にインラインで足すと、その分だけ
+                グリッドが下にずれてスクロールバーが出る
+            -->
+            {#if form?.message}
+                <div class="alert alert-error mt-4" data-testid="guide-error">{form.message}</div>
+            {/if}
             {#if program.reservation_state}
                 <div class="modal-action items-center">
                     <span class="badge badge-info" data-testid="detail-state">
@@ -274,9 +277,9 @@
                         method="POST"
                         action="?/cancel"
                         use:submitting={() =>
-                            async ({ update }) => {
+                            async ({ result, update }) => {
                                 await update();
-                                selected = null;
+                                if (result.type === 'success') selected = null;
                             }}
                     >
                         <input type="hidden" name="programId" value={program.id} />
@@ -291,9 +294,10 @@
                     action="?/reserve"
                     class="mt-4 flex flex-col gap-3"
                     use:submitting={() =>
-                        async ({ update }) => {
+                        async ({ result, update }) => {
                             await update();
-                            selected = null;
+                            // 失敗したときは開いたままにして、中に理由を出す
+                            if (result.type === 'success') selected = null;
                         }}
                 >
                     <input type="hidden" name="programId" value={program.id} />

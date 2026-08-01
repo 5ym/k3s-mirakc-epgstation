@@ -151,7 +151,14 @@ test.describe('予約の細かい指定', () => {
 
         await cellOf(page, past[0].id).getByTestId('program-button').click();
         await page.getByTestId('detail-reserve').click();
-        await expect(page.getByTestId('guide-error')).toContainText('放送が終わっています');
+
+        // 断る理由は詳細を開いたまま、その中に出す。番組表にインラインで足すと
+        // グリッドが押し下げられてスクロールバーが出る
+        const detail = page.getByTestId('program-detail');
+        await expect(detail).toBeVisible();
+        await expect(detail.getByTestId('guide-error')).toContainText('放送が終わっています');
+        await page.getByTestId('detail-close').click();
+        await expect(detail).toHaveCount(0);
 
         await goto(page, '/');
         await expect(
