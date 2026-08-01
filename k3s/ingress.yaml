@@ -22,55 +22,6 @@ spec:
           port: 40772
 ---
 apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
-  name: epgstation
-  namespace: epg
-spec:
-  entryPoints:
-    - websecure
-  tls:
-    certResolver: mydnschallenge
-  routes:
-    - match: Host(`e.doany.io`) && (PathPrefix(`/api/videos`) || PathPrefix(`/api/streams/live`))
-      kind: Rule
-      priority: 60
-      middlewares:
-        - name: basic-auth
-          namespace: auth
-      services:
-        - name: epgstation
-          port: 8888
-    - match: Host(`e.doany.io`)
-      kind: Rule
-      priority: 50
-      middlewares:
-        - name: forward-auth-errors
-          namespace: auth
-        - name: forward-auth
-          namespace: auth
-      services:
-        - name: epgstation
-          port: 8888
----
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
-  name: epgstation-home-arpa-http
-  namespace: epg
-spec:
-  entryPoints:
-    - websecure
-  tls:
-    secretName: e-home-arpa-tls
-  routes:
-    - match: Host(`e.home.arpa`) && ClientIP(`10.10.0.0/16`)
-      kind: Rule
-      services:
-        - name: epgstation
-          port: 8888
----
-apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
   name: https-redirect

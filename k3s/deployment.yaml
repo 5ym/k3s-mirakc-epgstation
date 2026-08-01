@@ -46,6 +46,9 @@ spec:
             path: /dev/dvb
             type: Directory
 ---
+# EPGStation の MariaDB。EPGStation 本体は止めたが、denpa への引き継ぎ
+# (ルール・予約・録画)がここを読むので、引き継ぎが済むまでは残す。
+# 済んだらこの Deployment と Service、epg-db / epgstation-* の PVC を消してよい
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -84,63 +87,6 @@ spec:
         - name: db-data
           persistentVolumeClaim:
             claimName: epg-db
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: epgstation
-  namespace: epg
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: epgstation
-  template:
-    metadata:
-      labels:
-        app: epgstation
-    spec:
-      containers:
-        - name: epgstation
-          image: ghcr.io/danything/epgstation:sha-241280b8ad75
-          imagePullPolicy: IfNotPresent
-          env:
-            - name: TZ
-              value: Asia/Tokyo
-            - name: XOOL_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: epgstation-secrets
-                  key: xool-api-key
-            - name: BASIC_AUTH_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: epgstation-secrets
-                  key: basic-auth-password
-          ports:
-            - containerPort: 8888
-          volumeMounts:
-            - name: epgstation-data
-              mountPath: /app/data
-            - name: epgstation-thumbnail
-              mountPath: /app/thumbnail
-            - name: epgstation-logs
-              mountPath: /app/logs
-            - name: recorded
-              mountPath: /app/recorded
-      volumes:
-        - name: epgstation-data
-          persistentVolumeClaim:
-            claimName: epgstation-data
-        - name: epgstation-thumbnail
-          persistentVolumeClaim:
-            claimName: epgstation-thumbnail
-        - name: epgstation-logs
-          persistentVolumeClaim:
-            claimName: epgstation-logs
-        - name: recorded
-          persistentVolumeClaim:
-            claimName: epgstation-recorded
 ---
 apiVersion: apps/v1
 kind: Deployment

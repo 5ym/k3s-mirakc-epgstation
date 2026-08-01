@@ -6,9 +6,6 @@ on:
     paths:
       - 'mirakurun/Dockerfile'
       - 'mirakurun/*.yml'
-      - 'epgstation/Dockerfile'
-      - 'epgstation/*.js'
-      - 'epgstation/*.yml'
       - 'app/**'
       - '.github/workflows/build-and-deploy.yml'
   workflow_dispatch: {}
@@ -43,7 +40,7 @@ jobs:
         id: tag
         run: |
           set -eu
-          for image in mirakurun epgstation denpa; do
+          for image in mirakurun denpa; do
             case "$image" in
               denpa) path=app ;;
               *) path="$image" ;;
@@ -74,18 +71,6 @@ jobs:
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/mirakurun:${{ steps.tag.outputs.mirakurun }}
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/mirakurun:latest
 
-      - name: Build and push epgstation image
-        uses: docker/build-push-action@v7
-        with:
-          context: ./epgstation
-          platforms: linux/amd64
-          push: true
-          pull: true
-          cache-from: type=gha,scope=epgstation
-          cache-to: type=gha,mode=max,scope=epgstation
-          tags: |
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/epgstation:${{ steps.tag.outputs.epgstation }}
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/epgstation:latest
 
       - name: Build and push denpa image
         uses: docker/build-push-action@v7
@@ -119,10 +104,9 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
-            for image in mirakurun epgstation denpa; do
+            for image in mirakurun denpa; do
               case "$image" in
                 mirakurun) tag="${{ steps.tag.outputs.mirakurun }}" ;;
-                epgstation) tag="${{ steps.tag.outputs.epgstation }}" ;;
                 denpa) tag="${{ steps.tag.outputs.denpa }}" ;;
               esac
               sed -i -E "s#image: [^[:space:]]*/${image}:[^[:space:]]*#image: ${{ env.REGISTRY }}/${OWNER}/${image}:${tag}#g" ${FILES}

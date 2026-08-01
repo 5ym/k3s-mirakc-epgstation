@@ -4,27 +4,27 @@
 
 ## 全体構成と移行状況
 
-最終形は **Mirakurun + denpa(自前の録画/エンコード管理)** です。
+**Mirakurun + denpa(自前の録画/エンコード管理)** です。
 視聴用のメディアサーバは置きません。denpa がファイルをそのまま配り、
-再生は端末のプレイヤー(mpv / VLC / Infuse)に任せます。
-現在は移行の途中で、EPGStation と denpa が並走しています。
+再生は端末のプレイヤー(mpv / VLC / Kodi / Infuse)に任せます。
 
 ```text
-チューナー ── Mirakurun ─┬─ EPGStation (従来。まだ現役)
-                          └─ denpa ── ライブラリ(mkv) ─→ mpv / VLC / Infuse
+チューナー ── Mirakurun ── denpa ── 録画(mkv) ─┬─→ mpv / VLC / Infuse (URLスキーム)
+                                               └─→ Kodi (WebDAV)
 ```
 
-denpa が実機で録れることを確認するまで EPGStation は残してあります。切り替えは
-「denpa 側で予約ルールを作る → 数日並走させて録画が落ちることを確認する →
-EPGStation の予約を止める → `k3s/` から epgstation/db の Deployment・Service・
-IngressRoute を消す」の順で行ってください。PVC は `Prune=false,Delete=false` が
-付いているので、マニフェストから消しても録画データは残ります。
+EPGStation は**停止済み**です。MariaDB だけは引き継ぎ(ルール・予約・録画)が
+済むまで残してあります。
+
+引き継ぎが済んだら、`k3s/deployment.yaml` の `db` と `k3s/service.yaml` の `db`、
+`epg-db` / `epgstation-*` の PVC、`k3s/sealed-secret.yaml`、`k3s/tls-secret.yaml` を
+消せます。PVC には `Prune=false,Delete=false` が付いているので、マニフェストから
+消しても録画データは残ります(消すのは手作業)。
 
 | コンポーネント | 役割 | URL |
 | --- | --- | --- |
 | Mirakurun | チューナー制御・EPG・TS配信 | `m.doany.io` |
 | denpa | 予約・録画・CM検出・エンコード・ライブラリ管理 | `dp.doany.io` |
-| EPGStation | 従来の録画基盤(移行完了後に撤去) | `e.doany.io` |
 
 denpa 自体の詳細(状態遷移・環境変数・テスト)は [app/README.md](app/README.md) を参照。
 
@@ -309,14 +309,13 @@ k3sホストの初期構築やクラスタ共通のアドオン類は別の(プ�
   ArgoCDへのwebhookが自動登録される運用。ArgoCD Application自体はクラスタの
   state.dbバックアップ/リストアで復元される前提のため、このリポジトリにも
   bootstrap側にもマニフェストとしては存在しない。
-- **DNS**: `m.doany.io` / `e.doany.io` / `dp.doany.io` がTraefikの
-  外部IPを指すこと。`e.home.arpa` はLAN内(`10.10.0.0/16`)専用で、
-  `k3s/tls-secret.yaml` に同梱の自己署名証明書で処理される。
+- **DNS**: `m.doany.io` / `dp.doany.io` がTraefikの外部IPを指すこと。
+  (`e.doany.io` と `e.home.arpa` は EPGStation 用だったので不要になった)
 - **チューナードライバ**: `k3s/deployment.yaml` の mirakurun は
   `privileged: true` かつ `/dev/bus`・`/dev/dvb` をhostPathでマウントする
   ため、ノード側にPT3/PX4系チューナーのドライバが読み込まれている必要がある。
-- **GHCRイメージの公開設定**: `ghcr.io/danything/mirakurun` /
-  `ghcr.io/danything/epgstation` / `ghcr.io/danything/denpa` をpullできること
+- **GHCRイメージの公開設定**: `ghcr.io/danything/mirakurun` と
+  `ghcr.io/danything/denpa` をpullできること
   (imagePullSecrets未設定のため publicパッケージである前提)。
 
 ## チャンネルスキャン
