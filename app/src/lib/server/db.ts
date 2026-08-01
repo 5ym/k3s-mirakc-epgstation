@@ -2,7 +2,7 @@ import { Database, type SQLQueryBindings } from 'bun:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { config } from './config';
-import { SCHEMA } from './schema';
+import { ADDED_COLUMNS, SCHEMA } from './schema';
 
 /**
  * SQLite への接続。
@@ -24,9 +24,24 @@ export function database(): Database {
     db.exec('PRAGMA busy_timeout = 5000');
     db.exec('PRAGMA synchronous = NORMAL');
     db.exec(SCHEMA);
+    addMissingColumns(db);
 
     instance = db;
     return instance;
+}
+
+/**
+ * 後から足した列を、既にあるテーブルに補う。
+ * 既にある列は飛ばすだけなので、何度実行しても同じ結果になる。
+ */
+export function addMissingColumns(db: Database): void {
+    for (const { table, column, definition } of ADDED_COLUMNS) {
+        const columns = db.query(`PRAGMA table_info(${table})`).all() as { name: string }[];
+        if (columns.length === 0) continue; // まだテーブルが無いなら SCHEMA 側で作られる
+        if (columns.some((c) => c.name === column)) continue;
+        db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+        console.log(`[db] ${table}.${column} を追加しました`);
+    }
 }
 
 export function now(): number {

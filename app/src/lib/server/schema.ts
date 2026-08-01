@@ -1,6 +1,26 @@
 /** スキーマは TS の文字列として持つ。?raw インポートに頼らないので、
  * vite のビルド経由でも bun test の直接実行でも同じように読める。
  */
+/**
+ * 後から足した列。
+ *
+ * `CREATE TABLE IF NOT EXISTS` は既存のテーブルに列を足さないので、
+ * スキーマに書くだけでは動いているDBには反映されない(実際に本番が500を返した)。
+ * 列を足すときは SCHEMA と一緒にここへも書くこと。
+ */
+export const ADDED_COLUMNS: { table: string; column: string; definition: string }[] = [
+    { table: 'services', column: 'has_logo', definition: 'INTEGER NOT NULL DEFAULT 0' },
+    { table: 'rules', column: 'cm_cut', definition: "TEXT NOT NULL DEFAULT 'chapter'" },
+    { table: 'rules', column: 'codec', definition: "TEXT NOT NULL DEFAULT 'av1'" },
+    { table: 'rules', column: 'service_types', definition: 'TEXT' },
+    { table: 'reservations', column: 'cm_cut', definition: "TEXT NOT NULL DEFAULT 'chapter'" },
+    { table: 'reservations', column: 'codec', definition: "TEXT NOT NULL DEFAULT 'av1'" },
+    { table: 'recordings', column: 'cm_cut', definition: "TEXT NOT NULL DEFAULT 'chapter'" },
+    { table: 'recordings', column: 'codec', definition: "TEXT NOT NULL DEFAULT 'av1'" },
+    { table: 'recordings', column: 'cm_ranges', definition: 'TEXT' },
+    { table: 'recordings', column: 'acknowledged_at', definition: 'INTEGER' },
+];
+
 export const SCHEMA = `
 -- 全て CREATE ... IF NOT EXISTS で書き、起動のたびに流す。
 -- 列を足すときは末尾に ALTER TABLE ... ADD COLUMN を追記していく方針
