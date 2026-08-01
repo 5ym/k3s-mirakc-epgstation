@@ -60,6 +60,7 @@ export default defineConfig({
                 RECORDED_DIR: `${TEST_ROOT}/recorded`,
                 LIBRARY_DIR,
                 FFMPEG: './tests/fake/ffmpeg.sh',
+                FAKE_FFMPEG_FAIL_FILE: `${TEST_ROOT}/fail-encode`,
                 MIRAKURUN_URL: `http://127.0.0.1:${MIRAKURUN_PORT}`,
                 JELLYFIN_URL,
                 JELLYFIN_API_KEY: 'e2e',

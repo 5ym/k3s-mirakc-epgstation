@@ -31,6 +31,14 @@ fi
 echo "Input #0, mpegts, from '${input}':" >&2
 echo "  Duration: 00:00:10.00, start: 0.000000, bitrate: 15000 kb/s" >&2
 
+# E2E から「この先のエンコードは失敗させる」と指示するための目印。
+# 失敗したときの表示と後始末を確かめるのに要る
+if [ -f "${FAKE_FFMPEG_FAIL_FILE:-/nonexistent}" ]; then
+    echo "[libsvtav1 @ 0x1] Error initializing the encoder" >&2
+    echo "Conversion failed!" >&2
+    exit 1
+fi
+
 if [ "${FAKE_FFMPEG_FAIL:-0}" = "1" ]; then
     echo "Error while opening encoder - fake failure" >&2
     exit 1

@@ -68,6 +68,12 @@
                                         <button class="btn btn-xs" data-testid="encode-retry">やり直す</button
                                         >
                                     </form>
+                                    <form method="POST" action="?/dismissEncode" use:submitting>
+                                        <input type="hidden" name="id" value={job.id} />
+                                        <button class="btn btn-xs btn-ghost" data-testid="encode-dismiss">
+                                            消す
+                                        </button>
+                                    </form>
                                 {/if}
                             </div>
                         </div>
