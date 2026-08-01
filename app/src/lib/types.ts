@@ -21,6 +21,8 @@ export interface Service {
     network_id: number;
     name: string;
     type: ChannelType;
+    /** ARIB のサービス種別。1 がデジタルTV */
+    service_type: number;
     channel: string;
     remote_control_key: number | null;
     has_logo: number;

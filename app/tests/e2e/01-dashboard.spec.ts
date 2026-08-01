@@ -2,6 +2,14 @@ import { expect, test } from '@playwright/test';
 import { goto, syncEpg } from './helpers';
 
 test.describe('ダッシュボードと画面遷移', () => {
+    test('データ放送のチャンネルは取り込まない', async ({ page, request }) => {
+        await syncEpg(request);
+        await goto(page, '/guide?type=GR');
+        // 映像が入っていないので録っても中身が無い。番組表に出るとルールが引っかけて
+        // 録画が失敗する
+        await expect(page.locator('[data-testid="guide-grid"]')).not.toContainText('MXデータ');
+    });
+
     test('EPG取得後に局・番組が反映され、全ページを開ける', async ({ page, request }) => {
         await syncEpg(request);
 

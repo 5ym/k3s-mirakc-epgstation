@@ -26,6 +26,8 @@ export const ADDED_COLUMNS: { table: string; column: string; definition: string 
     { table: 'programs', column: 'genre_detail', definition: 'TEXT' },
     // 引き継ぎ元での識別子。二重に取り込まないための印
     { table: 'rules', column: 'source', definition: 'TEXT' },
+    // ARIB のサービス種別。1 がデジタルTV
+    { table: 'services', column: 'service_type', definition: 'INTEGER NOT NULL DEFAULT 1' },
 ];
 
 export const SCHEMA = `
@@ -61,6 +63,9 @@ CREATE TABLE IF NOT EXISTS services (
     network_id INTEGER NOT NULL,
     name TEXT NOT NULL,
     type TEXT NOT NULL,               -- GR / BS / CS
+    -- ARIB のサービス種別 (STD-B10)。1 = デジタルTV、2 = デジタル音声、
+    -- 192 = データ/ワンセグ、164 = エンジニアリング。録るのは 1 だけ
+    service_type INTEGER NOT NULL DEFAULT 1,
     channel TEXT NOT NULL,            -- 物理チャンネル。同一チャンネルの同時録画はチューナーを共有できる
     remote_control_key INTEGER,
     has_logo INTEGER NOT NULL DEFAULT 0,

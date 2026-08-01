@@ -97,7 +97,7 @@ Bun.serve({
                     serviceId: s.serviceId,
                     networkId: s.networkId,
                     name: s.name,
-                    type: 1,
+                    type: s.serviceType,
                     channel: { type: s.type, channel: s.channel },
                     hasLogoData: true,
                 })),

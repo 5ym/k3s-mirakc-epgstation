@@ -202,9 +202,12 @@ export function deleteRecordingFiles(recording: Recording, reason: string): void
         pruneEmptyDirs(recording.library_path);
     }
     removeIfExists(recording.ts_path);
+    // 失敗した録画を消したときに理由を上書きすると、なぜ失敗したのかが分からなくなる。
+    // 元の理由があるならそちらを残す
     database()
         .prepare(
-            `UPDATE recordings SET deleted_at = ?, library_path = NULL, ts_path = NULL, error = ?, updated_at = ? WHERE id = ?`,
+            `UPDATE recordings SET deleted_at = ?, library_path = NULL, ts_path = NULL,
+             error = COALESCE(NULLIF(error, ''), ?), updated_at = ? WHERE id = ?`,
         )
         .run(now(), reason, now(), recording.id);
 }

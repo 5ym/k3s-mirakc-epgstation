@@ -91,7 +91,7 @@ export function buildArgs(
     // mapで解決できない(型が不明な)ストリームは黙ってスキップする。エンコード自体を止めないため
     args.push('-ignore_unknown');
     // 字幕ストリーム設定(?は字幕ストリームが無い録画でもエンコードが失敗しないようにするため)
-    args.push('-map', '0:s?', '-c:s', 'dvdsub');
+    args.push('-map', '0:s?', '-c:s', 'dvbsub');
     // インタレ解除(bwdifはyadifよりコーミング残りが少ない。modeは既定のsend_fieldのままにし、
     // フィールドごとに1フレーム生成して59.94p出力にする)
     args.push('-vf', video.filter);

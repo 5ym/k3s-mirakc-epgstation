@@ -8,16 +8,27 @@ import { toHalfWidth } from './title';
 
 const CHANNEL_TYPES = new Set(['GR', 'BS', 'CS', 'SKY']);
 
+/**
+ * 録画できるサービスかどうか。ARIB のサービス種別 (STD-B10) で決める。
+ *
+ * Mirakurun はデータ放送(NHKデータ1、Gガイド)もワンセグ(tvkワンセグ1)も
+ * ラジオも同じ一覧で返す。これらを録っても映像は入っておらず、
+ * データ放送は番組表上「24時間ぶんの1番組」になっていたりする。
+ * ルールが引っかけて録画が失敗するので、取り込む時点で落とす。
+ */
+const DIGITAL_TV = 1;
+
 export function syncServices(services: mirakurun.MirakurunService[]): number {
     const stmt = database().prepare(`
-        INSERT INTO services (id, service_id, network_id, name, type, channel, remote_control_key,
-                              has_logo, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO services (id, service_id, network_id, name, type, service_type, channel,
+                              remote_control_key, has_logo, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             service_id = excluded.service_id,
             network_id = excluded.network_id,
             name = excluded.name,
             type = excluded.type,
+            service_type = excluded.service_type,
             channel = excluded.channel,
             remote_control_key = excluded.remote_control_key,
             has_logo = excluded.has_logo,
@@ -25,22 +36,40 @@ export function syncServices(services: mirakurun.MirakurunService[]): number {
     `);
     const at = now();
     let count = 0;
+    const dropped: number[] = [];
     const tx = database().transaction(() => {
         for (const s of services) {
-            // channel を持たないサービス(データ放送等)は録画対象にならないので捨てる
             if (s.channel === undefined || !CHANNEL_TYPES.has(s.channel.type)) continue;
+            // 映像の入っていないサービスは録っても仕方がない
+            if (s.type !== DIGITAL_TV) {
+                dropped.push(s.id);
+                continue;
+            }
             stmt.run(
                 s.id,
                 s.serviceId,
                 s.networkId,
                 toHalfWidth(s.name ?? ''),
                 s.channel.type,
+                s.type,
                 s.channel.channel,
                 s.remoteControlKeyId ?? null,
                 s.hasLogoData === true ? 1 : 0,
                 at,
             );
             count++;
+        }
+        // 以前の取り込みで入ってしまったデータ放送やワンセグを片付ける。
+        // 残っていると番組表に並び続け、ルールが引っかけて録画が失敗する
+        for (const id of dropped) {
+            database()
+                .prepare(
+                    `UPDATE reservations SET state = 'canceled', updated_at = ?
+                     WHERE service_id = ? AND state IN ('scheduled', 'conflict')`,
+                )
+                .run(at, id);
+            database().prepare('DELETE FROM programs WHERE service_id = ?').run(id);
+            database().prepare('DELETE FROM services WHERE id = ?').run(id);
         }
     });
     tx();

@@ -25,7 +25,7 @@ describe('録画エンコードの引数', () => {
     test('字幕と音声はコーデックによらず同じ', () => {
         for (const codec of ['av1', 'h264'] as const) {
             const args = buildArgs('/in.m2ts', '/out.mkv', 1, null, codec);
-            expect(argValue(args, '-c:s')).toBe('dvdsub');
+            expect(argValue(args, '-c:s')).toBe('dvbsub');
             expect(argValue(args, '-c:a')).toBe('libopus');
         }
     });
@@ -47,7 +47,7 @@ describe('録画エンコードの引数', () => {
         });
         expect(argValue(args, '-filter_complex')).toContain("select='between(t,0.000,300.000)'");
         expect(args).toContain('-sn');
-        expect(args).not.toContain('dvdsub');
+        expect(args).not.toContain('dvbsub');
     });
 
     test('チャプターを渡すと2つ目の入力として読み込む', () => {
