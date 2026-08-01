@@ -42,11 +42,6 @@
         apply();
     }
 
-    /** ページ名はナビと同じものを使う。タブに出す */
-    const title = $derived(
-        `${links.find((l) => l.href === page.url.pathname)?.label ?? 'denpa'} - denpa`,
-    );
-
     const links = [
         { href: '/', label: 'ダッシュボード' },
         { href: '/guide', label: '番組表' },
@@ -54,6 +49,9 @@
         { href: '/recordings', label: 'ライブラリ' },
         { href: '/settings', label: '設定' },
     ];
+
+    /** ページ名はナビと同じものを使う。タブに出す */
+    const title = $derived(`${links.find((l) => l.href === page.url.pathname)?.label ?? 'denpa'} - denpa`);
 </script>
 
 <svelte:head>

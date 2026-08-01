@@ -1,7 +1,15 @@
 {
     "$schema": "https://biomejs.dev/schemas/2.5.6/schema.json",
     "files": {
-        "includes": ["**", "!build", "!.svelte-kit", "!test-results", "!playwright-report", "!**/*.svelte"]
+        "includes": [
+            "**",
+            "!build",
+            "!.svelte-kit",
+            "!test-results",
+            "!playwright-report",
+            "!**/*.svelte",
+            "!static"
+        ]
     },
     "formatter": {
         "enabled": true,
