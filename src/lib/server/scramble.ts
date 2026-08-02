@@ -113,7 +113,11 @@ export async function cardStatus(): Promise<CardStatus> {
  * recisdb はカードが読めないとき「黙って素通しする」ので、終了コードでは
  * 成否が分からない。出来上がったものを見て判断する。
  */
-export async function descramble(input: string, output: string): Promise<{ ok: boolean; error: string }> {
+export async function descramble(
+    input: string,
+    output: string,
+    signal?: AbortSignal,
+): Promise<{ ok: boolean; error: string }> {
     /*
      * 向こうのマウント先はこちらと同じとは限らないので、生TSの置き場からの相対で渡す。
      * 掛かったままのTSは必ずここにある(引き継いだ録画も、移行のときに
@@ -127,10 +131,12 @@ export async function descramble(input: string, output: string): Promise<{ ok: b
     }
 
     try {
+        // 解除は数十分かかることがある。中止を押されたらここで切る
         const res = await fetch(`${config.tunerAgentUrl}/denpa/decode`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ input: from, output: to }),
+            signal,
         });
         const body = (await res.json()) as { ok?: boolean; error?: string };
         if (!res.ok || body.ok !== true) {

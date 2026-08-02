@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { encodeSource } from '../source';
-import type { EncodeJob, Recording, VideoCodec } from '../types';
+import type { EncodeJob, EncodePhase, Recording, VideoCodec } from '../types';
 import { type CmDetection, chapterMetadata, detectCm, keepRanges, type Range } from './cm';
 import { config } from './config';
 import { database, now, queryOne } from './db';
@@ -41,6 +41,14 @@ const PROGRESS_INTERVAL = 2000;
 const runningJobs = new Set<number>();
 /** kill 用。ffmpeg が起動している間だけ入る */
 const procs = new Map<number, Bun.Subprocess>();
+/**
+ * 中止の合図。ジョブが走っている間ずっとある。
+ *
+ * ffmpeg を kill するだけでは足りない。スクランブル解除は向こうの
+ * コンテナへの HTTP、CM検出は別の ffmpeg で、どちらも数十分かかることがある。
+ * 「中止を押したのに何も起きない」を無くすため、段階ごとにこれを渡す
+ */
+const aborts = new Map<number, AbortController>();
 /** ユーザーが止めたジョブ。失敗と区別して再試行しないため */
 const canceled = new Set<number>();
 
@@ -216,20 +224,31 @@ export function enqueue(recordingId: number): number {
 
 export function cancel(jobId: number): void {
     canceled.add(jobId);
-    const proc = procs.get(jobId);
-    if (proc !== undefined) {
-        proc.kill();
-        return;
-    }
-    database()
+    // どの段階に居ても止まるようにする。ffmpeg が回っていない段階もある
+    aborts.get(jobId)?.abort();
+    procs.get(jobId)?.kill();
+
+    const stopped = database()
         .prepare(
             `UPDATE encode_jobs SET state = 'canceled', finished_at = ? WHERE id = ? AND state = 'queued'`,
         )
         .run(now(), jobId);
+    // まだ始まっていなければここで終わり。走っている分は runJob が後始末して知らせる
+    if (stopped.changes > 0) emit('recordings');
+}
+
+/** 段階を進めて画面にも伝える。押しても反応が無いように見えるのを防ぐ */
+function setPhase(jobId: number, phase: EncodePhase, log: string): void {
+    database()
+        .prepare('UPDATE encode_jobs SET phase = ?, log = ?, percent = 0, eta_ms = NULL WHERE id = ?')
+        .run(phase, log, jobId);
+    emit('recordings');
 }
 
 interface Progress {
     percent: number;
+    /** 残り時間の見込み(ms)。速さが読めないうちは null */
+    etaMs: number | null;
     log: string;
 }
 
@@ -250,12 +269,25 @@ export function parseProgressBlock(
         // percent は NaN 汚染を防ぐガードが要る (JSON上 typeof NaN === 'number' で素通りするため)
         percent = Math.min(1, outTimeUs / 1e6 / durationSec);
     }
+    /*
+     * 残り時間。ffmpeg が出す speed (実時間比。"0.85x" のような形) で、
+     * まだ通していない秒数を割る。AV1 だと 0.1x を切ることもあるので、
+     * 割合だけ出しても放っておいていいのか判断できない
+     */
+    const speed = parseFloat(block.speed);
+    let etaMs: number | null = null;
+    if (Number.isFinite(speed) && speed > 0 && Number.isFinite(durationSec) && Number.isFinite(outTimeUs)) {
+        const leftSec = durationSec - outTimeUs / 1e6;
+        if (leftSec > 0) etaMs = Math.round((leftSec / speed) * 1000);
+    }
+
     const elapsedMin = (outTimeUs / 1e6 / 60).toFixed(2);
     const totalMin = (durationSec / 60).toFixed(2);
     const sizeMb = (parseInt(block.total_size, 10) / 1024 / 1024).toFixed(1);
     const rateMbps = (parseFloat(block.bitrate) / 1000).toFixed(2);
     return {
         percent,
+        etaMs,
         log: `elapsed: ${elapsedMin}min / ${totalMin}min, speed: ${block.speed}, size: ${sizeMb}MB, rate: ${rateMbps}Mbps, drop: ${block.drop_frames}`,
     };
 }
@@ -301,11 +333,14 @@ async function runFfmpeg(
     // 出力し終えた時点の位置。CMを切ると入力より短くなるので、出来上がりの長さはこちら
     let outTimeUs = NaN;
     let percent = 0;
+    let etaMs: number | null = null;
     let log = '';
     let lastWrite = 0;
     let stderrTail = '';
 
-    const updateProgress = database().prepare('UPDATE encode_jobs SET percent = ?, log = ? WHERE id = ?');
+    const updateProgress = database().prepare(
+        'UPDATE encode_jobs SET percent = ?, eta_ms = ?, log = ? WHERE id = ?',
+    );
 
     // 動画長は ffprobe を別に叩くとチャンネル切替直後のTSでハングして巻き込まれるため、
     // ffmpeg 自身が起動時に stderr へ出す "Duration:" 行から取る
@@ -341,13 +376,16 @@ async function runFfmpeg(
 
                 const p = parseProgressBlock(block, durationSec, percent);
                 percent = p.percent;
+                etaMs = p.etaMs;
                 log = p.log;
                 block = {};
 
                 const wroteAt = Date.now();
                 if (wroteAt - lastWrite >= PROGRESS_INTERVAL) {
                     lastWrite = wroteAt;
-                    updateProgress.run(percent, log, job.id);
+                    updateProgress.run(percent, etaMs, log, job.id);
+                    // 進み具合を画面にも流す。書き込みと同じ間隔なので、これ以上細かくはならない
+                    emit('recordings');
                 }
             }
         }
@@ -355,7 +393,7 @@ async function runFfmpeg(
 
     const [code] = await Promise.all([proc.exited, readStdout, readStderr]);
     procs.delete(job.id);
-    updateProgress.run(code === 0 ? 1 : percent, log, job.id);
+    updateProgress.run(code === 0 ? 1 : percent, null, log, job.id);
     return { code, stderrTail: failureReason(stderrTail), outTimeUs };
 }
 
@@ -367,15 +405,16 @@ async function prepareCm(
     jobId: number,
     recording: Recording,
     input: string,
+    signal: AbortSignal,
 ): Promise<EncodeOptions & { chaptersFile: string | null }> {
     const none = { keep: null, chaptersFile: null };
     if (recording.cm_cut === 'off') return none;
 
-    database().prepare('UPDATE encode_jobs SET log = ? WHERE id = ?').run('CM検出中...', jobId);
+    setPhase(jobId, 'cm', 'CMを探しています');
 
     let detection: CmDetection;
     try {
-        detection = await detectCm(input);
+        detection = await detectCm(input, signal);
     } catch (error) {
         console.error(`[cm] 検出に失敗したためCM処理をスキップします: ${error}`);
         return none;
@@ -399,23 +438,35 @@ async function prepareCm(
 }
 
 /** ffmpeg を1回動かす。戻り値は終了コード */
-async function runOnce(args: string[]): Promise<number> {
+async function runOnce(args: string[], signal: AbortSignal): Promise<number> {
     const proc = Bun.spawn([config.ffmpeg, ...args], { stdout: 'ignore', stderr: 'pipe' });
-    return await proc.exited;
+    const kill = () => proc.kill();
+    signal.addEventListener('abort', kill, { once: true });
+    try {
+        return await proc.exited;
+    } finally {
+        signal.removeEventListener('abort', kill);
+    }
 }
 
 /**
  * CM を切り落としたTSを作って、そのパスを返す。作れなければ null。
  * 元のTSはそのまま残す(切り方を間違えても録画は失われない)。
  */
-async function trimCm(jobId: number, input: string, keep: Range[]): Promise<string | null> {
-    database().prepare('UPDATE encode_jobs SET log = ? WHERE id = ?').run('CMを切っています...', jobId);
+async function trimCm(
+    jobId: number,
+    input: string,
+    keep: Range[],
+    signal: AbortSignal,
+): Promise<string | null> {
+    setPhase(jobId, 'cut', 'CMを切っています');
 
     const parts: string[] = [];
     try {
         for (const [i, range] of keep.entries()) {
+            if (signal.aborted) throw new Error('中止されました');
             const part = `${input}.part${i}.ts`;
-            const code = await runOnce(buildSegmentArgs(input, part, range));
+            const code = await runOnce(buildSegmentArgs(input, part, range), signal);
             if (code !== 0 || !existsSync(part)) throw new Error(`区間 ${i} の切り出しに失敗しました`);
             parts.push(part);
         }
@@ -423,7 +474,7 @@ async function trimCm(jobId: number, input: string, keep: Range[]): Promise<stri
         const listFile = `${input}.concat.txt`;
         const trimmed = `${input}.cut.ts`;
         writeFileSync(listFile, concatList(parts));
-        const code = await runOnce(buildConcatArgs(listFile, trimmed));
+        const code = await runOnce(buildConcatArgs(listFile, trimmed), signal);
         rmSync(listFile, { force: true });
         if (code !== 0 || !existsSync(trimmed)) throw new Error('繋ぎ直しに失敗しました');
         return trimmed;
@@ -469,7 +520,28 @@ function fail(jobId: number, recording: Recording, reason: string): void {
     });
 }
 
+/**
+ * 中止で終わったときの後始末。
+ *
+ * 出来かけの作業ファイルだけ捨てて、元の録画には触らない。
+ * どの段階で止めても同じ形で畳めるように1か所にまとめてある。
+ */
+function finishCanceled(jobId: number, recording: Recording, working: string | null): void {
+    removeIfExists(working);
+    database()
+        .prepare(`UPDATE encode_jobs SET state = 'canceled', finished_at = ? WHERE id = ?`)
+        .run(now(), jobId);
+    database()
+        .prepare(`UPDATE recordings SET state = 'recorded', updated_at = ? WHERE id = ?`)
+        .run(now(), recording.id);
+    emit('recordings');
+}
+
 async function runJob(jobId: number): Promise<void> {
+    const controller = new AbortController();
+    aborts.set(jobId, controller);
+    const signal = controller.signal;
+
     const job = queryOne<EncodeJob>('SELECT * FROM encode_jobs WHERE id = ?', jobId)!;
     const recording = queryOne<Recording>('SELECT * FROM recordings WHERE id = ?', job.recording_id);
     const input = recording === undefined ? null : encodeSource(recording);
@@ -481,9 +553,14 @@ async function runJob(jobId: number): Promise<void> {
         return;
     }
 
+    /*
+     * 前に失敗していたら、その痕跡はここで消す。
+     * 残したままだと、録り直して成功しても行に赤い理由が出続ける
+     */
     database()
-        .prepare(`UPDATE recordings SET state = 'encoding', updated_at = ? WHERE id = ?`)
+        .prepare(`UPDATE recordings SET state = 'encoding', error = NULL, updated_at = ? WHERE id = ?`)
         .run(now(), recording.id);
+    emit('recordings');
 
     const output = libraryPath(recording, '.mkv');
     mkdirSync(dirname(output), { recursive: true });
@@ -500,11 +577,13 @@ async function runJob(jobId: number): Promise<void> {
     let decoded: string | null = null;
     let sourceTs = input;
     if (isScrambled(input)) {
-        database().prepare('UPDATE encode_jobs SET log = ? WHERE id = ?').run('スクランブル解除中...', jobId);
+        setPhase(jobId, 'descramble', 'スクランブルを解いています');
         const target = `${input}.decoded.ts`;
-        const result = await descramble(input, target);
+        const result = await descramble(input, target, signal);
         if (!result.ok) {
             removeIfExists(target);
+            // 中止で切ったときは失敗にしない。下の後始末で canceled として畳む
+            if (canceled.has(jobId)) return finishCanceled(jobId, recording, target);
             fail(jobId, recording, `スクランブルを解除できませんでした: ${result.error}`);
             return;
         }
@@ -518,7 +597,8 @@ async function runJob(jobId: number): Promise<void> {
         }
     }
 
-    const encodeOptions = await prepareCm(jobId, recording, sourceTs);
+    const encodeOptions = await prepareCm(jobId, recording, sourceTs, signal);
+    if (canceled.has(jobId)) return finishCanceled(jobId, recording, decoded);
 
     // CMを実際に切る場合は、エンコードの前にTSの段階で切っておく。
     // エンコードのフィルタで切ると字幕のタイミングを追従させられず落とすことになる
@@ -526,9 +606,16 @@ async function runJob(jobId: number): Promise<void> {
     let trimmed: string | null = null;
     const keep = encodeOptions.keep ?? null;
     if (keep !== null && keep.length > 0) {
-        trimmed = await trimCm(jobId, sourceTs, keep);
+        trimmed = await trimCm(jobId, sourceTs, keep, signal);
         if (trimmed !== null) source = trimmed;
     }
+    if (canceled.has(jobId)) {
+        removeIfExists(trimmed);
+        removeIfExists(encodeOptions.chaptersFile);
+        return finishCanceled(jobId, recording, decoded);
+    }
+
+    setPhase(jobId, 'encode', '');
 
     let result = await runFfmpeg(
         job,
@@ -559,17 +646,8 @@ async function runJob(jobId: number): Promise<void> {
     removeIfExists(trimmed);
     removeIfExists(decoded);
 
-    if (canceled.has(jobId)) {
-        // 出来かけを捨てるだけ。元のファイルには触らない
-        removeIfExists(working);
-        database()
-            .prepare(`UPDATE encode_jobs SET state = 'canceled', finished_at = ? WHERE id = ?`)
-            .run(now(), jobId);
-        database()
-            .prepare(`UPDATE recordings SET state = 'recorded', updated_at = ? WHERE id = ?`)
-            .run(now(), recording.id);
-        return;
-    }
+    // 出来かけを捨てるだけ。元のファイルには触らない
+    if (canceled.has(jobId)) return finishCanceled(jobId, recording, working);
 
     if (result.code !== 0) {
         removeIfExists(working);
@@ -659,6 +737,8 @@ export function pump(): void {
 
         const jobId = next.id;
         runningJobs.add(jobId);
+        // 待機中が走り出したことも伝える。押した直後に何も変わらないと止まって見える
+        emit('recordings');
         void runJob(jobId)
             .catch((error) => {
                 database()
@@ -670,7 +750,9 @@ export function pump(): void {
             .finally(() => {
                 runningJobs.delete(jobId);
                 procs.delete(jobId);
+                aborts.delete(jobId);
                 canceled.delete(jobId);
+                emit('recordings');
                 // 空いた枠に次のジョブを入れる
                 pump();
             });
@@ -684,7 +766,8 @@ export function pump(): void {
 export function requeueOrphanedJobs(): number {
     return database()
         .prepare(
-            `UPDATE encode_jobs SET state = 'queued', percent = 0, started_at = NULL WHERE state = 'running'`,
+            `UPDATE encode_jobs SET state = 'queued', phase = 'encode', percent = 0, eta_ms = NULL,
+                    started_at = NULL WHERE state = 'running'`,
         )
         .run().changes;
 }

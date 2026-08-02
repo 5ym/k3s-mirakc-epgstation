@@ -38,6 +38,13 @@ export const ADDED_COLUMNS: { table: string; column: string; definition: string 
     { table: 'rules', column: 'search_fields', definition: "TEXT NOT NULL DEFAULT 'name,description'" },
     // ARIB のサービス種別。1 がデジタルTV
     { table: 'services', column: 'service_type', definition: 'INTEGER NOT NULL DEFAULT 1' },
+    /*
+     * エンコードのどの段階か。'encode' 以外は ffmpeg が回る前の下ごしらえで、
+     * 長いものだと数十分かかる。進み具合が出せないので、代わりに段階を出す
+     */
+    { table: 'encode_jobs', column: 'phase', definition: "TEXT NOT NULL DEFAULT 'encode'" },
+    // 残り時間の見込み(ms)。ffmpeg の speed から出す
+    { table: 'encode_jobs', column: 'eta_ms', definition: 'INTEGER' },
 ];
 
 export const SCHEMA = `
@@ -194,7 +201,10 @@ CREATE TABLE IF NOT EXISTS encode_jobs (
     recording_id INTEGER NOT NULL,
     -- queued | running | done | failed | canceled
     state TEXT NOT NULL DEFAULT 'queued',
+    -- descramble | cm | cut | encode。running の間、いまどの段階かを表す
+    phase TEXT NOT NULL DEFAULT 'encode',
     percent REAL NOT NULL DEFAULT 0,
+    eta_ms INTEGER,
     log TEXT NOT NULL DEFAULT '',
     attempts INTEGER NOT NULL DEFAULT 0,
     error TEXT,

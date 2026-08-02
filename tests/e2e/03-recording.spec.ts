@@ -57,9 +57,11 @@ test.describe('録画とエンコード', () => {
         expect(videoPath).toContain('/tmp/denpa-e2e/library/');
         expect(videoPath).toContain('.mkv');
 
-        // CM検出が走り、既定のチャプター付与として記録されていること
-        // 出るのは検出した区間。設定そのものは全体設定なので一覧には出さない
-        await expect(recording.getByTestId('cm-info')).toContainText('CM 5:00-6:00');
+        // CM検出が走り、既定のチャプター付与として記録されていること。
+        // どこを検出したかは一覧に出さず、行を押した詳細で見せる (長くて場所を食うため)
+        await recording.locator('td').first().click();
+        await expect(page.getByTestId('detail-cm')).toContainText('5:00-6:00');
+        await page.getByTestId('detail-close').click();
 
         // 実際に録れた長さが記録されていること。番組表の尺は予定でしかなく、
         // 途中で止めたときは実物と合わない
@@ -159,7 +161,9 @@ test.describe('CMの実カット', () => {
 
         await goto(page, '/');
         const recording = page.locator(recordingRow);
-        await expect(recording.getByTestId('cm-info')).toContainText('CM 5:00-6:00');
+        await recording.locator('td').first().click();
+        await expect(page.getByTestId('detail-cm')).toContainText('5:00-6:00');
+        await page.getByTestId('detail-close').click();
 
         // 字幕はエンコードの前にTSを切ることで残している。
         // フィルタで切っていた頃は -sn で落とすしかなかった

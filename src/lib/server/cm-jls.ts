@@ -94,17 +94,25 @@ function findAvs(input: string, stdout: string): string | null {
     return newest?.path ?? (fromStdout === null ? null : fromStdout[0]);
 }
 
-export async function detectWithJls(input: string, duration: number): Promise<{ cm: Range[]; note: string }> {
+export async function detectWithJls(
+    input: string,
+    duration: number,
+    signal?: AbortSignal,
+): Promise<{ cm: Range[]; note: string }> {
     const command = config.cmJlsCommand.replaceAll('{input}', input);
     const proc = Bun.spawn(['sh', '-c', command], { stdout: 'pipe', stderr: 'pipe' });
 
     const timer = setTimeout(() => proc.kill(), config.cmDetectTimeout);
+    // 実時間の数分の一かかる。中止を押されたら止める
+    const kill = () => proc.kill();
+    signal?.addEventListener('abort', kill, { once: true });
     const [stdout, stderr] = await Promise.all([
         text(proc.stdout as ReadableStream<Uint8Array>),
         text(proc.stderr as ReadableStream<Uint8Array>),
     ]);
     const code = await proc.exited;
     clearTimeout(timer);
+    signal?.removeEventListener('abort', kill);
 
     if (code !== 0) {
         return { cm: [], note: `join_logo_scp が失敗 (code ${code}): ${stderr.slice(-500)}` };

@@ -3,9 +3,9 @@ import { detectPlatform } from '$lib/play';
 import { enabled as authEnabled } from '$lib/server/auth';
 import { database, queryAll, queryOne } from '$lib/server/db';
 import { cancel as cancelEncode, enqueue, pump } from '$lib/server/encoder';
+import { emit } from '$lib/server/events';
 import { deleteRecordingFiles, reconcile } from '$lib/server/files';
 import { cancel, restore } from '$lib/server/reservations';
-import { resolveConflicts } from '$lib/server/scheduler';
 import { settings } from '$lib/server/settings';
 import { encodeSource } from '$lib/source';
 import type { EncodeJob, Recording, Reservation } from '$lib/types';
@@ -16,7 +16,9 @@ interface RecordingRow extends Recording {
     /** 動いているエンコード。無ければ null。行の状態としてそのまま出す */
     job_id: number | null;
     job_state: EncodeJob['state'] | null;
+    job_phase: EncodeJob['phase'] | null;
     job_percent: number | null;
+    job_eta_ms: number | null;
     job_log: string | null;
 }
 
@@ -64,12 +66,19 @@ export function load({ url, request }) {
     const recordings = database()
         .prepare(
             `SELECT r.*, (
-                 -- 失敗の理由は詳細で見せる。一覧には「失敗」とだけ出す
-                 SELECT j.error FROM encode_jobs j
-                 WHERE j.recording_id = r.id AND j.state = 'failed'
-                 ORDER BY j.id DESC LIMIT 1
+                 /*
+                  * 失敗の理由は詳細で見せる。一覧には「失敗」とだけ出す。
+                  *
+                  * **いちばん新しいジョブが失敗していたときだけ**出す。
+                  * 「失敗したジョブのうち最新」を拾っていた頃は、録り直して成功しても
+                  * 前の失敗が消えずに残っていた
+                  */
+                 SELECT CASE WHEN j2.state = 'failed' THEN j2.error END FROM encode_jobs j2
+                 WHERE j2.recording_id = r.id
+                 ORDER BY j2.id DESC LIMIT 1
              ) AS encode_error,
-             j.id AS job_id, j.state AS job_state, j.percent AS job_percent, j.log AS job_log
+             j.id AS job_id, j.state AS job_state, j.phase AS job_phase,
+             j.percent AS job_percent, j.eta_ms AS job_eta_ms, j.log AS job_log
              FROM recordings r
              -- 動いているエンコードは録画1本につき高々1つ (encoder.enqueue が重複を弾く)
              LEFT JOIN encode_jobs j ON j.id = (
@@ -80,8 +89,11 @@ export function load({ url, request }) {
              WHERE r.deleted_at IS ${showDeleted ? 'NOT NULL' : 'NULL'}
              -- 録画中のものは予約一覧に出ている。ここにも出すと同じ番組が2箇所に並ぶ
              AND r.state != 'recording'
-             -- 動いているものは状態が変わるので先頭に固定する
-             ORDER BY (j.id IS NOT NULL OR r.state = 'recorded') DESC, r.start_at DESC
+             /*
+              * 並びは放送日順に固定する。エンコードが始まったものを上へ動かしていた頃は、
+              * 眺めている間に行が飛んで、どれを見ていたのか分からなくなっていた
+              */
+             ORDER BY r.start_at DESC
              LIMIT 300`,
         )
         .all() as RecordingRow[];
@@ -151,7 +163,10 @@ export const actions = {
 
     reconcile: () => {
         // 「実体と照合」ボタン。外から消した分をすぐ一覧に反映したいとき用
-        return { success: true, reconcile: reconcile() };
+        const result = reconcile();
+        // 押した本人以外の画面も更新する。同じものを見ている端末が食い違うのを防ぐ
+        emit('recordings');
+        return { success: true, reconcile: result };
     },
 
     /** 取り消した予約を戻す。ルールは作り直さないので、ここからしか戻せない */
@@ -172,11 +187,6 @@ export const actions = {
         const id = Number(form.get('id'));
         if (!Number.isFinite(id)) return fail(400, { message: '予約IDが不正です' });
         await cancel(id);
-        return { success: true };
-    },
-
-    resolve: async () => {
-        await resolveConflicts();
         return { success: true };
     },
 };

@@ -56,7 +56,10 @@ export function parseSilences(stderr: string): { silences: Silence[]; duration: 
 }
 
 /** ffmpeg を1パス流して無音位置を取る。映像はデコードしないので実時間の数十分の一で終わる */
-export async function detectSilences(input: string): Promise<{ silences: Silence[]; duration: number }> {
+export async function detectSilences(
+    input: string,
+    signal?: AbortSignal,
+): Promise<{ silences: Silence[]; duration: number }> {
     const proc = Bun.spawn(
         [
             config.ffmpeg,
@@ -76,9 +79,16 @@ export async function detectSilences(input: string): Promise<{ silences: Silence
         { stdout: 'ignore', stderr: 'pipe' },
     );
 
-    const stderr = await text(proc.stderr as ReadableStream<Uint8Array>);
-    await proc.exited;
-    return parseSilences(stderr);
+    // 長い録画だと数分かかる。中止を押されたら ffmpeg ごと止める
+    const kill = () => proc.kill();
+    signal?.addEventListener('abort', kill, { once: true });
+    try {
+        const stderr = await text(proc.stderr as ReadableStream<Uint8Array>);
+        await proc.exited;
+        return parseSilences(stderr);
+    } finally {
+        signal?.removeEventListener('abort', kill);
+    }
 }
 
 /** 無音の中央を境界とみなす。無音そのものはCM側にも本編側にも属さないため */
@@ -221,18 +231,18 @@ export interface CmDetection {
  * jls を選んでいても、ロゴデータ未整備などで結果が空なら無音ベースに落とす
  * (何も検出できないよりは、チャプターだけでも付いたほうが使えるため)。
  */
-export async function detectCm(input: string): Promise<CmDetection> {
+export async function detectCm(input: string, signal?: AbortSignal): Promise<CmDetection> {
     if (config.cmDetector === 'jls') {
         const duration = await probeDuration(input);
         if (Number.isFinite(duration)) {
             const { detectWithJls } = await import('./cm-jls');
-            const result = await detectWithJls(input, duration);
+            const result = await detectWithJls(input, duration, signal);
             if (result.cm.length > 0) return { cm: result.cm, duration, note: result.note };
             console.warn(`[cm] jls で検出できなかったため無音検出に切り替えます: ${result.note}`);
         }
     }
 
-    const { silences, duration } = await detectSilences(input);
+    const { silences, duration } = await detectSilences(input, signal);
     return {
         cm: detectCmRanges(silences, duration),
         duration,

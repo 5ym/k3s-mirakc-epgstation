@@ -58,6 +58,36 @@ export function percent(value: number): string {
     return `${Math.round(value * 100)}%`;
 }
 
+/**
+ * 残り時間の見込み。分より細かくは出さない。
+ * 秒まで出すと数字が落ち着かず、かえって読みにくい。
+ */
+export function eta(ms: number | null): string {
+    if (ms === null || !Number.isFinite(ms) || ms <= 0) return '';
+    const min = Math.round(ms / 60000);
+    if (min < 1) return 'あと1分未満';
+    return `あと${durationMs(min * 60000)}`;
+}
+
+/**
+ * エンコードの段階。ffmpeg が回る前の下ごしらえは進み具合を出せないので、
+ * 何をしているところなのかを状態として出す。
+ */
+export const PHASE_LABEL: Record<string, string> = {
+    descramble: 'スクランブル解除中',
+    cm: 'CM検出中',
+    cut: 'CMカット中',
+    encode: 'エンコード中',
+};
+
+/** 行の状態。エンコードが動いていればその段階、そうでなければ録画の状態 */
+export function encodeLabel(job: { state: string; phase: string | null } | null): string | null {
+    if (job === null) return null;
+    if (job.state === 'queued') return 'エンコード待ち';
+    if (job.state !== 'running') return null;
+    return PHASE_LABEL[job.phase ?? 'encode'] ?? 'エンコード中';
+}
+
 /** daisyUI の badge 色。状態が一目で分かるようにする */
 export function badgeClass(state: string): string {
     switch (state) {

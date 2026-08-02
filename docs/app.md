@@ -45,7 +45,6 @@ EPGStation の置き換えとして作ったもので、エンコード設定は
 | `src/lib/server/config.ts` | 環境変数 |
 | `src/lib/server/settings.ts` | 画面から変えられる設定 (環境変数を初期値にDBで上書き) |
 | `src/lib/server/db.ts` / `schema.ts` | SQLite と スキーマ |
-| `scripts/repair.ts` | 引き継ぎで崩れたデータを直す道具 (使い捨て) |
 
 ## 状態遷移
 
@@ -132,30 +131,6 @@ mirakc の親として動くエージェント。なぜ親を置いているか�
 | `mirakc/scan.ts` | 物理チャンネルの総当たり |
 | `mirakc/config.ts` | mirakc の `config.yml` の読み書き |
 | `mirakc/config.yml` | 初回に配る設定の雛形 |
-
-## 引き継ぎで崩れたデータを直す
-
-移行のロジック自体は直してあるので、これから引き継ぐ人には要らない。
-**既に引き継いでしまった環境を直すためだけ**の使い捨て (`scripts/repair.ts`)。
-
-```sh
-# 何をするかを出すだけ
-kubectl -n epg exec deploy/denpa -- bun scripts/repair.ts
-# 実際に直す
-kubectl -n epg exec deploy/denpa -- bun scripts/repair.ts --apply
-
-# docker compose なら
-docker compose -f compose.prod.yml exec denpa bun scripts/repair.ts --apply
-```
-
-直すのは2つ。
-
-- **ルールのジャンル指定** — `{genre, subGenre}` のまま入っているものを `"7-0"` に直し、
-  引けない値は落とす
-- **保存先に入ってしまった生TS** — 作業領域へ移して `ts_path` に付け替える。
-  `.nfo` とサムネイルも片付け、空になったフォルダは畳む
-
-何度実行しても同じ結果になる。
 
 ## テスト
 

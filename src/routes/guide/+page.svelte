@@ -108,15 +108,10 @@
         <div class="badge badge-lg badge-ghost" data-testid="counts">
             番組 {data.counts.programs} / 局 {data.counts.services}
         </div>
-        <!-- 番組表が古いと気づくのはこの画面なので、取り直すのもここに置く -->
-        <form method="POST" action="?/sync" use:submitting>
-            <button class="btn btn-sm" data-testid="sync-button">EPGを今すぐ取得</button>
-        </form>
-        {#if form?.sync}
-            <span class="text-sm" data-testid="sync-result">
-                局 {form.sync.services} / 番組 {form.sync.programs} / 新規予約 {form.sync.reserved}
-            </span>
-        {/if}
+        <!--
+            「EPGを今すぐ取得」は置いていない。mirakc が番組表を更新したら
+            その場で知らせてくるので (docs/data.md)、押す前に入っている
+        -->
     </div>
     <!--
         検索と条件の編集はルール画面に寄せてある。条件を2箇所で書けるようにすると
@@ -178,7 +173,7 @@
         <p class="text-base-content/60">
             {TYPE_LABEL[
                 data.type
-            ]}のチャンネルがありません。ダッシュボードで「EPGを今すぐ取得」を実行してください。
+            ]}のチャンネルがありません。チューナー画面でチャンネルスキャンを実行してください。
         </p>
     </div>
 {:else}

@@ -37,12 +37,6 @@ test.describe('ダッシュボードと画面遷移', () => {
         await expect(page.getByTestId('status-card')).toContainText('Fake Card Reader');
     });
 
-    test('ダッシュボードのボタンからEPGを取り直せる', async ({ page }) => {
-        await goto(page, '/guide');
-        await page.getByTestId('sync-button').click();
-        await expect(page.getByTestId('sync-result')).toContainText('局 3');
-    });
-
     test('番組表はグリッドで出て、キーワード検索ではリストになる', async ({ page }) => {
         await goto(page, '/guide');
 
@@ -111,21 +105,22 @@ test.describe('ダッシュボードと画面遷移', () => {
     });
 
     test('アクション中はボタンを押せなくし、ローディングを出す', async ({ page }) => {
-        await goto(page, '/guide');
+        await goto(page, '/');
 
-        // EPG取得は実機だと数秒かかる。その間に二度押しできないことを確かめたいので遅らせる
-        await page.route('**/guide?/sync', async (route) => {
+        // 照合は録画の数だけファイルを見に行くので実機では数秒かかる。
+        // その間に二度押しできないことを確かめたいので遅らせる
+        await page.route('**/?/reconcile', async (route) => {
             await new Promise((resolve) => setTimeout(resolve, 2000));
             await route.continue();
         });
 
-        const button = page.getByTestId('sync-button');
+        const button = page.getByTestId('reconcile-button');
         await button.click();
 
         await expect(button).toBeDisabled();
         await expect(page.getByTestId('loading-bar')).toHaveAttribute('data-loading', 'true');
 
-        await expect(page.getByTestId('sync-result')).toBeVisible();
+        await expect(page.getByTestId('reconcile-result')).toBeVisible();
         await expect(button).toBeEnabled();
         await expect(page.getByTestId('loading-bar')).not.toHaveAttribute('data-loading', 'true');
     });
@@ -143,12 +138,12 @@ test.describe('ダッシュボードと画面遷移', () => {
             }
         });
 
-        // 予約の競合を計算し直すと reservations が飛ぶ
-        await page.getByRole('button', { name: '競合を再計算' }).click();
+        // 実体と照合すると recordings が飛ぶ
+        await page.getByTestId('reconcile-button').click();
 
         await expect
             .poll(async () => await page.evaluate(() => (window as unknown as { seen: string[] }).seen))
-            .toContain('reservations');
+            .toContain('recordings');
     });
 
     test('番組表の検索窓はルール画面で結果を出し、そのままルールにできる', async ({ page, request }) => {

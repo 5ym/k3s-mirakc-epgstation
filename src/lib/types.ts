@@ -146,11 +146,20 @@ export interface Recording {
 
 export type EncodeState = 'queued' | 'running' | 'done' | 'failed' | 'canceled';
 
+/**
+ * エンコードの段階。`encode` 以外は ffmpeg が回る前の下ごしらえで、
+ * 進み具合が出せない代わりにこれを状態として出す。
+ */
+export type EncodePhase = 'descramble' | 'cm' | 'cut' | 'encode';
+
 export interface EncodeJob {
     id: number;
     recording_id: number;
     state: EncodeState;
+    phase: EncodePhase;
     percent: number;
+    /** 残り時間の見込み(ms)。分からない間は null */
+    eta_ms: number | null;
     log: string;
     attempts: number;
     error: string | null;

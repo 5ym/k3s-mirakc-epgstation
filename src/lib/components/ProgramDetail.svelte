@@ -1,7 +1,7 @@
 <script lang="ts">
     import type { Snippet } from 'svelte';
     import { type Audio, audioLabel, type Genre, genreLabel, videoLabel } from '$lib/arib';
-    import { dateTime, duration, time } from '$lib/format';
+    import { cmRanges, dateTime, duration, time } from '$lib/format';
     import type { ProgramDetail } from '$lib/types';
 
     /**
@@ -15,8 +15,16 @@
         program,
         onclose,
         error = null,
+        cm = null,
         actions,
-    }: { program: ProgramDetail; onclose: () => void; error?: string | null; actions?: Snippet } = $props();
+    }: {
+        program: ProgramDetail;
+        onclose: () => void;
+        error?: string | null;
+        /** 検出したCM区間 (JSON)。録画から開いたときだけ入る */
+        cm?: string | null;
+        actions?: Snippet;
+    } = $props();
 
     /** 詳細情報。mirakc が拾った「出演者」などの見出し付きテキスト */
     function extended(json: string | null): [string, string][] {
@@ -46,6 +54,7 @@
     );
     const audios = $derived(parse<Audio>(program.audios).map(audioLabel));
     const video = $derived(videoLabel(program.video_resolution, program.video_type));
+    const cmText = $derived(cmRanges(cm));
 </script>
 
 <div class="modal modal-open" role="dialog" data-testid="program-detail">
@@ -82,6 +91,14 @@
                 <div class="text-base-content/70 text-sm whitespace-pre-wrap">{body}</div>
             </div>
         {/each}
+
+        {#if cmText}
+            <!-- どこをCMとみなしたか。一覧に出すと長くて場所を食うので、見たいときだけ -->
+            <div class="mt-3" data-testid="detail-cm">
+                <div class="text-sm font-medium">CM</div>
+                <div class="text-base-content/70 text-sm break-words">{cmText}</div>
+            </div>
+        {/if}
 
         {#if error}
             <!-- エンコードが失敗した理由。一覧には「失敗」とだけ出して、中身はここで見せる -->

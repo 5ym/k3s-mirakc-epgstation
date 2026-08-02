@@ -5,10 +5,11 @@
     import { detectPlatform, type Platform, playLinks, withCredentials } from '$lib/play';
     import {
         badgeClass,
-        cmRanges,
         date,
         dateTime,
         duration,
+        encodeLabel,
+        eta,
         percent,
         recordedDuration,
         size,
@@ -66,6 +67,8 @@
     let detail = $state<Detail | null>(null);
     /** その行のエンコード失敗の理由。詳細の中で見せる */
     let detailError = $state<string | null>(null);
+    /** その行で検出したCM区間。長いので一覧には出さず、詳細でだけ見せる */
+    let detailCm = $state<string | null>(null);
 
     /** 続けて別の行を押したとき、遅れて届いた前の結果で上書きされないようにする */
     let opened = 0;
@@ -89,9 +92,11 @@
         programId: number | null,
         row: Row,
         error: string | null = null,
+        cm: string | null = null,
     ): Promise<void> {
         const token = ++opened;
         detailError = error;
+        detailCm = cm;
         detail = {
             ...row,
             extended: null,
@@ -126,10 +131,11 @@
         programId: number | null,
         row: Row,
         error: string | null = null,
+        cm: string | null = null,
     ): void {
         if (event instanceof KeyboardEvent && event.key !== 'Enter') return;
         if ((event.target as HTMLElement).closest('a, button, input, label')) return;
-        void openDetail(programId, row, error);
+        void openDetail(programId, row, error, cm);
     }
 </script>
 
@@ -170,14 +176,13 @@
         <section class="order-2 min-w-0 lg:order-none lg:col-span-2 lg:flex lg:min-h-0 lg:flex-col">
             <div class="mb-2 flex min-h-8 flex-wrap items-center justify-between gap-2">
                 <h2 class="text-lg font-bold">予約</h2>
-                <div class="flex gap-2">
-                    <a class="btn btn-sm" href={data.showFinished ? '/' : '/?all=1'}>
-                        {data.showFinished ? '進行中のみ' : '完了分も表示'}
-                    </a>
-                    <form method="POST" action="?/resolve" use:submitting>
-                        <button class="btn btn-sm">競合を再計算</button>
-                    </form>
-                </div>
+                <!--
+                    「競合を再計算」は置いていない。番組表を取り直したときとルールを
+                    いじったときに必ず走るので、押す機会が無かった
+                -->
+                <a class="btn btn-sm" href={data.showFinished ? '/' : '/?all=1'}>
+                    {data.showFinished ? '進行中のみ' : '完了分も表示'}
+                </a>
             </div>
 
             <!--
@@ -330,8 +335,10 @@
                                 data-duration-ms={rec.duration_ms}
                                 class="hover cursor-pointer"
                                 tabindex="0"
-                                onclick={(event) => rowClick(event, rec.program_id, rec, rec.encode_error)}
-                                onkeydown={(event) => rowClick(event, rec.program_id, rec, rec.encode_error)}
+                                onclick={(event) =>
+                                    rowClick(event, rec.program_id, rec, rec.encode_error, rec.cm_ranges)}
+                                onkeydown={(event) =>
+                                    rowClick(event, rec.program_id, rec, rec.encode_error, rec.cm_ranges)}
                             >
                                 <td class="whitespace-nowrap">
                                     {dateTime(rec.start_at)}
@@ -364,13 +371,8 @@
                                             {/if}
                                         </div>
                                     {/if}
-                                    {#if rec.cm_cut !== 'off' && cmRanges(rec.cm_ranges)}
-                                        <!-- 何を検出したかは録画ごとに違うので出す。
-                                         コーデックとCMの設定そのものは全体設定なので出さない -->
-                                        <div class="text-base-content/60 text-xs" data-testid="cm-info">
-                                            CM {cmRanges(rec.cm_ranges)}
-                                        </div>
-                                    {/if}
+                                    <!-- CM をどこで検出したかは行に出さない。長くて場所を食う割に
+                                         普段は見ないので、行を押したときの詳細に回す -->
                                 </td>
                                 <td class="hidden whitespace-nowrap sm:table-cell">{size(rec.ts_size)}</td>
                                 <td class="whitespace-nowrap">
@@ -384,37 +386,26 @@
                                     >
                                         {#if rec.deleted_at !== null}
                                             削除済み
-                                        {:else if rec.job_state === 'running'}
-                                            エンコード中
-                                        {:else if rec.job_state === 'queued'}
-                                            エンコード待ち
                                         {:else}
-                                            {stateLabel(rec.state)}
+                                            {encodeLabel(
+                                                rec.job_state === null
+                                                    ? null
+                                                    : { state: rec.job_state, phase: rec.job_phase },
+                                            ) ?? stateLabel(rec.state)}
                                         {/if}
                                     </span>
                                     <!--
-                                    進み具合は状態のすぐ下に出す。別のカードに分けていた頃は
-                                    同じ番組が2箇所に並び、増えるたびに表が下へずれていた
-                                -->
-                                    {#if rec.job_id !== null}
-                                        <div class="mt-1 w-28" data-testid="encode-progress">
-                                            <progress
-                                                class="progress progress-primary h-1 w-full"
-                                                value={rec.job_percent ?? 0}
-                                                max="1"
-                                            ></progress>
-                                            <div class="text-base-content/60 text-xs">
-                                                {percent(rec.job_percent ?? 0)}
-                                            </div>
-                                            {#if rec.job_log}
-                                                <!-- 速さや残りはここでしか分からない。折り返して全部出す -->
-                                                <div
-                                                    class="text-base-content/60 text-xs break-words whitespace-normal"
-                                                    data-testid="encode-log"
-                                                >
-                                                    {rec.job_log}
-                                                </div>
-                                            {/if}
+                                        エンコード中だけ、割合と残りの見込みを状態の下に添える。
+                                        ffmpeg が回っていない段階 (解除中・CM検出中) は
+                                        進み具合が取れないので、状態だけを出す
+                                    -->
+                                    {#if rec.job_state === 'running' && rec.job_phase === 'encode'}
+                                        <div
+                                            class="text-base-content/60 mt-0.5 text-xs"
+                                            data-testid="encode-progress"
+                                        >
+                                            {percent(rec.job_percent ?? 0)}
+                                            {#if eta(rec.job_eta_ms)}・{eta(rec.job_eta_ms)}{/if}
                                         </div>
                                     {/if}
                                 </td>
@@ -520,6 +511,26 @@
                                     </div>
                                 </td>
                             </tr>
+                            {#if rec.job_id !== null}
+                                <!--
+                                    進み具合は行の下に幅いっぱいで敷く。状態の列に押し込むと
+                                    細くて動きが読めないし、その列だけ縦に伸びて行が歪む。
+                                    ffmpeg が回っていない段階は割合が出せないので、
+                                    動いていることだけ分かるバーにする
+                                -->
+                                <tr data-testid="encode-bar-row" data-job-id={rec.job_id}>
+                                    <td colspan="5" class="border-t-0 px-4 py-0 pb-2">
+                                        <progress
+                                            class="progress progress-primary block h-1 w-full"
+                                            value={rec.job_phase === 'encode' && rec.job_state === 'running'
+                                                ? (rec.job_percent ?? 0)
+                                                : undefined}
+                                            max="1"
+                                            data-testid="encode-bar"
+                                        ></progress>
+                                    </td>
+                                </tr>
+                            {/if}
                         {:else}
                             <tr><td colspan="5" class="text-base-content/60">録画はありません</td></tr>
                         {/each}
@@ -531,5 +542,5 @@
 </div>
 
 {#if detail}
-    <ProgramDetail program={detail} error={detailError} onclose={() => (detail = null)} />
+    <ProgramDetail program={detail} error={detailError} cm={detailCm} onclose={() => (detail = null)} />
 {/if}
