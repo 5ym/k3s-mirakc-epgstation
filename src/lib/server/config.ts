@@ -29,6 +29,12 @@ const MIN = 60 * SEC;
 
 export const config = {
     mirakurunUrl: str('MIRAKURUN_URL', 'http://mirakurun:40772').replace(/\/+$/, ''),
+    /**
+     * スクランブル解除の受け口。Mirakurun と同じコンテナに居る。
+     * B-CASカードは pcscd 経由でしか読めず、その pcscd は向こう側にしか無いので、
+     * 掛かったまま録れたTSは投げて解いてもらう
+     */
+    descramblerUrl: str('DESCRAMBLER_URL', 'http://mirakurun:40773').replace(/\/+$/, ''),
 
     dbPath: str('DENPA_DB', '/app/data/denpa.db'),
     /** 生TSの置き場。エンコード後は(keep_original でなければ)消える作業領域 */
@@ -37,8 +43,6 @@ export const config = {
     libraryDir: str('LIBRARY_DIR', '/library'),
 
     ffmpeg: str('FFMPEG', '/usr/local/bin/ffmpeg'),
-    // スクランブルが掛かったまま録れてしまったTSを、エンコードの前に解くのに使う
-    recisdb: str('RECISDB', '/usr/bin/recisdb'),
     encodeConcurrency: num('ENCODE_CONCURRENCY', 1),
     /** 先頭が壊れていて初期化に失敗したときに頭を捨てて再試行する秒数 (enc.js 由来) */
     encodeRetrySeek: num('ENCODE_RETRY_SEEK', 0.2),

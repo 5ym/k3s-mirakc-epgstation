@@ -1,4 +1,5 @@
 import { closeSync, openSync, readSync } from 'node:fs';
+import { relative } from 'node:path';
 import { config } from './config';
 
 /**
@@ -10,6 +11,12 @@ import { config } from './config';
  *
  * 録画そのものは止めない(電波は二度と戻ってこないので、暗号のままでも残す)。
  * 代わりにエンコードの前に見て、掛かったままならその場で解く。
+ *
+ * 解くのは Mirakurun 側。カードは pcscd 経由でしか読めず、その pcscd は
+ * Mirakurun のコンテナに居る。socket を共有して denpa から直接読ませていたが
+ * カードを開けないままだったので、カードを持っている側に頼む形にしてある
+ * (mirakurun/descrambler.mjs)。生TSの置き場は両方のコンテナに見せてあり、
+ * やり取りするのはパスだけ。
  */
 
 /** MPEG-TS のパケット長 */
@@ -62,19 +69,76 @@ export function isScrambled(path: string): boolean {
     return scrambledRatio(path) > THRESHOLD;
 }
 
+export interface CardStatus {
+    ok: boolean;
+    /** 画面にそのまま出す一言 */
+    message: string;
+    readers: string[];
+}
+
 /**
- * recisdb でスクランブルを解く。成功したら出力先のパスを返す。
+ * カードリーダーの状態。設定画面に出す。
  *
- * カードは Mirakurun 側の pcscd が握っている。その socket を共有しているので、
- * こちらは recisdb を呼ぶだけで読める。カードが無ければ失敗するので、
- * そのときは元のまま(スクランブルされたまま)エンコードに進んで失敗させる。
+ * pcscd が動いていてもリーダーを掴めていないことがある(USBが黙る)。
+ * そうなると録画は成功したように見えて中身が全部スクランブルされたまま、という
+ * 気づきにくい壊れ方をするので、画面から見えるようにしてある。
+ */
+export async function cardStatus(): Promise<CardStatus> {
+    try {
+        const res = await fetch(`${config.descramblerUrl}/denpa/card`, {
+            signal: AbortSignal.timeout(10_000),
+        });
+        if (!res.ok) {
+            return { ok: false, message: `解除の受け口が ${res.status} を返しました`, readers: [] };
+        }
+        const body = (await res.json()) as Partial<CardStatus>;
+        return {
+            ok: body.ok === true,
+            message: body.message ?? '',
+            readers: body.readers ?? [],
+        };
+    } catch (error) {
+        return { ok: false, message: `解除の受け口に繋がりません: ${error}`, readers: [] };
+    }
+}
+
+/**
+ * スクランブルを解く。成功したら output に解けたTSが出来ている。
+ *
+ * 渡すのはパスだけで、TS そのものは流さない。生TSの置き場は Mirakurun 側にも
+ * 見せてあるので、読むのも書くのも向こうが直接やる。数十GBになることがあり、
+ * HTTP で往復させる意味が無い(そもそも Bun の fetch は送りながら受け取れず、
+ * 大きいものを投げると詰まる)。
+ *
+ * recisdb はカードが読めないとき「黙って素通しする」ので、終了コードでは
+ * 成否が分からない。出来上がったものを見て判断する。
  */
 export async function descramble(input: string, output: string): Promise<{ ok: boolean; error: string }> {
-    const proc = Bun.spawn([config.recisdb, 'decode', '-i', input, output], {
-        stdout: 'ignore',
-        stderr: 'pipe',
-    });
-    const stderr = await new Response(proc.stderr).text();
-    const code = await proc.exited;
-    return { ok: code === 0, error: stderr.trim().split('\n').slice(-5).join('\n') };
+    // 向こうのマウント先はこちらと同じとは限らないので、置き場からの相対で渡す
+    const from = relative(config.recordedDir, input);
+    const to = relative(config.recordedDir, output);
+    if (from.startsWith('..') || to.startsWith('..')) {
+        return { ok: false, error: `生TSの置き場 (${config.recordedDir}) の外は解除に回せません` };
+    }
+
+    try {
+        const res = await fetch(`${config.descramblerUrl}/denpa/decode`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ input: from, output: to }),
+        });
+        const body = (await res.json()) as { ok?: boolean; error?: string };
+        if (!res.ok || body.ok !== true) {
+            return { ok: false, error: body.error ?? `解除の受け口が ${res.status} を返しました` };
+        }
+    } catch (error) {
+        return { ok: false, error: `解除の受け口に繋がりません: ${error}` };
+    }
+
+    if (isScrambled(output)) {
+        // 素通しされた。ほぼカードが読めていない
+        const card = await cardStatus();
+        return { ok: false, error: `解除しても掛かったままです。${card.message}` };
+    }
+    return { ok: true, error: '' };
 }

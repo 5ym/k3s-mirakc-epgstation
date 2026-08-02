@@ -493,8 +493,11 @@ async function runJob(jobId: number): Promise<void> {
      *
      * カードが読めないとき録画を止めてしまうと電波は二度と戻ってこないので、
      * 録画自体は暗号のままでも残す方針にしてある。解くのはこの時点でよい。
+     * 解くのは Mirakurun 側(カードを持っているのはあちら)。
      */
+    /** 後始末で消す作業ファイル。生TSを置き換えたときは残す側になるので null のまま */
     let decoded: string | null = null;
+    let sourceTs = input;
     if (isScrambled(input)) {
         database().prepare('UPDATE encode_jobs SET log = ? WHERE id = ?').run('スクランブル解除中...', jobId);
         const target = `${input}.decoded.ts`;
@@ -504,9 +507,15 @@ async function runJob(jobId: number): Promise<void> {
             fail(jobId, recording, `スクランブルを解除できませんでした: ${result.error}`);
             return;
         }
-        decoded = target;
+        if (recording.keep_original && recording.ts_path === input) {
+            // 生TSを残す設定なら、残すのは解けたほうだけにする。
+            // 掛かったままのTSを取っておいても、あとから解ける保証は無い
+            renameSync(target, input);
+        } else {
+            decoded = target;
+            sourceTs = target;
+        }
     }
-    const sourceTs = decoded ?? input;
 
     const encodeOptions = await prepareCm(jobId, recording, sourceTs);
 

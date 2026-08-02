@@ -13,10 +13,9 @@ test.describe('ダッシュボードと画面遷移', () => {
     test('EPG取得後に局・番組が反映され、全ページを開ける', async ({ page, request }) => {
         await syncEpg(request);
 
-        // 状態と番組数は番組表に出す。古いことに気づくのはこの画面なので
+        // 番組数は番組表に出す。古いことに気づくのはこの画面なので
         await goto(page, '/guide');
-        await expect(page.getByTestId('status')).toContainText('Mirakurun');
-        await expect(page.locator('.badge').filter({ hasText: '局' })).toContainText('局 3');
+        await expect(page.getByTestId('counts')).toContainText('局 3');
 
         for (const [name, heading] of [
             ['nav-guide', '番組表'],
@@ -27,6 +26,14 @@ test.describe('ダッシュボードと画面遷移', () => {
             await page.getByTestId(name).click();
             await expect(page.getByRole('heading', { level: 1 })).toHaveText(heading);
         }
+    });
+
+    test('設定画面に Mirakurun とカードリーダーの状態が出る', async ({ page }) => {
+        await goto(page, '/settings');
+        // どちらも相手待ちなので後から流れてくる
+        await expect(page.getByTestId('status-mirakurun')).toHaveText('3.9.0-fake');
+        await expect(page.getByTestId('status-card-reader')).toHaveText('OK');
+        await expect(page.getByTestId('status-card')).toContainText('Fake Card Reader');
     });
 
     test('ダッシュボードのボタンからEPGを取り直せる', async ({ page }) => {
@@ -47,10 +54,23 @@ test.describe('ダッシュボードと画面遷移', () => {
         await expect(page.getByTestId('grid-program').first()).toBeVisible();
         await page.getByTestId('type-GR').click();
 
-        // いまが何時かの線が出て、開いた時点でそこまでスクロールされている
+        // いまが何時かの線が出て、開いた時点でそこが見えているところまで動いている。
+        // 位置を offsetTop で測っていた頃は、ナビや見出しの高さまで足し込まれて
+        // その分だけ行き過ぎ、線が上に流れて見えなくなっていた
         await expect(page.getByTestId('now-line')).toBeVisible();
-        const scrolled = await page.getByTestId('guide-grid').evaluate((el) => (el as HTMLElement).scrollTop);
-        expect(scrolled).toBeGreaterThan(0);
+        const view = await page.getByTestId('guide-grid').evaluate((el) => {
+            const grid = el as HTMLElement;
+            const line = grid.querySelector('[data-testid="now-line"]') as HTMLElement;
+            return {
+                scrollTop: grid.scrollTop,
+                // グリッドの上端から見た「いま」の線の位置
+                offset: line.getBoundingClientRect().top - grid.getBoundingClientRect().top,
+                height: grid.clientHeight,
+            };
+        });
+        expect(view.scrollTop).toBeGreaterThan(0);
+        expect(view.offset).toBeGreaterThan(0);
+        expect(view.offset).toBeLessThan(view.height / 2);
 
         // 番組をクリックすると詳細が出る。ここで予約するかどうか決める
         await page.getByTestId('program-button').first().click();

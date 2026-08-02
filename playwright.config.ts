@@ -38,6 +38,9 @@ export default defineConfig({
                 FAKE_MIRAKURUN_PORT: String(MIRAKURUN_PORT),
                 // 尺は tests/fake/services.ts で局ごとに決めている
                 FAKE_SLOTS: '30',
+                // スクランブル解除はパスだけ受け取って直接ファイルを触る。
+                // 本物でも denpa と Mirakurun の両方に同じ置き場を見せている
+                RECORDED_DIR: `${TEST_ROOT}/recorded`,
             },
         },
         {
@@ -63,7 +66,9 @@ export default defineConfig({
                 RECORDED_DIR: `${TEST_ROOT}/recorded`,
                 LIBRARY_DIR,
                 FFMPEG: './tests/fake/ffmpeg.sh',
-                RECISDB: './tests/fake/recisdb.sh',
+                // スクランブル解除の受け口。本物では Mirakurun と同じコンテナの
+                // 別プロセスだが、偽 Mirakurun が同じ口を兼ねている
+                DESCRAMBLER_URL: MIRAKURUN_URL,
                 // 引き継ぎ画面。何も待ち受けていない先を指して、失敗したときの見え方も試す
                 EPGSTATION_RECORDED_DIR: EPGSTATION_DIR,
                 EPGSTATION_DB_HOST: '127.0.0.1',

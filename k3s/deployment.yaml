@@ -24,8 +24,14 @@ spec:
           env:
             - name: TZ
               value: Asia/Tokyo
+            # 掛かったまま録れたTSを解く先。denpa の RECORDED_DIR と同じ実体
+            - name: RECORDED_DIR
+              value: /denpa-recorded
           ports:
             - containerPort: 40772
+            # スクランブル解除の受け口。カードを読めるのはこのコンテナだけなので、
+            # 掛かったまま録れたTSは denpa からここへ投げてもらう
+            - containerPort: 40773
           volumeMounts:
             - name: mirakurun-data
               mountPath: /app-data
@@ -36,10 +42,10 @@ spec:
               mountPath: /dev/bus
             - name: dev-dvb
               mountPath: /dev/dvb
-            # pcscd がここに socket を作る。denpa からも同じものを見せて、
-            # スクランブルの解除だけカードを借りられるようにする
-            - name: pcscd
-              mountPath: /run/pcscd
+            # denpa の生TSの置き場。掛かったまま録れたTSはここで解く。
+            # カードを読めるのはこのコンテナだけなので、denpa はパスだけ寄越す
+            - name: denpa-recorded
+              mountPath: /denpa-recorded
       volumes:
         - name: mirakurun-data
           persistentVolumeClaim:
@@ -47,6 +53,9 @@ spec:
         - name: mirakurun-config
           persistentVolumeClaim:
             claimName: mirakurun-config
+        - name: denpa-recorded
+          persistentVolumeClaim:
+            claimName: denpa-recorded
         - name: dev-bus
           hostPath:
             path: /dev/bus
@@ -55,10 +64,6 @@ spec:
           hostPath:
             path: /dev/dvb
             type: Directory
-        - name: pcscd
-          hostPath:
-            path: /run/denpa-pcscd
-            type: DirectoryOrCreate
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -97,6 +102,10 @@ spec:
               value: x-forwarded-proto
             - name: MIRAKURUN_URL
               value: http://mirakurun:40772
+            # スクランブルの解除は Mirakurun 側に頼む。カードは pcscd 経由でしか
+            # 読めず、その pcscd は向こうのコンテナにしか居ない
+            - name: DESCRAMBLER_URL
+              value: http://mirakurun:40773
             - name: DENPA_DB
               value: /app/data/denpa.db
             - name: RECORDED_DIR
@@ -128,9 +137,6 @@ spec:
               mountPath: /app/recorded
             - name: library
               mountPath: /library
-            # Mirakurun 側の pcscd の socket。カードを直接は掴まない
-            - name: pcscd
-              mountPath: /run/pcscd
       volumes:
         - name: denpa-data
           persistentVolumeClaim:
@@ -141,7 +147,3 @@ spec:
         - name: library
           persistentVolumeClaim:
             claimName: denpa-library
-        - name: pcscd
-          hostPath:
-            path: /run/denpa-pcscd
-            type: DirectoryOrCreate

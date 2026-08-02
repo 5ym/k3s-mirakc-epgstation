@@ -20,30 +20,31 @@
 
     const TYPE_LABEL: Record<string, string> = { GR: '地上波', BS: 'BS', CS: 'CS', SKY: 'SKY' };
 
-    function describe(rule: {
-        service_types: string | null;
-        service_ids: string | null;
-        genres: string | null;
-    }): string {
-        const parts: string[] = [];
+    /** JSON で持っている条件を読む。壊れていれば「条件なし」と同じ扱いにする */
+    function list<T>(json: string | null): T[] {
+        if (json === null || json === '') return [];
         try {
-            if (rule.service_types !== null) {
-                parts.push(...(JSON.parse(rule.service_types) as string[]).map((t) => TYPE_LABEL[t] ?? t));
-            }
-            if (rule.service_ids !== null) {
-                parts.push(
-                    ...(JSON.parse(rule.service_ids) as number[]).map(
-                        (id) => data.services.find((s) => s.id === id)?.name ?? String(id),
-                    ),
-                );
-            }
-            if (rule.genres !== null) {
-                parts.push(...(JSON.parse(rule.genres) as (string | number)[]).map(genreName));
-            }
+            const value = JSON.parse(json);
+            return Array.isArray(value) ? (value as T[]) : [];
         } catch {
-            return 'すべて';
+            return [];
         }
-        return parts.length === 0 ? 'すべて' : parts.join(', ');
+    }
+
+    function channels(rule: { service_types: string | null; service_ids: string | null }): string {
+        const parts = [
+            ...list<string>(rule.service_types).map((t) => TYPE_LABEL[t] ?? t),
+            ...list<number>(rule.service_ids).map(
+                (id) => data.services.find((s) => s.id === id)?.name ?? String(id),
+            ),
+        ];
+        return parts.length === 0 ? '全局' : parts.join(', ');
+    }
+
+    /** 絞り込んでいるジャンル。条件のうち一番見落としやすいので独立した列に出す */
+    function genres(rule: { genres: string | null }): string {
+        const parts = list<string | number>(rule.genres).map(genreName);
+        return parts.length === 0 ? '全ジャンル' : parts.join(', ');
     }
 
     /** チャンネルは50局以上あるので種別ごとにまとめる */
@@ -344,6 +345,7 @@
                 <th>ルール</th>
                 <th>除外</th>
                 <th>チャンネル</th>
+                <th>ジャンル</th>
                 <th>録画</th>
                 <th>優先度</th>
                 <th>予約数</th>
@@ -360,8 +362,22 @@
                         </span>
                     </td>
                     <td class="text-error text-sm">{rule.ignore_keyword || '-'}</td>
-                    <td class="max-w-xs truncate text-sm">{describe(rule)}</td>
-                    <td class="text-sm whitespace-nowrap"> </td>
+                    <td class="max-w-48 text-sm" data-testid="rule-channels">{channels(rule)}</td>
+                    <td class="max-w-48 text-sm" data-testid="rule-genres-label">{genres(rule)}</td>
+                    <!-- 既定と違うところだけ出す。全部並べても見比べにくい -->
+                    <td class="text-sm">
+                        <div class="flex flex-wrap gap-1">
+                            {#if !rule.encode}
+                                <span class="badge badge-ghost badge-sm">TSのみ</span>
+                            {/if}
+                            {#if rule.keep_original}
+                                <span class="badge badge-ghost badge-sm">生TSも残す</span>
+                            {/if}
+                            {#if !rule.free_only}
+                                <span class="badge badge-ghost badge-sm">有料も</span>
+                            {/if}
+                        </div>
+                    </td>
                     <td>{rule.priority}</td>
                     <td>{rule.reservations}</td>
                     <td class="flex flex-nowrap gap-2">
@@ -388,7 +404,7 @@
                     </td>
                 </tr>
             {:else}
-                <tr><td colspan="7" class="text-base-content/60">ルールはまだありません</td></tr>
+                <tr><td colspan="8" class="text-base-content/60">ルールはまだありません</td></tr>
             {/each}
         </tbody>
     </table>

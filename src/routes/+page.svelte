@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { submitting } from '$lib/actions';
+    import { fillViewport, submitting } from '$lib/actions';
     import ProgramDetail from '$lib/components/ProgramDetail.svelte';
     import { liveUpdates } from '$lib/live-updates.svelte';
     import { detectPlatform, type Platform, playLinks, withCredentials } from '$lib/play';
@@ -142,10 +142,11 @@
         </div>
 
         <!--
-            画面の高さに収めて、中だけスクロールさせる。2つ並べたときに、
-            片方が長いともう片方が下に置いていかれるため
+            画面の残りいっぱいまで伸ばして、中だけスクロールさせる。2つ並べたときに、
+            片方が長いともう片方が下に置いていかれるため。
+            高さは実測で決める(class の値はJSが動くまでの当て)
         -->
-        <div class="overflow-auto rounded-box bg-base-100 max-h-[calc(100vh-14rem)] shadow">
+        <div class="overflow-auto rounded-box bg-base-100 max-h-[calc(100dvh-14rem)] shadow" use:fillViewport>
             <table class="table-pin-rows table table-zebra">
                 <thead>
                     <tr>
@@ -294,10 +295,11 @@
         {/if}
 
         <!--
-            画面の高さに収めて、中だけスクロールさせる。2つ並べたときに、
-            片方が長いともう片方が下に置いていかれるため
+            画面の残りいっぱいまで伸ばして、中だけスクロールさせる。2つ並べたときに、
+            片方が長いともう片方が下に置いていかれるため。
+            高さは実測で決める(class の値はJSが動くまでの当て)
         -->
-        <div class="overflow-auto rounded-box bg-base-100 max-h-[calc(100vh-14rem)] shadow">
+        <div class="overflow-auto rounded-box bg-base-100 max-h-[calc(100dvh-14rem)] shadow" use:fillViewport>
             <table class="table-pin-rows table table-zebra">
                 <thead>
                     <tr>

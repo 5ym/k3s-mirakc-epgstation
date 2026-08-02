@@ -5,9 +5,13 @@
  * 決めるので、同じ枠は何度取得しても同じIDになり、予約が別番組に化けない。
  * SLOT_MS を短くすると「数秒後に始まる番組」が作れるので、E2Eで録画完了まで通せる。
  */
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { type FakeService, SERVICES } from './services';
 
 const PORT = Number(process.env.FAKE_MIRAKURUN_PORT ?? 40772);
+/** 生TSの置き場。本物では denpa と同じものを Mirakurun 側にも見せてある */
+const RECORDED_DIR = resolve(process.env.RECORDED_DIR ?? '/recorded');
 const SLOTS = Number(process.env.FAKE_SLOTS ?? 60);
 /** 番組表を丸1日ぶん埋めるための追加分。局ごとの尺に応じて増やす */
 const DAY = 30 * 60 * 60 * 1000;
@@ -81,6 +85,26 @@ function packets(count: number, scrambled: boolean): Uint8Array {
     return buffer;
 }
 
+/**
+ * 偽のスクランブル解除。本物の復号はせず、4バイト目の
+ * transport_scrambling_control を落とすだけ。
+ *
+ * 本物と同じく、渡されるのは生TSの置き場からの相対パス。
+ */
+function unscramble(input: string, output: string): { ok: boolean; error: string } {
+    const from = resolve(RECORDED_DIR, input);
+    const to = resolve(RECORDED_DIR, output);
+    if (!from.startsWith(`${RECORDED_DIR}/`) || !to.startsWith(`${RECORDED_DIR}/`)) {
+        return { ok: false, error: `生TSの置き場 (${RECORDED_DIR}) の外は解除に回せません` };
+    }
+    if (!existsSync(from)) return { ok: false, error: `${from} が見えません` };
+
+    const buffer = readFileSync(from);
+    for (let i = 0; i + 188 <= buffer.length; i += 188) buffer[i + 3] &= 0x3f;
+    writeFileSync(to, buffer);
+    return { ok: true, error: '' };
+}
+
 /** テストから切り替える。カードが読めていない状態を作るため */
 let scrambled = process.env.FAKE_SCRAMBLED === '1';
 
@@ -120,6 +144,34 @@ Bun.serve({
         if (url.pathname === '/__control/scrambled' && request.method === 'POST') {
             scrambled = new URL(request.url).searchParams.get('on') === '1';
             return json({ scrambled });
+        }
+
+        /*
+         * スクランブル解除の受け口。本物では Mirakurun と同じコンテナに居る別プロセス
+         * (mirakurun/descrambler.mjs) で、B-CASカードを持っているのはそちら側。
+         * ここでは同じ口を偽 Mirakurun が兼ねる。
+         */
+        if (url.pathname === '/denpa/card') {
+            return json(
+                scrambled
+                    ? {
+                          ok: false,
+                          pcscd: true,
+                          readers: [],
+                          message: 'pcscd は動いていますが、カードリーダーが見つかりません',
+                      }
+                    : {
+                          ok: true,
+                          pcscd: true,
+                          readers: ['Fake Card Reader 00 00'],
+                          message: 'カードリーダーが見えています (1 台)',
+                      },
+            );
+        }
+        if (url.pathname === '/denpa/decode' && request.method === 'POST') {
+            return request
+                .json()
+                .then((body: { input: string; output: string }) => json(unscramble(body.input, body.output)));
         }
         // チャンネルスキャン。本物は進み具合を改行区切りのテキストで流し続ける
         if (url.pathname === '/api/config/channels/scan' && request.method === 'PUT') {

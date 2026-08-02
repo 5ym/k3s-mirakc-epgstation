@@ -48,9 +48,9 @@
      * 開いたときに「いま」が見えている状態にする。24時間ぶん出るので、
      * 先頭(4:00)のままだと毎回スクロールさせることになる。
      *
-     * 位置は「いま」の行そのものから測る。マスの高さから計算すると、
-     * ヘッダーの高さが変わる(疎通確認のバッジは後から届く)だけでずれる。
-     * 実際にずれたので、レイアウトが落ち着くまで数フレーム見て合わせ直す。
+     * 位置は offsetTop では測れない。offsetTop は「位置指定された親」からの距離で、
+     * ここでは body が親になるため、ナビや見出しの高さまで足し込まれて
+     * その分だけ下に行き過ぎる。実際に見えている位置の差から出す。
      */
     let scrolled = false;
     $effect(() => {
@@ -62,7 +62,8 @@
         // 「いま」を上端ちょうどに置くと直前の番組が見えず、放送中のものが
         // 頭から切れて分かりにくい。画面の4分の1あたりに来るようにする
         const place = () => {
-            target.scrollTop = Math.max(0, mark.offsetTop - target.clientHeight / 4);
+            const top = mark.getBoundingClientRect().top - target.getBoundingClientRect().top;
+            target.scrollTop = Math.max(0, target.scrollTop + top - target.clientHeight / 4);
         };
 
         place();
@@ -109,15 +110,11 @@
 <div class="mb-4 flex flex-wrap items-center justify-between gap-2">
     <div class="flex flex-wrap items-center gap-2">
         <h1 class="text-2xl font-bold">番組表</h1>
-        <!-- 疎通確認は後から流れてくる。場所だけ先に確保して、来たら差し替える -->
-        {#await data.mirakurun}
-            <div class="badge badge-lg badge-ghost" data-testid="status">Mirakurun 確認中</div>
-        {:then mirakurun}
-            <div class="badge badge-lg {mirakurun.ok ? 'badge-success' : 'badge-error'}" data-testid="status">
-                Mirakurun {mirakurun.ok ? (mirakurun.version ?? 'OK') : 'NG'}
-            </div>
-        {/await}
-        <div class="badge badge-lg badge-ghost">番組 {data.counts.programs} / 局 {data.counts.services}</div>
+        <!-- 番組表が古いことに気づくのはこの画面なので、いま何件あるかは出す。
+             Mirakurun 自体の状態は設定画面にまとめてある -->
+        <div class="badge badge-lg badge-ghost" data-testid="counts">
+            番組 {data.counts.programs} / 局 {data.counts.services}
+        </div>
         <!-- 番組表が古いと気づくのはこの画面なので、取り直すのもここに置く -->
         <form method="POST" action="?/sync" use:submitting>
             <button class="btn btn-sm" data-testid="sync-button">EPGを今すぐ取得</button>

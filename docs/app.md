@@ -23,7 +23,7 @@ Mirakurun から EPG と TS を受け取り、予約・録画・エンコード�
 | `src/lib/server/metadata.ts` | .nfo とサムネイル (Kodi など向け) |
 | `src/lib/server/files.ts` | 録画の削除と、実体とDBの突き合わせ |
 | `src/lib/server/serve.ts` | ファイルの配信 (Range 対応) |
-| `src/lib/server/scramble.ts` | スクランブルの検出と、recisdb での解除 |
+| `src/lib/server/scramble.ts` | スクランブルの検出と、Mirakurun 側への解除依頼 |
 | `src/lib/server/scan.ts` | チャンネルスキャン (Mirakurun に投げて進み具合を読む) |
 | `src/lib/server/migrate.ts` | EPGStation からの引き継ぎ |
 | `src/lib/server/dav.ts` | WebDAV (Kodi 向け) |

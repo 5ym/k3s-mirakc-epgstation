@@ -4,6 +4,8 @@ import { config } from '$lib/server/config';
 import { database, now, queryAll, queryOne } from '$lib/server/db';
 import { isVideoCodec } from '$lib/server/encoder';
 import { available as migrateAvailable, source, start, status } from '$lib/server/migrate';
+import { ping } from '$lib/server/mirakurun';
+import { cardStatus } from '$lib/server/scramble';
 import { isStored, saveSettings, settings } from '$lib/server/settings';
 import { send, type Webhook } from '$lib/server/webhook';
 import { EVENTS } from '$lib/webhook-events';
@@ -27,6 +29,12 @@ export function load() {
             source: source.recordedDir,
             status: status(),
         },
+        /*
+         * 外との繋がり具合。await せずに promise のまま返して後から流し込む。
+         * どちらも相手の応答待ちなので、待ってから返すと設定画面そのものが出るのが遅れる
+         */
+        mirakurun: ping(),
+        card: cardStatus(),
     };
 }
 

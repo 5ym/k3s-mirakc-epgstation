@@ -22,4 +22,8 @@ for file in /app-config-defaults/*; do
     fi
 done
 
+# スクランブル解除の受け口。カードを読めるのはこのコンテナだけなので、
+# 掛かったまま録れたTSは denpa からここへ投げてもらって解く
+node /usr/local/bin/descrambler.mjs &
+
 exec /bin/bash ./docker/container-init.sh "$@"

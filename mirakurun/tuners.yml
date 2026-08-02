@@ -3,8 +3,9 @@
 #
 # -e (--exit-on-card-error) を付けるとその場で失敗させられるが、付けていない。
 # 電波は二度と戻ってこないので、スクランブルされたままでも録っておくほうがまし。
-# denpa はエンコードの前にスクランブルを見て、掛かったままならそこで解く
-# (app/src/lib/server/scramble.ts)。
+# denpa はエンコードの前にスクランブルを見て、掛かったままならそこで解き直す
+# (src/lib/server/scramble.ts)。解くのはこのコンテナ側 (descrambler.mjs)。
+# カードは pcscd 経由でしか読めず、その pcscd はここにしか居ないため。
 - name: adapter0
   types:
     - BS

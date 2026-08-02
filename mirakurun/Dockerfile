@@ -15,6 +15,10 @@ RUN apt-get update && apt-get -y install curl procps && \
 # entrypoint が /app-config に無いものだけ写す
 COPY channels.yml tuners.yml /app-config-defaults/
 
+# スクランブル解除の受け口。カードを持っているのはこちら側なので、
+# denpa は解きたいTSを投げて、解けたものを受け取るだけにする
+COPY descrambler.mjs /usr/local/bin/descrambler.mjs
+
 # B-CASカードを読めるようにしてから Mirakurun を起動する
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh

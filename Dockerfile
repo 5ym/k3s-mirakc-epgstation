@@ -81,18 +81,12 @@ ENV NODE_ENV=production \
     FFMPEG=/usr/local/bin/ffmpeg \
     FFPROBE=/usr/local/bin/ffprobe
 
-# recisdb はスクランブルが掛かったまま録れたTSを解くのに使う。カードは
-# Mirakurun 側の pcscd が握っているので、こちらは libpcsclite でその socket に繋ぐだけ
-# (/run/pcscd を両方の Pod で共有している)。チューナーには触らない
-ARG RECISDB_VERSION=1.2.4
+# B-CASカードは触らない。掛かったまま録れたTSの解除は Mirakurun 側の
+# 受け口に投げる(あちらにしか pcscd が居ないため)。recisdb も libpcsclite も要らない
 RUN apt-get update && \
     apt-get -y --no-install-recommends install \
       libopus0 libsvtav1enc2 libx264-164 libdav1d7 libfontconfig1 libfreetype6 \
-      fontconfig ca-certificates tzdata libpcsclite1 curl && \
-    curl -fsSLO https://github.com/kazuki0824/recisdb-rs/releases/download/${RECISDB_VERSION}/recisdb_${RECISDB_VERSION}-1_amd64.deb && \
-    apt-get -y --no-install-recommends install ./recisdb_${RECISDB_VERSION}-1_amd64.deb && \
-    rm -f recisdb_${RECISDB_VERSION}-1_amd64.deb && \
-    apt-get -y purge curl && apt-get -y autoremove && \
+      fontconfig ca-certificates tzdata && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # bun 本体。SvelteKit(adapter-node) の出力を bun で動かす

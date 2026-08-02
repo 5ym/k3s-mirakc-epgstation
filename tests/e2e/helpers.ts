@@ -84,11 +84,23 @@ export function cellOf(page: Page, programId: string) {
  * BSの偽番組は10秒しかなく、番組表のグリッドではマスが潰れて押せない。
  * ここで見たいのは録画そのものなので、予約は画面ではなくアクションに直接投げる。
  */
-export async function reserveSoon(page: Page, request: APIRequestContext, type: string, skip = 0) {
+export async function reserveSoon(
+    page: Page,
+    request: APIRequestContext,
+    type: string,
+    skip = 0,
+    /** 録画のしかた。画面のチェックボックスと同じキーを渡す */
+    options: Record<string, string> = {},
+) {
     await goto(page, `/guide?type=${type}`);
     const cells = await upcoming(page);
     const target = cells[Math.min(skip, cells.length - 1)];
-    const res = await request.post('/guide?/reserve', { form: { programId: target.programId } });
+    // options=1 は「画面のフォームから来た」印。無いと既定のまま扱われる
+    const form =
+        Object.keys(options).length === 0
+            ? { programId: target.programId }
+            : { programId: target.programId, options: '1', ...options };
+    const res = await request.post('/guide?/reserve', { form });
     expect(res.ok()).toBeTruthy();
     return target.programId;
 }
