@@ -70,12 +70,28 @@ describe('コマ数の決め方', () => {
             // 同じ入力を2回開き、片方は ASS、もう片方はビットマップで読む
             expect(args.filter((a) => a === '/in.m2ts')).toHaveLength(2);
             expect(argValue(args, '-c:s:0')).toBe('ass');
-            expect(argValue(args, '-c:s:1')).toBe('dvbsub');
-            // 既定は ASS。焼いたほうを既定にすると VLC がそれを開いて落ちる
+            /*
+             * 焼くほうは dvdsub。dvbsub は ffmpeg が CodecPrivate を書かないので
+             * VLC がトラックごと捨てる (届いても復号が壊れる)。PGS は ffmpeg に
+             * 符号器が無い。VLC が実際に読めるビットマップ字幕はこれだけ
+             */
+            expect(argValue(args, '-c:s:1')).toBe('dvdsub');
+            // 既定は ASS。どの再生側でも素直に出る
             expect(argValue(args, '-disposition:s:0')).toBe('default');
             expect(argValue(args, '-disposition:s:1')).toBe('0');
             expect(argValue(args, '-c:a')).toBe('libopus');
         }
+    });
+
+    test('焼く側には画面の大きさを渡す', () => {
+        // 渡さないと libaribcaption は 1440x1080 とみなすので、
+        // 1920x1080 の録画では字幕だけ横に伸びる
+        const args = buildArgs('/in.m2ts', '/out.mkv', 1, null, 'av1', { canvasSize: '1920x1080' });
+        expect(argValue(args, '-canvas_size')).toBe('1920x1080');
+        // 文字のままのほうには要らない (位置は ASS の座標系で書かれる)
+        expect(args.filter((a) => a === '-canvas_size')).toHaveLength(1);
+        // 大きさが取れなかったときは付けない
+        expect(buildArgs('/in.m2ts', '/out.mkv', 1, null)).not.toContain('-canvas_size');
     });
 
     test('デュアルモノは左右を別トラックに分ける', () => {

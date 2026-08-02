@@ -1,4 +1,5 @@
-import { mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import type { Range } from './cm';
 import { config } from './config';
 import { text } from './stream';
@@ -122,9 +123,20 @@ async function run(argv: string[], signal: AbortSignal | undefined, deadline: nu
     }
 }
 
+/**
+ * 途中で作るファイルの共通の頭。入力の隣に置く (TSと同じ場所なら容量の心配が要らない)。
+ *
+ * 後始末はこの頭で拾って消す。logoframe は渡した名前のほかに
+ * `_1.txt` や `_list.ini` を**自分で足して**作るので、こちらが名前を並べただけでは
+ * 取りこぼす。実機の生TSの置き場に残骸が溜まっていた
+ */
+function workPrefix(input: string): string {
+    return `${input}.jls`;
+}
+
 /** 途中で作るファイル。入力の隣に置く (TSと同じ場所なら容量の心配が要らない) */
 function workFiles(input: string) {
-    const base = `${input}.jls`;
+    const base = workPrefix(input);
     return {
         /** chapter_exe が出す無音・シーンチェンジの一覧 */
         scenes: `${base}.chapterexe.txt`,
@@ -229,7 +241,26 @@ export async function detectWithJls(
         return { cm: invertRanges(keep, duration), note: 'join_logo_scp', logoMissing };
     } finally {
         // 中身は使い終わっている。録画の隣に置いているので残すと生TSの置き場を圧迫する
-        for (const path of Object.values(work)) rmSync(path, { force: true });
+        cleanup(input);
+    }
+}
+
+/**
+ * 途中で作ったものを片付ける。
+ *
+ * 名前を並べて消すのではなく**頭で拾う**。logoframe は渡した名前に `_1.txt` や
+ * `_list.ini` を自分で足して作るので、こちらが知っている名前だけでは取りこぼす。
+ */
+function cleanup(input: string): void {
+    const prefix = workPrefix(input);
+    const dir = dirname(prefix);
+    const head = basename(prefix);
+    try {
+        for (const name of readdirSync(dir)) {
+            if (name.startsWith(head)) rmSync(join(dir, name), { force: true });
+        }
+    } catch {
+        // 置き場ごと消えていることもある。片付けで録画を止めない
     }
 }
 

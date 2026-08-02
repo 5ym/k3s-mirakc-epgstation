@@ -108,6 +108,8 @@ export interface EncodeOptions {
     chaptersFile?: string | null;
     /** 60コマ/秒で出す。滑らかになる代わりに時間もサイズも約2倍 (smoothMotionFor) */
     smoothMotion?: boolean;
+    /** 字幕を絵で焼くときの画面の大きさ ("1920x1080")。無ければ 1440x1080 とみなされる */
+    canvasSize?: string;
 }
 
 /**
@@ -131,17 +133,28 @@ export function buildArgs(
 
     /*
      * ARIB字幕は**2本入れる**。同じ入力を2回開いて、片方は文字のまま (ASS)、
-     * もう片方は絵に焼いて (dvbsub) 持つ。
+     * もう片方は絵に焼いて持つ。
      *
      * どちらか一方では足りない。
      * - ASS … Matroska が元から想定している形で、VLC も Kodi も Infuse も素直に出す。
-     *   ただし外字 (DRCS) を絵に置き換えられるのはビットマップのときだけで、
-     *   点滅や背景の箱も ASS のタグでは表せない
-     * - dvbsub … 放送されたとおりに出る (256色。4色までなのは DVD の字幕のほう)。
-     *   ただし **VLC がこれの入った mkv で落ちる**
+     *   ただし**外字 (DRCS) は全部「〓」になる** (libaribcaption は ASS を組むとき
+     *   DRCS を下駄記号に置き換える。`replace_drcs` はビットマップ専用)。
+     *   背景の箱も影の色で代用するだけで、点滅は表せない
+     * - 絵に焼いたほう … 放送されたとおりの字が出る。外字もそのまま絵になる
      *
-     * そこで ASS を既定のトラックにして VLC を通し、原寸で見たいときのために
-     * 焼いたほうも残す。字幕は数十KBしかないので、入れておいて損が無い。
+     * 焼くほうは **dvdsub (S_VOBSUB)**。ffmpeg で作れるビットマップ字幕のうち、
+     * VLC が実際に読めるのはこれだけだった。
+     * - dvbsub は表現力は上 (256色) だが、**ffmpeg は CodecPrivate を書かない**。
+     *   VLC の mkv 読み取りは S_DVBSUB に4バイト以上の CodecPrivate を要求するので、
+     *   トラックごと捨てられる。届いたとしても、ffmpeg が字幕ごとに必ず出す
+     *   「消すための空パケット」で VLC の dvbsub 復号が壊れる (修正は 2026-07 に
+     *   入ったばかりで、まだどの released 版にも乗っていない)
+     * - PGS なら256色で申し分ないが、**ffmpeg に符号器が無い** (復号のみ)
+     * - dvdsub は1枚あたり4色まで。文字・縁取り・背景・透明でちょうど使い切る。
+     *   色分けした字幕は色が落ちるが、出ないよりはるかにまし
+     *
+     * ASS を既定のトラックにして、原寸で見たいときに焼いたほうへ切り替える。
+     * 字幕は数十KBしかないので、入れておいて損が無い。
      *
      * `-font` は libaribcaption が ASS に書き込むフォント名。
      * `Rounded M+ 1m for ARIB` は公式推奨で、丸ゴシック+JIS第三水準漢字+ARIB外字を
@@ -165,7 +178,18 @@ export function buildArgs(
     };
 
     openInput(['-sub_type', 'ass', '-ass_single_rect', '1', '-font', SUBTITLE_FONTS]);
-    openInput(['-sub_type', 'bitmap', '-font', SUBTITLE_FONTS]);
+    /*
+     * 焼くほうには画面の大きさを渡す。libaribcaption は指定が無いと 1440x1080
+     * (PROFILE_A) とみなすので、1920x1080 で録れているものは字幕だけ横に伸びる
+     */
+    const canvas = options.canvasSize;
+    openInput([
+        '-sub_type',
+        'bitmap',
+        ...(canvas === undefined ? [] : ['-canvas_size', canvas]),
+        '-font',
+        SUBTITLE_FONTS,
+    ]);
     if (options.chaptersFile != null) {
         // CM位置をチャプターとして持たせる。ファイルは切らないので誤検出しても本編は失われない
         args.push('-i', options.chaptersFile, '-map_chapters', '2');
@@ -178,7 +202,7 @@ export function buildArgs(
      * 既定は ASS のほう。焼いたほうを既定にすると VLC がそれを開いて落ちる
      */
     args.push('-map', '0:s:0?', '-c:s:0', 'ass', '-metadata:s:s:0', 'title=字幕');
-    args.push('-map', '1:s:0?', '-c:s:1', 'dvbsub', '-metadata:s:s:1', 'title=字幕 (放送そのまま)');
+    args.push('-map', '1:s:0?', '-c:s:1', 'dvdsub', '-metadata:s:s:1', 'title=字幕 (放送そのまま)');
     args.push('-disposition:s:0', 'default', '-disposition:s:1', '0');
     // インタレ解除 (bwdif は yadif よりコーミング残りが少ない)。
     // なめらかさの指定でコマ数が変わる (videoArgs)
@@ -765,6 +789,11 @@ async function runJob(jobId: number): Promise<void> {
      * 拾えない TS だと割合が最後まで 0% のままだった
      */
     const measured = await probeVideo(source);
+    // 字幕を絵で焼くときの画面の大きさ。渡さないと 1440x1080 とみなされ、
+    // 1920x1080 の録画では字幕だけ横に伸びる
+    if (Number.isFinite(measured.width) && Number.isFinite(measured.height)) {
+        encodeOptions.canvasSize = `${measured.width}x${measured.height}`;
+    }
 
     let result = await runFfmpeg(
         job,

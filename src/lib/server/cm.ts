@@ -217,7 +217,9 @@ export function chapterMetadata(cm: Range[], duration: number): string {
  * ffmpeg の stderr に出る `Duration:` を当てにしていた頃は、TS によっては
  * 拾えず、進み具合が最後まで 0% のままになっていた。先に ffprobe で押さえる。
  */
-export async function probeVideo(input: string): Promise<{ duration: number; fps: number }> {
+export async function probeVideo(
+    input: string,
+): Promise<{ duration: number; fps: number; width: number; height: number }> {
     const read = async (args: string[]): Promise<string> => {
         const proc = Bun.spawn([config.ffprobe, '-v', 'error', ...args, input], {
             stdout: 'pipe',
@@ -230,28 +232,36 @@ export async function probeVideo(input: string): Promise<{ duration: number; fps
 
     let duration = NaN;
     let fps = NaN;
+    let width = NaN;
+    let height = NaN;
     try {
         duration = Number(await read(['-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1']));
-        // "30000/1001" の形で返る
-        const [num, den] = (
+        // "30000/1001,1440,1080" の形で返る
+        const [rate, w, h] = (
             await read([
                 '-select_streams',
                 'v:0',
                 '-show_entries',
-                'stream=avg_frame_rate',
+                'stream=avg_frame_rate,width,height',
                 '-of',
-                'default=nw=1:nk=1',
+                'csv=p=0',
             ])
-        )
-            .split('/')
-            .map(Number);
+        ).split(',');
+        const [num, den] = (rate ?? '').split('/').map(Number);
         fps = den ? num / den : num;
+        width = Number(w);
+        height = Number(h);
     } catch {
         // ffprobe が使えない環境。呼ぶ側が NaN を見て諦める
     }
+    const positive = (value: number) => (Number.isFinite(value) && value > 0 ? value : NaN);
     return {
-        duration: Number.isFinite(duration) && duration > 0 ? duration : NaN,
-        fps: Number.isFinite(fps) && fps > 0 ? fps : NaN,
+        duration: positive(duration),
+        fps: positive(fps),
+        // 字幕を絵で焼くときの画面の大きさ。libaribcaption は既定で 1440x1080 と
+        // みなすので、渡さないと 1920x1080 の録画で字幕だけ横に伸びる
+        width: positive(width),
+        height: positive(height),
     };
 }
 
