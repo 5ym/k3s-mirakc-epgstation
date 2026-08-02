@@ -11,7 +11,7 @@
  * 2台あれば半分の時間で終わる。スキャンの間 mirakc は止まっているので取り合いにならない。
  */
 
-import { type FoundService, ServiceReader } from './tsinfo';
+import { type FoundService, ServiceReader } from '../src/lib/ts/psi';
 
 /**
  * 1チャンネルあたりの待ち時間。Mirakurun と同じ。

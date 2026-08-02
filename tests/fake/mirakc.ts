@@ -7,7 +7,14 @@
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { packetize, withCrc } from '../../src/lib/ts/synth';
 import { type FakeService, SERVICES } from './services';
+
+/** ロゴとして流す PNG。中身は問われないので小さいものでよい */
+const LOGO_PNG = Uint8Array.from(
+    atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='),
+    (c) => c.charCodeAt(0),
+);
 
 const PORT = Number(process.env.FAKE_MIRAKC_PORT ?? 40772);
 /** 生TSの置き場。本物では denpa と同じものを mirakc 側にも見せてある */
@@ -190,13 +197,64 @@ async function advanceScan(): Promise<void> {
 /** テストから切り替える。カードが読めていない状態を作るため */
 let scrambled = process.env.FAKE_SCRAMBLED === '1';
 
-function fakeStream(signal: AbortSignal): ReadableStream<Uint8Array> {
+/**
+ * 局ロゴを放送波に混ぜる。本物と同じく CDT (実体) と SDT (どの局のものか) に
+ * 分かれて流れてくるので、denpa 側は両方を読んで初めて紐付けられる
+ */
+function logoPackets(service: FakeService): Uint8Array {
+    const be = (value: number) => [(value >> 8) & 0xff, value & 0xff];
+    const logoId = service.serviceId % 512;
+
+    const cdt = withCrc([
+        0xc8,
+        0x00,
+        0x00,
+        ...be(service.networkId),
+        0xc1,
+        0x00,
+        0x00,
+        ...be(service.networkId),
+        0x01,
+        ...be(0xf000),
+        0x05,
+        ...be(logoId),
+        ...be(1),
+        ...be(LOGO_PNG.length),
+        ...LOGO_PNG,
+    ]);
+    const sdt = withCrc([
+        0x42,
+        0x00,
+        0x00,
+        ...be(1),
+        0xc1,
+        0x00,
+        0x00,
+        ...be(service.networkId),
+        0xff,
+        ...be(service.serviceId),
+        0xfc,
+        ...be(0x8000 | 9),
+        0xcf,
+        0x07,
+        0x01,
+        ...be(logoId),
+        ...be(1),
+        ...be(service.networkId),
+    ]);
+    return Uint8Array.from([...packetize(0x0029, cdt), ...packetize(0x0011, sdt, 5)]);
+}
+
+function fakeStream(signal: AbortSignal, service?: FakeService): ReadableStream<Uint8Array> {
+    const logo = service === undefined ? new Uint8Array(0) : logoPackets(service);
     const chunk = packets(20, scrambled);
     return new ReadableStream({
         start(controller) {
+            // 実際の放送波と同じで、ロゴは時々しか流れてこない
+            let ticks = 0;
             const timer = setInterval(() => {
                 try {
-                    controller.enqueue(chunk);
+                    controller.enqueue(++ticks % 5 === 0 ? logo : chunk);
                 } catch {
                     clearInterval(timer);
                 }
@@ -343,27 +401,13 @@ Bun.serve({
             );
         }
 
-        // 局ロゴ。中身は問われないので1x1のPNGを返す
-        const logo = url.pathname.match(/^\/api\/services\/(\d+)\/logo$/);
-        if (logo !== null) {
-            if (!SERVICES.some((s) => s.id === Number(logo[1]))) {
-                return new Response('no logo', { status: 404 });
-            }
-            const png = Uint8Array.from(
-                atob(
-                    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
-                ),
-                (c) => c.charCodeAt(0),
-            );
-            return new Response(png, { headers: { 'Content-Type': 'image/png' } });
-        }
-
         const stream = url.pathname.match(/^\/api\/services\/(\d+)\/stream$/);
         if (stream !== null) {
             if (!SERVICES.some((s) => s.id === Number(stream[1]))) {
                 return new Response('unknown service', { status: 404 });
             }
-            return new Response(fakeStream(request.signal), {
+            const service = SERVICES.find((s) => s.id === Number(stream[1]));
+            return new Response(fakeStream(request.signal, service), {
                 headers: { 'Content-Type': 'video/MP2T' },
             });
         }

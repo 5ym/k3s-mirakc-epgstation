@@ -8,6 +8,7 @@ import { enqueue } from './encoder';
 import { emit } from './events';
 import { moveFile } from './fsx';
 import { libraryPath, recordedPath } from './library';
+import { watch as watchLogo } from './logo';
 import { writeNfo, writeThumbnail } from './metadata';
 import { openServiceStream } from './mirakc';
 import { chunks } from './stream';
@@ -174,9 +175,13 @@ async function pump(recording: Recording, controller: AbortController): Promise<
         // 途中で止めたときや掴むのに手間取ったときは実物と合わない。
         // 再開したときは足していく(ファイルも追記なので合計が実物になる)
         const from = Date.now();
+        // mirakc はロゴを TS から集めないので、録画のついでに拾っておく。
+        // 局ロゴのために別途チューナーを開かずに済む
+        const collectLogo = watchLogo(recording.service_id);
         try {
             for await (const chunk of chunks(stream)) {
                 written += chunk.byteLength;
+                collectLogo(chunk);
                 if (!sink.write(chunk)) await once(sink, 'drain');
             }
         } finally {

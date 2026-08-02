@@ -31,7 +31,6 @@ export function syncServices(services: mirakc.MirakcService[]): number {
             service_type = excluded.service_type,
             channel = excluded.channel,
             remote_control_key = excluded.remote_control_key,
-            has_logo = excluded.has_logo,
             updated_at = excluded.updated_at
     `);
     const at = now();
@@ -54,7 +53,8 @@ export function syncServices(services: mirakc.MirakcService[]): number {
                 s.type,
                 s.channel.channel,
                 s.remoteControlKeyId ?? null,
-                s.hasLogoData === true ? 1 : 0,
+                // ロゴは mirakc からは取れない。denpa が放送波から拾ったときに立てる
+                0,
                 at,
             );
             count++;

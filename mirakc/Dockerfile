@@ -4,9 +4,11 @@
 # ---------------------------------------------------------------------------
 FROM docker.io/oven/bun:1-debian AS agent
 WORKDIR /build
-# テストは agent.ts から辿れないので束ねられない。個別に並べると足すたびに壊れる
-COPY *.ts ./
-RUN bun build --compile --minify agent.ts --outfile denpa-agent
+# TSの解析は denpa と共通 (src/lib/ts)。二重に持つと片方だけ直して食い違う。
+# テストは agent.ts から辿れないので束ねられない
+COPY mirakc/*.ts mirakc/
+COPY src/lib/ts/*.ts src/lib/ts/
+RUN bun build --compile --minify mirakc/agent.ts --outfile denpa-agent
 
 # ---------------------------------------------------------------------------
 FROM docker.io/mirakc/mirakc:debian

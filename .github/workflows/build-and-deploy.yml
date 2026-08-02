@@ -47,7 +47,7 @@ jobs:
           set -eu
           # denpa はリポジトリ直下なので、mirakc など別物のパスを除いて見る
           denpa_paths="Dockerfile src static package.json bun.lock svelte.config.js vite.config.ts"
-          echo "mirakc=sha-$(git log -1 --format=%H -- mirakc | cut -c1-12)" >> "$GITHUB_OUTPUT"
+          echo "mirakc=sha-$(git log -1 --format=%H -- mirakc src/lib/ts mirakc/Dockerfile | cut -c1-12)" >> "$GITHUB_OUTPUT"
           echo "denpa=sha-$(git log -1 --format=%H -- $denpa_paths | cut -c1-12)" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
@@ -63,7 +63,8 @@ jobs:
       - name: Build and push mirakc image
         uses: docker/build-push-action@v7
         with:
-          context: ./mirakc
+          context: .
+          file: mirakc/Dockerfile
           platforms: linux/amd64
           push: true
           pull: true

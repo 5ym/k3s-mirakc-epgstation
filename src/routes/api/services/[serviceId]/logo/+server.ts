@@ -1,23 +1,19 @@
 import { error } from '@sveltejs/kit';
-import { fetchLogo } from '$lib/server/mirakc';
+import { readLogo } from '$lib/server/logo';
 
 /**
- * 局ロゴの中継。
+ * 局ロゴ。
  *
- * mirakc を直接ブラウザから叩かせると、denpa と mirakc の両方を
- * 外に出す必要が出てくるので、こちら経由で渡す。
- * ロゴは滅多に変わらないので長めにキャッシュさせる。
+ * mirakc はロゴを TS から集めないので、denpa が放送波から拾って持っている
+ * (src/lib/server/logo.ts)。ロゴは滅多に変わらないので長めにキャッシュさせる。
  */
-export async function GET({ params, setHeaders }) {
+export function GET({ params, setHeaders }) {
     const serviceId = Number(params.serviceId);
     if (!Number.isFinite(serviceId)) error(400, 'チャンネルIDが不正です');
 
-    const logo = await fetchLogo(serviceId);
+    const logo = readLogo(serviceId);
     if (logo === null) error(404, 'ロゴがありません');
 
-    setHeaders({
-        'Content-Type': logo.headers.get('content-type') ?? 'image/png',
-        'Cache-Control': 'public, max-age=86400',
-    });
-    return new Response(logo.body);
+    setHeaders({ 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' });
+    return new Response(logo as BodyInit);
 }

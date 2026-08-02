@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { nitSection, packetize, sdtSection } from '../src/lib/ts/synth';
 import { channelEntry, channelsFor, readServices, render, Scanner } from './scan';
-import { nitSection, packetize, sdtSection } from './tsinfo.test';
 
 /**
  * チューナーの代わりに、組み立てた TS を吐くだけのコマンドを使う。

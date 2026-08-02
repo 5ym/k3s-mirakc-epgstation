@@ -8,7 +8,6 @@ export interface MirakcService {
     name: string;
     type: number;
     remoteControlKeyId?: number;
-    hasLogoData?: boolean;
     channel?: { type: ChannelType; channel: string };
 }
 

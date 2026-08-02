@@ -37,6 +37,8 @@ export const config = {
     tunerAgentUrl: str('TUNER_AGENT_URL', 'http://mirakc:40773').replace(/\/+$/, ''),
 
     dbPath: str('DENPA_DB', '/app/data/denpa.db'),
+    /** DBと並べて置くもの。いまは局ロゴだけ */
+    dataDir: str('DENPA_DATA_DIR', ''),
     /** 生TSの置き場。エンコード後は(keep_original でなければ)消える作業領域 */
     recordedDir: str('RECORDED_DIR', '/app/recorded'),
     /** エンコード済みの置き場。プレイヤーにはここのファイルを配る */
@@ -96,6 +98,8 @@ export const config = {
     schedulerTick: num('SCHEDULER_TICK', 5 * SEC),
     /** 保存先の実体とDBを突き合わせる間隔。外から消されたものをここで拾う */
     reconcileInterval: num('RECONCILE_INTERVAL', 5 * MIN),
+    /** 局ロゴを取りに行く間隔。放送波に流れてくるのを待つので、急いでも取れない */
+    logoSweepInterval: num('LOGO_SWEEP_INTERVAL', 30 * MIN),
     /** 終了した番組情報をDBに残しておく期間。番組表の遡り表示にしか使わないので短くてよい */
     programRetention: num('PROGRAM_RETENTION', 24 * 60 * MIN),
 
@@ -118,5 +122,8 @@ export const config = {
     /** 0 にすると EPG 取得・スケジューラ・エンコーダを起動しない (単体テスト用) */
     autostart: bool('DENPA_AUTOSTART', true),
 };
+
+/** 指定が無ければDBの隣。運用でいちいち2つ指す意味が無い */
+if (config.dataDir === '') config.dataDir = config.dbPath.replace(/\/[^/]*$/, '') || '.';
 
 export type Config = typeof config;

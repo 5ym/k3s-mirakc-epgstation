@@ -107,6 +107,7 @@ spec:
             # このコンテナからは開けない
             - name: TUNER_AGENT_URL
               value: http://mirakc:40773
+            # DBと、放送波から拾った局ロゴの置き場
             - name: DENPA_DB
               value: /app/data/denpa.db
             - name: RECORDED_DIR
