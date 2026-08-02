@@ -79,12 +79,10 @@ PowerShell を開いて、
 $s="$env:TEMP\denpa.ps1"; irm https://raw.githubusercontent.com/DAnything/denpa/main/windows/denpa.ps1 -OutFile $s; & $s
 ```
 
-- 途中で **UAC の確認が出ます**。これは*毎回の「このサイトは PowerShell を開こうと
-  しています」を消すため*だけに使います (ブラウザのポリシーは管理者でないと書けません)。
-  断っても再生自体はできます
-- **書いたあと、ブラウザを一度終了してから開き直してください。** 反映されません
-- denpa を別の場所 (既定は `dp.home.arpa` と `dp.doany.io`) で開いているなら
-  `-Origins http://denpa.example` のように渡してください
+**管理者権限は要りません。** 登録先は自分のユーザーの下だけです。
+
+初めて再生ボタンを押すと、ブラウザが「このサイトは denpa を開こうとしています」と
+聞いてきます。そこで **「常に許可」にチェックを入れて**開いてください。以後は出ません。
 
 ```powershell
 & $s -Test      # 実際に開いてみる
@@ -93,6 +91,10 @@ $s="$env:TEMP\denpa.ps1"; irm https://raw.githubusercontent.com/DAnything/denpa/
 ```
 
 VLC が見つからないときは `-PlayerPath "C:\...\vlc.exe"` で場所を渡します。
+
+聞かれること自体を無くしたいときは `-Policy` を足します。ブラウザのポリシーに
+書き込むので **UAC の確認が出て、書いたあとブラウザの再起動が要ります**。
+別の場所から開いているなら `-Origins http://denpa.example` も一緒に渡してください。
 
 > 登録の中身は**レジストリの値そのもの**です。ファイルを置かないので、後から消えたり
 > 移動したりして壊れません。登録先は HKCU なので、登録自体に管理者権限は要りません。
@@ -111,9 +113,10 @@ sh denpa.sh --show     # 登録されている中身を見る
 sh denpa.sh --remove   # 解除
 ```
 
-- **こちらは管理者権限が要りません。** ただし Windows と同じく、
-  **ブラウザを一度終了してから開き直す**まで確認ダイアログは消えません。
-  許す origin は `DENPA_ORIGINS` で変えられます (Safari にこれに当たる設定はありません)
+- Windows と同じく、初回の確認で **「常に許可」** にチェックを入れれば以後は出ません
+- 聞かれること自体を無くしたいときは `DENPA_POLICY=1`。ブラウザのポリシーに書くので
+  **一度終了してから開き直す**まで反映されません。許す origin は `DENPA_ORIGINS` で
+  変えられます (Safari にこれに当たる設定はありません)
 - VLC は `/Applications/VLC.app/Contents/MacOS/VLC` を見ます。違うところに
   入れているなら `DENPA_VLC` で渡してください
 

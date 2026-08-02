@@ -4,8 +4,10 @@
 
 .DESCRIPTION
     denpa:// を Windows のプロトコルハンドラとして登録する。
-    あわせて、指定した origin からは確認なしで開けるようブラウザに教える
-    (「このサイトは PowerShell を開こうとしています」を毎回出さないため)。
+
+    初めて再生ボタンを押すとブラウザが確認を出すので、そこで
+    **「常に許可」にチェックを入れて**開く。以後は出ない。
+    ブラウザが覚えるので、こちらから何かを書く必要はない。
 
         denpa://play/<base64url>/?title=<base64url>
 
@@ -23,12 +25,16 @@
     終わったあとに Enter を待たない。自動実行やパイプから使うとき用。
 
 .PARAMETER NoElevate
-    管理者に上げ直さない。確認ダイアログの抑止だけ諦めて、そのまま進む。
+    管理者に上げ直さない。-Policy と一緒に使ったときだけ意味がある。
+
+.PARAMETER Policy
+    確認そのものを出さないよう、ブラウザのポリシーに書く。
+    **普通は要らない** (初回の「常に許可」で足りる)。管理者権限と
+    ブラウザの再起動が要る代わりに、どのプロファイルでも初回から確認が出なくなる。
 
 .PARAMETER Origins
-    確認なしで開くことを許す denpa の origin。既定は dp.home.arpa と dp.doany.io。
-    Edge と Chrome のポリシー (AutoLaunchProtocolsFromOrigins) に書く。
-    HKCU なので管理者権限は要らないが、書いたあとブラウザの再起動が要る。
+    -Policy のときに、確認なしで開くことを許す denpa の origin。
+    既定は dp.home.arpa と dp.doany.io。
 
 .PARAMETER Remove
     確認せずに登録を解除する。
@@ -56,6 +62,7 @@ param(
     [string[]] $Origins = @('http://dp.home.arpa', 'https://dp.doany.io'),
     [switch] $NoPause,
     [switch] $NoElevate,
+    [switch] $Policy,
     [switch] $Remove,
     [switch] $Show,
     [string] $Test
@@ -92,13 +99,15 @@ $CommandKey = "$Root\shell\open\command"
 <#
     ブラウザに「この origin からの denpa:// は確認なしで開いてよい」と教える。
 
-    独自スキームを開くとき、Edge も Chrome も既定で毎回確認を出す。黙らせる方法は
-    ポリシー (AutoLaunchProtocolsFromOrigins) しかない。
+    **既定では通らない。** 独自スキームを開くとき Edge も Chrome も確認を出すが、
+    その確認には「常に許可」のチェックが付いていて、1回入れれば以後は出ない。
+    それで足りるので、普段はブラウザに任せる。
 
+    ここを通すのは -Policy を渡したときだけ。プロファイルを作り直しても
+    初回から確認を出したくない、といった場合用。
     HKCU\Software\Policies は普通のユーザーには書けない(ポリシーを自分で足せると
-    意味が無いので ACL で守られている)。**管理者として実行したときだけ**書ける。
-    書けなくても再生自体はできるので、その旨だけ出して先へ進む。
-    反映にはブラウザの再起動が要る。
+    意味が無いので ACL で守られている)ので、管理者権限と、書いたあとの
+    ブラウザ再起動が要る。
 #>
 $Policies = @{
     Edge   = 'HKCU:\Software\Policies\Microsoft\Edge'
@@ -108,8 +117,8 @@ $PolicyName = 'AutoLaunchProtocolsFromOrigins'
 
 function Set-AutoLaunchPolicy([string[]] $origins) {
     if (-not (Test-Elevated)) {
-        Write-Host '確認ダイアログの抑止は飛ばします (管理者権限が要ります)。'
-        Write-Host '  毎回の確認を消したいときは、PowerShell を「管理者として実行」してもう一度どうぞ。'
+        Write-Host 'ポリシーは書けませんでした (管理者権限が要ります)。'
+        Write-Host '  初回の確認で「常に許可」にチェックを入れれば、これは無くても構いません。'
         return
     }
 
@@ -162,12 +171,13 @@ function Test-Elevated {
 function Invoke-Elevated {
     # iex でパイプから流し込まれた場合は自分の場所が無い。上げ直しようがない
     if (-not $PSCommandPath) {
-        Write-Host '確認ダイアログの抑止には管理者権限が要ります。'
+        Write-Host 'ポリシーを書くには管理者権限が要ります。'
         Write-Host '  いったんファイルに保存してから実行してください (README のワンライナー参照)。'
         return $false
     }
 
     $argv = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"", '-NoElevate')
+    if ($Policy) { $argv += '-Policy' }
     if ($PlayerPath) { $argv += @('-PlayerPath', "`"$PlayerPath`"") }
     if ($Origins) { $argv += @('-Origins', (($Origins | ForEach-Object { "`"$_`"" }) -join ',')) }
     if ($Remove) { $argv += '-Remove' }
@@ -349,8 +359,13 @@ function Build-RegistryCommand([string] $exe, [string] $powershell, [string] $co
 
 # --- 管理者に上げ直す -----------------------------------------------------
 
-# 見るだけ・試すだけなら要らない。書くとき (登録・解除) だけ上げる
-if (-not $NoElevate -and -not $Show -and -not $PSBoundParameters.ContainsKey('Test') -and -not (Test-Elevated)) {
+<#
+    普段は上げない。登録先は HKCU なので管理者権限は要らず、毎回の確認は
+    ブラウザ側の「常に許可」で消えるため。
+
+    -Policy を渡したときだけ、ポリシーを書くために上げ直す。
+#>
+if ($Policy -and -not $NoElevate -and -not (Test-Elevated)) {
     if (Invoke-Elevated) {
         # 上げた先で全部やり終えている。こちらは黙って終わる
         return
@@ -410,8 +425,7 @@ if ($existing) {
     Remove-Registration
 }
 
-# ブラウザのポリシーは何度書いても同じなので、毎回通す
-Set-AutoLaunchPolicy $Origins
+if ($Policy) { Set-AutoLaunchPolicy $Origins }
 
 $exe = Find-Player
 Write-Host "VLC: $exe"
@@ -432,11 +446,17 @@ if (-not (Get-RegisteredCommand)) { throw '登録に失敗しました。' }
 
 Write-Host ''
 Write-Host '登録しました。'
-if (Test-Elevated) {
+if ($Policy) {
     Write-Host '確認を出さずに開くには、ブラウザを一度終了してから開き直してください。'
     Write-Host "許可した origin: $($Origins -join ', ')"
+    Write-Host '(違う場所から開くなら -Origins で渡してください)'
 }
-Write-Host '(違う場所から開くなら -Origins で渡してください)'
+else {
+    Write-Host ''
+    Write-Host '初めて再生ボタンを押すと、ブラウザが「開きますか?」と聞いてきます。'
+    Write-Host '  そこで「常に許可」にチェックを入れて開いてください。以後は聞かれません。'
+    Write-Host '  (聞かれること自体を無くしたいときは -Policy。管理者権限が要ります)'
+}
 Write-Host ''
 Write-Host '確認は .\denpa.ps1 -Test'
 Write-Host '中身は .\denpa.ps1 -Show'

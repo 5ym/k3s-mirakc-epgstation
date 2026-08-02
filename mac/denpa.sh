@@ -146,9 +146,13 @@ test_link() {
 <<'NOTE' true
 ブラウザに「この origin からの denpa:// は確認なしで開いてよい」と教える。
 
-独自スキームを開くとき、Chrome も Edge も既定で毎回確認を出す。黙らせる方法は
-ポリシー (AutoLaunchProtocolsFromOrigins) しかない。macOS では管理者権限が要らず、
-ユーザーの設定ドメインに書ける。反映にはブラウザの再起動が要る。
+独自スキームを開くと Chrome も Edge も確認を出すが、その確認には「常に許可」の
+チェックが付いていて、1回入れれば以後は出ない。ここを書くのは、
+プロファイルを作り直しても初回から出したくない場合のため
+(DENPA_POLICY=1)。反映にはブラウザの再起動が要る。
+
+macOS では管理者権限が要らないので、Windows 版と違って書くこと自体は安い。
+それでも既定で書かないのは、**ブラウザの設定をこちらが勝手に変えないため**。
 NOTE
 allow_origins() {
     entries=$(printf %s "$ORIGINS" | tr ',' '\n' | sed 's/.*/"&"/' | paste -sd, -)
@@ -219,9 +223,15 @@ case ${1:---install} in
     --help | -h) usage ;;
     --install)
         install_scheme
-        allow_origins
         echo ''
-        echo '確認を出さずに開くには、ブラウザを一度終了してから開き直してください。'
+        if [ "${DENPA_POLICY:-0}" = 1 ]; then
+            allow_origins
+            echo '確認を出さずに開くには、ブラウザを一度終了してから開き直してください。'
+        else
+            echo '初めて再生ボタンを押すと、ブラウザが「開きますか?」と聞いてきます。'
+            echo '  そこで「常に許可」にチェックを入れて開いてください。以後は聞かれません。'
+            echo '  (聞かれること自体を無くしたいときは DENPA_POLICY=1)'
+        fi
         echo '確認は sh denpa.sh --test'
         echo '解除は sh denpa.sh --remove'
         ;;
