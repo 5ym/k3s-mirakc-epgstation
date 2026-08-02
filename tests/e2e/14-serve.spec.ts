@@ -31,7 +31,8 @@ test.describe('設定画面からの認証', () => {
 
     test('設定画面から認証を変えられる', async ({ page }) => {
         await goto(page, '/settings');
-        await expect(page.getByTestId('auth-user')).toHaveValue('denpa');
+        // ユーザー名は固定。入力欄そのものが無い
+        await expect(page.getByTestId('auth-user')).toHaveText('denpa');
         /*
          * いま効いているパスワードをそのまま出す。Kodi や VLC に入れるときに要るものを
          * 隠していると、思い出せないたびに作り直すことになり、そのたびに
@@ -41,12 +42,6 @@ test.describe('設定画面からの認証', () => {
         await expect(page.getByTestId('auth-password')).toHaveAttribute('type', 'password');
         await page.getByTestId('auth-reveal').click();
         await expect(page.getByTestId('auth-password')).toHaveAttribute('type', 'text');
-
-        // 自動生成はURLに埋められる文字だけを使う (再生リンクに入るため)
-        await page.getByTestId('auth-generate').click();
-        await expect(page.getByTestId('auth-password')).toHaveValue(/^[A-Za-z2-9]{24}$/);
-        // 変えずに続けたいので元に戻す
-        await page.getByTestId('auth-password').fill('ひみつ');
 
         await page.getByTestId('auth-scope').selectOption('all');
         await page.getByTestId('save-auth').click();
@@ -63,6 +58,26 @@ test.describe('設定画面からの認証', () => {
         await expect(page.getByTestId('auth-scope')).toHaveValue('files');
         // この範囲だと画面が素通しになるので、その旨を出す
         await expect(page.getByTestId('auth-warning')).toBeVisible();
+    });
+
+    test('パスワードは1回押すだけで作られて保存される', async ({ page }) => {
+        await goto(page, '/settings');
+        // 入れたのに保存を忘れると「掛けたつもりで掛かっていない」になる。押したら保存まで済む
+        await page.getByTestId('auth-generate').click();
+        await expect(page.getByTestId('saved-result')).toBeVisible();
+
+        // URLに埋められる文字だけを使う (再生リンクに入るため)
+        const created = await page.getByTestId('auth-password').inputValue();
+        expect(created).toMatch(/^[A-Za-z2-9]{24}$/);
+
+        // 開き直しても残っている = 保存されている
+        await goto(page, '/settings');
+        await expect(page.getByTestId('auth-password')).toHaveValue(created);
+
+        // 後ろのテストのために戻す
+        await page.getByTestId('auth-password').fill('ひみつ');
+        await page.getByTestId('save-auth').click();
+        await expect(page.getByTestId('saved-result')).toBeVisible();
     });
 });
 

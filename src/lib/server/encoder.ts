@@ -34,6 +34,13 @@ function videoArgs(codec: VideoCodec): { filter: string; encoder: string[] } {
 }
 
 const DUAL_MONO = 2;
+
+/**
+ * 字幕に使うフォント。先頭から順に探される。
+ * 1つ目はイメージに入れてあるもの。残りは Windows / Mac / Linux の丸ゴシックで、
+ * ASS を端末側で描くときに、その端末が持っているものへ落ちるようにしてある
+ */
+const SUBTITLE_FONTS = 'Rounded M+ 1m for ARIB,Hiragino Maru Gothic ProN,Yu Gothic UI,Noto Sans CJK JP';
 /** 進捗をDBに書き戻す間隔。1フレームごとに書くとWAL肥大とUIのちらつきの原因になる */
 const PROGRESS_INTERVAL = 2000;
 
@@ -83,9 +90,26 @@ export function buildArgs(
 
     // 字幕用
     args.push('-fix_sub_duration');
-    // ARIB字幕をビットマップとして焼き込む(再生側フォントに依存させない)。Rounded M+ 1m for ARIB は
-    // libaribcaption 公式推奨フォントで、丸ゴシック+JIS第三水準漢字+ARIB外字を1本でカバーする
-    args.push('-sub_type', 'bitmap', '-font', 'Rounded M+ 1m for ARIB');
+    /*
+     * ARIB字幕の持ち方。
+     *
+     * 既定は **ASS (文字のまま)**。以前はビットマップに焼いて dvbsub で入れていたが、
+     * **VLC が dvbsub の入った mkv で落ちる**。ASS は Matroska が元から想定している形で、
+     * VLC も Kodi も Infuse も素直に出す。位置も色もルビも ASS のタグで残る。
+     *
+     * 引き換えに、出す側のフォントに依存する。libaribcaption が ASS に書き込む
+     * フォント名を並べておき、無ければ端末側の丸ゴシックに落ちるようにする。
+     * `Rounded M+ 1m for ARIB` は libaribcaption 公式推奨で、丸ゴシック+JIS第三水準漢字+
+     * ARIB外字を1本でカバーする (イメージに入れてある)。
+     *
+     * `ass_single_rect` は「複数の矩形を扱えない再生側」向けの回避策。
+     * VLC がまさにそれで、切っておくと字幕が重なって出る。
+     */
+    if (config.subtitleMode === 'bitmap') {
+        args.push('-sub_type', 'bitmap', '-font', SUBTITLE_FONTS);
+    } else {
+        args.push('-sub_type', 'ass', '-ass_single_rect', '1', '-font', SUBTITLE_FONTS);
+    }
     if (seek !== null) {
         // 録画開始直後の1秒未満だけ、多重化されたもう一方の映像ストリームのPAT/PMTが確定しておらず
         // エンコーダの初期化(fps/解像度確定)自体が失敗することがある。
@@ -102,7 +126,7 @@ export function buildArgs(
     // mapで解決できない(型が不明な)ストリームは黙ってスキップする。エンコード自体を止めないため
     args.push('-ignore_unknown');
     // 字幕ストリーム設定(?は字幕ストリームが無い録画でもエンコードが失敗しないようにするため)
-    args.push('-map', '0:s?', '-c:s', 'dvbsub');
+    args.push('-map', '0:s?', '-c:s', config.subtitleMode === 'bitmap' ? 'dvbsub' : 'ass');
     // インタレ解除(bwdifはyadifよりコーミング残りが少ない。modeは既定のsend_fieldのままにし、
     // フィールドごとに1フレーム生成して59.94p出力にする)
     args.push('-vf', video.filter);

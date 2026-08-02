@@ -4,7 +4,7 @@ import { pump, requeueOrphanedJobs } from './encoder';
 import { sync } from './epg';
 import { emit } from './events';
 import { pruneHistory, reconcile } from './files';
-import { reconcile as logoReconcile, sweep } from './logo';
+import { reconcile as logoReconcile, ride, sweep } from './logo';
 import { listen } from './mirakc-events';
 import { activeRecordingIds, onOnairChanged, recoverOrphanedRecordings } from './recorder';
 import { tick } from './scheduler';
@@ -130,6 +130,12 @@ function listenToMirakc(): void {
             }
             case 'tuner.status-changed':
                 emit('tuners');
+                /*
+                 * mirakc が番組表を集めるために自分でチューナーを開いた、かもしれない。
+                 * そこへ同じチャンネルを要求すると新しいチューナーは掴まれないので、
+                 * ロゴを只で読める。開いた瞬間に来る知らせなので、ここで乗る
+                 */
+                void guard('logo', ride);
                 break;
             default:
                 // mirakc 自身の録画・タイムシフトの知らせ。denpa は使わない

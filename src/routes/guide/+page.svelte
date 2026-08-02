@@ -322,9 +322,14 @@
             {#if form?.message}
                 <div class="alert alert-error mt-4" data-testid="guide-error">{form.message}</div>
             {/if}
-            <div class="modal-action flex-wrap items-center">
+            <!--
+                閉じるは**いちばん右で動かさない**。押すものが番組によって増えたり
+                減ったりする (予約する / 取り消す / 再生 / ダウンロード) ので、
+                そのたびに位置が変わると、閉じたつもりで別のものを押すことになる
+            -->
+            <div class="modal-action flex-wrap items-center justify-end">
                 {#if program.reservation_state}
-                    <span class="badge badge-info" data-testid="detail-state">
+                    <span class="badge badge-info mr-auto" data-testid="detail-state">
                         {stateLabel(program.reservation_state)}
                     </span>
                 {:else if program.end_at <= clock}
@@ -332,12 +337,8 @@
                         もう終わった番組。予約する口を出しても、押した先で
                         「放送が終わっています」と断られるだけ (reservations.reserve)
                     -->
-                    <span class="badge badge-ghost" data-testid="detail-ended">放送終了</span>
+                    <span class="badge badge-ghost mr-auto" data-testid="detail-ended">放送終了</span>
                 {/if}
-
-                <button class="btn" onclick={() => (selected = null)} data-testid="detail-close">
-                    閉じる
-                </button>
 
                 {#if program.recording_id !== null && (program.library_path ?? program.ts_path) !== null}
                     <!--
@@ -404,6 +405,11 @@
                         <button class="btn btn-primary" data-testid="detail-reserve">予約する</button>
                     </form>
                 {/if}
+
+                <!-- 位置を動かさないため、いつでもここが最後 -->
+                <button class="btn" onclick={() => (selected = null)} data-testid="detail-close">
+                    閉じる
+                </button>
             </div>
         {/snippet}
     </ProgramDetail>

@@ -53,16 +53,24 @@ export const config = {
     /** h264 のときの x264 設定。ライブと違い実時間の縛りが無いので品質寄り */
     encodeH264Preset: str('ENCODE_H264_PRESET', 'medium'),
     encodeH264Crf: num('ENCODE_H264_CRF', 22),
+    /**
+     * ARIB字幕の持ち方。
+     * text   : ASS (文字のまま)。既定。VLC も Kodi も素直に出す
+     * bitmap : 絵に焼いて dvbsub で入れる。再生側のフォントに依存しない代わりに、
+     *          **VLC が落ちる**ことがある
+     */
+    subtitleMode: str('SUBTITLE_MODE', 'text') as 'text' | 'bitmap',
 
     /** CMの扱いの既定値。実カットは事故ると本編が消えるので既定はチャプターのみ */
     cmCutDefault: str('CM_CUT_DEFAULT', 'chapter') as CmMode,
     /**
      * CM検出の実装。
-     * silence: 無音 + CM尺(15秒の倍数)。追加のツールもロゴデータも要らない既定値。
-     * jls    : join_logo_scp (Amatsukaze と同じ検出核) にロゴ検出まで任せる。精度は高いが
-     *          イメージに chapter_exe / logoframe / join_logo_scp と局ごとのロゴデータが要る。
+     * jls    : join_logo_scp (Amatsukaze と同じ検出核)。既定。ロゴが消えるかどうかまで
+     *          見るので無音だけより格段に確か。一式はイメージに入っている。
+     *          ロゴを当てられなかったときは黙って silence に落ちる
+     * silence: 無音 + CM尺(15秒の倍数)。外部のコマンドを一切使わない
      */
-    cmDetector: str('CM_DETECTOR', 'silence') as 'silence' | 'jls',
+    cmDetector: str('CM_DETECTOR', 'jls') as 'silence' | 'jls',
     /** chapter_exe / logoframe / join_logo_scp の置き場。イメージに入っている */
     jlsBin: str('JLS_BIN', '/opt/jls/bin').replace(/\/+$/, ''),
     /** join_logo_scp の判定規則。join_logo_scp_trial に付いてくるもの */
@@ -161,7 +169,7 @@ export const config = {
      * そのリダイレクトを扱えない。そこで「ファイルを取りに来る口だけ」に
      * ベーシック認証をかけられるようにしてある。
      */
-    basicAuthUser: str('BASIC_AUTH_USER', ''),
+    basicAuthUser: str('BASIC_AUTH_USER', 'denpa'),
     basicAuthPassword: str('BASIC_AUTH_PASSWORD', ''),
     /**
      * 認証をかける範囲。

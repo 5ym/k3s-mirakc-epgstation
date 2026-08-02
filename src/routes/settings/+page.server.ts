@@ -7,6 +7,29 @@ import { isStored, saveSettings, settings } from '$lib/server/settings';
 import { send, type Webhook } from '$lib/server/webhook';
 import { EVENTS } from '$lib/webhook-events';
 
+/**
+ * ベーシック認証のユーザー名。**画面からは変えられない。**
+ *
+ * 変えて嬉しいことが何も無い。プレイヤー側にも同じものを入れる必要があるだけで、
+ * 忘れると登録済みの端末が全部つながらなくなる。
+ */
+const BASIC_AUTH_USER = 'denpa';
+
+/*
+ * パスワードに使う文字。
+ *
+ * 記号は入れない。このパスワードは**再生リンクのURLに埋め込まれる**ので、
+ * `:` `@` `/` `#` `?` が入ると URL として割れてしまう。
+ * 紛らわしい文字 (0/O、1/l/I) も外す。Kodi の画面で手入力することがある
+ */
+const ALPHABET = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const PASSWORD_LENGTH = 24;
+
+function generatePassword(): string {
+    const bytes = crypto.getRandomValues(new Uint8Array(PASSWORD_LENGTH));
+    return Array.from(bytes, (b) => ALPHABET[b % ALPHABET.length]).join('');
+}
+
 export function load() {
     const current = settings();
     return {
@@ -44,18 +67,28 @@ export const actions = {
      */
     saveAuth: async ({ request }) => {
         const form = await request.formData();
-        const user = String(form.get('basicAuthUser') ?? '').trim();
-        const password = String(form.get('basicAuthPassword') ?? '');
         const scope = String(form.get('basicAuthScope') ?? 'files');
         if (scope !== 'files' && scope !== 'all') {
             return fail(400, { message: '適用範囲の指定が不正です' });
         }
-        // 画面にはいま入っているものが出ている。空にしたのは「消したい」ということ。
-        // ただしユーザー名だけ残ると認証が黙って無効になるので、そこは断る
-        if (user !== '' && password === '') {
-            return fail(400, { message: 'パスワードを入力してください' });
-        }
-        saveSettings({ basicAuthUser: user, basicAuthPassword: password, basicAuthScope: scope });
+        // ユーザー名は denpa 固定 (画面から変えられない)。
+        // 画面にはいま入っているパスワードが出ているので、空にしたのは「消したい」ということ
+        saveSettings({
+            basicAuthUser: BASIC_AUTH_USER,
+            basicAuthPassword: String(form.get('basicAuthPassword') ?? ''),
+            basicAuthScope: scope,
+        });
+        return { success: true, saved: true };
+    },
+
+    /**
+     * パスワードを作り直して、そのまま保存する。
+     *
+     * 考えて決めるものではないし、入れたのに保存を忘れると
+     * 「掛けたつもりで掛かっていない」になる。1回の操作で終わらせる。
+     */
+    newPassword: () => {
+        saveSettings({ basicAuthUser: BASIC_AUTH_USER, basicAuthPassword: generatePassword() });
         return { success: true, saved: true };
     },
 

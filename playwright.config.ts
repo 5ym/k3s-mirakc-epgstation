@@ -5,10 +5,11 @@ import { defineConfig } from '@playwright/test';
  * ワーカーの数。
  *
  * 1つ増えるごとに denpa と偽 mirakc と偽通知先が1式ずつ増える (tests/stack.ts)。
- * 録画とエンコードを実時間で回すので、CPU の数より控えめにしないと
- * かえって遅くなる。半分を上限4で頭打ちにする
+ * 待っている時間 (偽の放送が終わるまで) が大半なので、CPU の数ぴったりにする
+ * 必要はない。実測では12コアで **4 → 6 にすると 1分43秒が59秒**になり、
+ * 8 まで増やすと取り合いで落ちるものが出た。半分を上限6で頭打ちにする
  */
-const WORKERS = Math.max(1, Math.min(4, Math.floor(cpus().length / 2)));
+const WORKERS = Math.max(2, Math.min(6, Math.ceil(cpus().length / 2)));
 
 export default defineConfig({
     testDir: 'tests/e2e',
@@ -23,6 +24,8 @@ export default defineConfig({
     workers: WORKERS,
     timeout: 120_000,
     expect: { timeout: 30_000 },
+    // ワーカーを増やすと、ごく稀にブラウザ側が落ちる。CI で1回だけやり直す
+    retries: process.env.CI ? 1 : 0,
     reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
     // 消してから、アプリを1度だけ組む。ワーカーはその出力を共有する
     globalSetup: './tests/global-setup.ts',

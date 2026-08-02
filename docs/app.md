@@ -80,13 +80,14 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 | `DENPA_DB` | `/app/data/denpa.db` | SQLite の置き場 |
 | `RECORDED_DIR` | `/app/recorded` | 生TSの作業領域 |
 | `LIBRARY_DIR` | `/library` | エンコード済みの置き場。ここから配る |
-| `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` | (空) | 両方入っているときだけベーシック認証が有効 |
+| `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` | `denpa` / (空) | パスワードが入っているときだけ有効。ユーザー名は画面からは変えられない |
 | `BASIC_AUTH_SCOPE` | `files` | `files` … 配信と WebDAV だけ / `all` … 画面も含めて全部 |
 | `FFMPEG` / `FFPROBE` | `/usr/local/bin/...` | 開発時は偽物に差し替える |
 | `ENCODE_CONCURRENCY` | `1` | 録画エンコードの同時実行数。ライブ配信の本数とは無関係 |
 | `ENCODE_CODEC` | `av1` | 録画の既定コーデック (`av1` / `h264`) |
 | `ENCODE_H264_PRESET` / `ENCODE_H264_CRF` | `medium` / `22` | H.264 のときの品質 |
 | `ENCODE_RETRY_SEEK` | `0.2` | 頭が壊れていて失敗したとき、捨てて再試行する秒数 |
+| `SUBTITLE_MODE` | `text` | `text` … ASS (文字のまま) / `bitmap` … 絵に焼いて dvbsub。**bitmap は VLC が落ちる** |
 | `START_MARGIN` / `END_MARGIN` | `10000` / `15000` | 録画の前後マージン(ms)。放送に追従しているときは mirakc 側が切れ目を決める |
 | `FOLLOW_ONAIR` | `1` | 放送の延長に追従する。`0` で番組表の時刻どおりに開いて閉じる |
 | `ONAIR_POLL_INTERVAL` | `300000` | 終了時刻を見に行く間隔(ms)。普段は mirakc の知らせで拾うので**保険** |
@@ -96,7 +97,7 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 | `SHUTDOWN_WAIT` | `21600000` | 止められたとき、録画が終わるまで待つ上限(ms)。`0` で待たない |
 | `SCHEDULER_TICK` | `5000` | 予約チェックの間隔(ms) |
 | `CM_CUT_DEFAULT` | `chapter` | `off` / `chapter` / `cut` の**初期値**。設定画面で変えられる |
-| `CM_DETECTOR` | `silence` | `silence` / `jls`。jls 一式はイメージに入っている (`/opt/jls`) |
+| `CM_DETECTOR` | `jls` | `jls` / `silence`。jls 一式はイメージに入っている (`/opt/jls`) |
 | `CM_SILENCE_NOISE` | `-50dB` | 無音とみなす音量 |
 | `CM_SILENCE_DURATION` | `0.4` | 無音とみなす最短の長さ(秒) |
 | `CM_TOLERANCE` | `0.6` | 「15秒の倍数」判定の許容誤差(秒) |
@@ -115,11 +116,11 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 
 | 画面 | 役割 |
 | --- | --- |
-| `/` | **予約と録画**を2ペインで並べる。予約の取消、再生リンク・再エンコード・削除。エンコード中のものは録画一覧の行に進み具合が出る |
+| `/` | **予約と録画**を2ペインで並べる。予約の取消、再生リンク・再エンコード・削除。行の形はどの画面幅でも同じで、狭いところでは押すものが下へ回り込む |
 | `/guide` | 番組表(グリッド)と番組検索。マスはジャンルごとに色を変える。詳細から予約・取消と、録れているものはそのまま再生できる |
 | `/rules` | 自動予約ルールの一覧と作成 |
 | `/tuners` | チャンネルスキャン、チューナーの空き、取れているチャンネル (mirakc 側の局と番組表の集まり具合つき)、mirakc とカードリーダーの状態 |
-| `/settings` | 録画のしかた(コーデック/CM/エンコードするか/生TSを残すか/無料放送だけか)、通知先(Webhook)、ベーシック認証、EPGStation からの引き継ぎ |
+| `/settings` | 録画のしかた(コーデック/CM/エンコードするか/生TSを残すか/無料放送だけか)、通知先(Webhook)、ベーシック認証(パスワードの表示と作り直し)、EPGStation からの引き継ぎ |
 | `/api/recordings/<id>/file` | 録画ファイル。Range 対応 |
 | `/api/recordings/<id>/frame?at=<秒>` | 録画から1コマ (JPEG)。ロゴの位置を指定するときに使う |
 | `/dav` | WebDAV (PROPFIND / GET / HEAD)。Kodi 用。書き込みは受けない |
@@ -140,7 +141,7 @@ mirakc の親として動くエージェント。なぜ親を置いているか�
 
 | 場所 | 何 |
 | --- | --- |
-| `tests/e2e/` | Playwright。番号順に、予約 → 録画 → ルール → 引き継ぎ → 放送の延長 |
+| `tests/e2e/` | Playwright。番号順に、予約 → 録画 → ルール → 引き継ぎ → 放送の延長。**ファイル単位で並ぶ**ので、長いものは割ってある |
 | `tests/stack.ts` | ワーカーごとに denpa と偽 mirakc を1式立てる (これでファイル単位に並べられる) |
 | `tests/fake/` | 偽mirakc・偽の通知先・偽ffmpeg |
 | `src/**/*.test.ts` | 純粋関数の境界条件 (bun test) |

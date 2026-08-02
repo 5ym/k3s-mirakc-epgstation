@@ -115,7 +115,7 @@ test.describe('予約の細かい指定', () => {
         const reservation = page.locator(
             `[data-testid="reservation-row"][data-program-id="${target.programId}"]`,
         );
-        await reservation.locator('td').first().click();
+        await reservation.getByTestId('row-body').click();
 
         const detail = page.getByTestId('program-detail');
         await expect(detail).toBeVisible();

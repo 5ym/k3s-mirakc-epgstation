@@ -58,8 +58,28 @@ jobs:
       - name: Unit tests
         run: bun run test:unit
 
+      # ブラウザは 150MB ほどあり、毎回落とすと1分近く持っていかれる。
+      # 中身は Playwright のバージョンでしか変わらないので、それを鍵にする
+      - name: Read Playwright version
+        id: playwright
+        run: echo "version=$(bun pm ls | grep -oP '@playwright/test@\K[^\s]+' | head -1)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Playwright browser
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+
+      # --with-deps は OS のライブラリを入れるところで、キャッシュに乗らない。
+      # ブラウザが残っていても毎回要る (入っていれば数秒で終わる)
       - name: Install Playwright browser
-        run: bunx playwright install --with-deps chromium
+        run: |
+          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
+            bunx playwright install-deps chromium
+          else
+            bunx playwright install --with-deps chromium
+          fi
 
       # アプリを1度だけ組んでから、ワーカーの数だけ立てる。
       # 偽mirakc・偽通知先もワーカーごとに1式ずつ (tests/stack.ts)

@@ -43,24 +43,19 @@ export function load({ url, request }) {
         ? "('scheduled','conflict','recording','done','failed','canceled','missed')"
         : "('scheduled','conflict','recording')";
     /*
-     * 並び。
+     * 並びは**放送日時の近い順**で固定する。録画中だけは真っ先に見たいので先頭に置く。
      *
-     * 「進行中のみ」は**これから録るものを近い順**に出す。まだ何も終わっていないので
-     * 放送日時の降順にすると、いちばん先の予約が先頭に来てしまう。
-     * 録画中だけは真っ先に見たいので先頭に固定する。
-     *
-     * 「完了分も表示」にすると終わったものが混ざる。ここで近い順を続けると、
-     * 昔の録画と明日の予約が入り混じって時系列として読めなくなるので、
-     * 録画一覧と同じ**放送日時の新しい順**に切り替える
+     * 「完了分も表示」で向きを変えていた頃は、押した瞬間に一覧がひっくり返って、
+     * さっきまで見ていた行がどこへ行ったのか分からなくなっていた。
+     * 出るものが増えるだけで、並びは変わらないほうがいい
      */
-    const order = showFinished ? 'r.start_at DESC' : `(r.state = 'recording') DESC, r.start_at ASC`;
     const reservations = queryAll<ReservationRow>(
         `SELECT r.*, s.name AS service_name, rules.name AS rule_name
          FROM reservations r
          JOIN services s ON s.id = r.service_id
          LEFT JOIN rules ON rules.id = r.rule_id
          WHERE r.state IN ${states}
-         ORDER BY ${order}
+         ORDER BY (r.state = 'recording') DESC, r.start_at ASC
          LIMIT 300`,
     );
 

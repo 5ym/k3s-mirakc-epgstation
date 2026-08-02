@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { untrack } from 'svelte';
     import { submitting } from '$lib/actions';
     import { liveUpdates } from '$lib/live-updates.svelte';
     import { EVENT_LABEL } from '$lib/webhook-events';
@@ -13,34 +14,25 @@
 
     // 引き継ぎは数百GBのコピーになる。進み具合はサーバから push される
 
-    /** ベーシック認証のパスワード。いま入っているものを出しておく */
+    /**
+     * 画面で触る値は、サーバから来たものを写して持つ。
+     *
+     * `value={data...}` を直に入れていた頃は、**別のフォームを保存しただけで
+     * 手元の入力が data の値に書き戻されて**いた (チェックが勝手に外れる)。
+     * 写しておけば、書き戻るのは data そのものが変わったときだけになる
+     */
     let password = $state('');
     let revealed = $state(false);
     let copied = $state(false);
+    // untrack は「初期値としてだけ読む」印。下の $effect で追従させている
+    let recording = $state(untrack(() => ({ ...data.recording })));
 
-    // 保存したあとはサーバの値で引き直す。自動生成した直後は手元の値のまま
     $effect(() => {
         password = data.auth.password;
     });
-
-    /*
-     * パスワードに使う文字。
-     *
-     * 記号は入れない。このパスワードは**再生リンクのURLに埋め込まれる**ので、
-     * `:` `@` `/` `#` `?` が入ると URL として割れてしまう。
-     * 紛らわしい文字 (0/O、1/l/I) も外す。Kodi の画面で手入力することがある
-     */
-    const ALPHABET = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    const LENGTH = 24;
-
-    function generate(): void {
-        const bytes = crypto.getRandomValues(new Uint8Array(LENGTH));
-        // 256 は文字数で割り切れないので、そのまま剰余を取ると先頭の文字がわずかに
-        // 出やすくなる。総当たりを気にする長さでもないが、偏らせる理由も無い
-        password = Array.from(bytes, (b) => ALPHABET[b % ALPHABET.length]).join('');
-        revealed = true;
-        copied = false;
-    }
+    $effect(() => {
+        recording = { ...data.recording };
+    });
 
     async function copy(): Promise<void> {
         try {
@@ -94,10 +86,10 @@
                     <label class="flex flex-col gap-1">
                         <span class="text-sm font-medium">映像コーデック</span>
                         <select name="codec" class="select select-bordered w-full" data-testid="global-codec">
-                            <option value="av1" selected={data.recording.codec === 'av1'}>
+                            <option value="av1" selected={recording.codec === 'av1'}>
                                 AV1 (小さい・遅い)
                             </option>
-                            <option value="h264" selected={data.recording.codec === 'h264'}>
+                            <option value="h264" selected={recording.codec === 'h264'}>
                                 H.264 (速い・非力なマシン向け)
                             </option>
                         </select>
@@ -108,11 +100,11 @@
                     <label class="flex flex-col gap-1">
                         <span class="text-sm font-medium">CM</span>
                         <select name="cmCut" class="select select-bordered w-full" data-testid="global-cmcut">
-                            <option value="chapter" selected={data.recording.cmCut === 'chapter'}>
+                            <option value="chapter" selected={recording.cmCut === 'chapter'}>
                                 チャプターを打つだけ (安全)
                             </option>
-                            <option value="cut" selected={data.recording.cmCut === 'cut'}>実際に切る</option>
-                            <option value="off" selected={data.recording.cmCut === 'off'}>何もしない</option>
+                            <option value="cut" selected={recording.cmCut === 'cut'}>実際に切る</option>
+                            <option value="off" selected={recording.cmCut === 'off'}>何もしない</option>
                         </select>
                         {#if data.fromEnv.cmCut}
                             <span class="text-base-content/60 text-xs">いまは環境変数の値です</span>
@@ -127,7 +119,7 @@
                         <input
                             type="checkbox"
                             name="encode"
-                            checked={data.recording.encode}
+                            bind:checked={recording.encode}
                             class="checkbox checkbox-sm mt-0.5"
                             data-testid="global-encode"
                         />
@@ -140,7 +132,7 @@
                         <input
                             type="checkbox"
                             name="keepOriginal"
-                            checked={data.recording.keepOriginal}
+                            bind:checked={recording.keepOriginal}
                             class="checkbox checkbox-sm mt-0.5"
                             data-testid="global-keep"
                         />
@@ -155,7 +147,7 @@
                         <input
                             type="checkbox"
                             name="freeOnly"
-                            checked={data.recording.freeOnly}
+                            bind:checked={recording.freeOnly}
                             class="checkbox checkbox-sm mt-0.5"
                             data-testid="global-free-only"
                         />
@@ -180,23 +172,25 @@
                 <h2 class="card-title">ベーシック認証</h2>
                 <p class="text-base-content/70 text-sm">
                     VLC も Kodi も、画面の前段に置くリダイレクト型の認証を扱えません。
-                    ファイルを取りに来る口だけにベーシック認証をかけられます。 ユーザー名とパスワードの<strong
-                        >両方</strong
-                    >が入っているときだけ有効です。
+                    ファイルを取りに来る口だけにベーシック認証をかけられます。
+                    <strong>パスワードが入っているときだけ</strong>有効です。
                 </p>
                 <form method="POST" action="?/saveAuth" use:submitting class="grid gap-4 sm:grid-cols-3">
-                    <label class="flex flex-col gap-1">
+                    <div class="flex flex-col gap-1">
                         <span class="text-sm font-medium">ユーザー名</span>
-                        <input
-                            name="basicAuthUser"
-                            class="input input-bordered w-full"
-                            value={data.auth.user}
+                        <!--
+                            変えられるようにしていたが、変えて嬉しいことが無い。
+                            プレイヤー側にも同じものを入れる必要があるだけで、
+                            忘れると全部の端末がつながらなくなる。denpa で固定する
+                        -->
+                        <div
+                            class="input input-bordered flex w-full items-center font-mono"
                             data-testid="auth-user"
-                        />
-                        <span class="text-base-content/60 text-xs">
-                            空にすると認証そのものが無効になります
-                        </span>
-                    </label>
+                        >
+                            denpa
+                        </div>
+                        <span class="text-base-content/60 text-xs">固定です</span>
+                    </div>
                     <label class="flex flex-col gap-1">
                         <span class="text-sm font-medium">パスワード</span>
                         <!--
@@ -223,13 +217,12 @@
                             </button>
                         </div>
                         <div class="flex flex-wrap gap-2">
-                            <button
-                                type="button"
-                                class="btn btn-xs"
-                                onclick={generate}
-                                data-testid="auth-generate"
-                            >
-                                自動生成
+                            <!--
+                                作って保存まで1回で済ませる。考えて入れるものではないし、
+                                入れたものを保存し忘れると、そのつもりで居るのに掛かっていない
+                            -->
+                            <button class="btn btn-xs" formaction="?/newPassword" data-testid="auth-generate">
+                                作り直して保存
                             </button>
                             <button
                                 type="button"

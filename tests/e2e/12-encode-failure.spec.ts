@@ -38,7 +38,7 @@ test.describe('エンコードの失敗', () => {
         await expect(failed.getByTestId('recording-error')).toContainText('エンコードに失敗しました');
 
         // 理由は行を押して詳細で見る。ffmpeg の出力は長いので一覧には貼らない
-        await failed.locator('td').first().click();
+        await failed.getByTestId('row-body').click();
         const detail = page.getByTestId('program-detail');
         await expect(detail.getByTestId('detail-error')).toContainText('Error initializing the encoder');
         // 警告に埋もれず、止まった理由だけが出ていること

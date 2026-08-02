@@ -40,7 +40,9 @@ describe('録画エンコードの引数', () => {
     test('字幕と音声はコーデックによらず同じ', () => {
         for (const codec of ['av1', 'h264'] as const) {
             const args = buildArgs('/in.m2ts', '/out.mkv', 1, null, codec);
-            expect(argValue(args, '-c:s')).toBe('dvbsub');
+            // 字幕は文字のまま ASS で持つ。dvbsub (絵に焼く) は VLC が落ちる
+            expect(argValue(args, '-sub_type')).toBe('ass');
+            expect(argValue(args, '-c:s')).toBe('ass');
             expect(argValue(args, '-c:a')).toBe('libopus');
         }
     });
@@ -62,7 +64,7 @@ describe('録画エンコードの引数', () => {
             keep: [{ start: 0, end: 300 }],
         });
         expect(args).not.toContain('-sn');
-        expect(argValue(args, '-c:s')).toBe('dvbsub');
+        expect(argValue(args, '-c:s')).toBe('ass');
     });
 
     test('チャプターを渡すと2つ目の入力として読み込む', () => {

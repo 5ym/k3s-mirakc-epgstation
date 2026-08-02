@@ -5,7 +5,7 @@ import { config } from './config';
 import { database, now, queryAll, queryOne } from './db';
 import { CURRENT_SERVICES } from './epg';
 import { emit } from './events';
-import { openServiceStream } from './mirakc';
+import { getTuners, type MirakcTuner, openServiceStream } from './mirakc';
 import { chunks } from './stream';
 
 /**
@@ -21,6 +21,11 @@ import { chunks } from './stream';
 
 /** 1局あたりの取得にかける上限。長く開くとチューナーを塞ぐ */
 const SWEEP_TIMEOUT = 60_000;
+/**
+ * 相乗りのときの上限。向こうの都合でいつ閉じてもおかしくないので短くする。
+ * ロゴは数十秒に一度流れてくるので、拾えるときはこの中で拾える
+ */
+const RIDE_TIMEOUT = 30_000;
 /** ロゴを取りに行くときの優先度。録画より低くして、必要なら奪われるようにする */
 const SWEEP_PRIORITY = 0;
 
@@ -145,12 +150,80 @@ export function reconcile(): number {
  * もう選局できないチャンネルを1局ずつ60秒かけて開いては諦めることになり、
  * 本当に要る局まで順番が回ってこない。
  */
-export function missing(): { id: number; network_id: number; name: string }[] {
-    return queryAll<{ id: number; network_id: number; name: string }>(
-        `SELECT id, network_id, name FROM services
+export function missing(): { id: number; network_id: number; name: string; channel: string }[] {
+    return queryAll<{ id: number; network_id: number; name: string; channel: string }>(
+        `SELECT id, network_id, name, channel FROM services
          WHERE has_logo = 0 AND ${CURRENT_SERVICES}
          ORDER BY type, channel, service_id`,
     );
+}
+
+/** 1局から拾えるまで開いておく。拾えたら即座に閉じる */
+async function collect(serviceId: number, timeout: number): Promise<boolean> {
+    const controller = new AbortController();
+    const stop = setTimeout(() => controller.abort(), timeout);
+    try {
+        const stream = await openServiceStream(serviceId, controller.signal, SWEEP_PRIORITY);
+        const feed = watch(serviceId);
+        for await (const chunk of chunks(stream)) {
+            feed(chunk);
+            if (readLogo(serviceId) !== null) return true;
+        }
+    } catch {
+        // 取れなければ次の機会に。チューナーが空いていないだけのことも多い
+    } finally {
+        clearTimeout(stop);
+        controller.abort();
+    }
+    return false;
+}
+
+/** いま mirakc が開けている物理チャンネル。選局コマンドから読む */
+function openChannels(tuners: MirakcTuner[]): Set<string> {
+    const open = new Set<string>();
+    for (const tuner of tuners) {
+        const channel = tuner.command?.match(/--channel\s+(\S+)/)?.[1];
+        if (channel !== undefined) open.add(channel);
+    }
+    return open;
+}
+
+/** 同時に2つ走らせない。相乗りの合図 (tuner.status-changed) は連続して飛んでくる */
+let riding = false;
+
+/**
+ * **いま開いている選局に相乗りして**ロゴを拾う。
+ *
+ * mirakc は番組表を集めるために自分でチューナーを開く。そこへ同じチャンネルの
+ * サービスを要求すると、mirakc は**新しいチューナーを掴まずに配っているものへ混ぜる**
+ * ので、こちらは只で電波を読める。空いた時間に自分で開き直すより早く埋まり、
+ * チューナーの取り合いも起きない。
+ *
+ * 合図は `tuner.status-changed`。開いた瞬間に呼ばれるので、閉じるまでの間に読み切る。
+ */
+export async function ride(): Promise<number> {
+    if (riding) return 0;
+    riding = true;
+    try {
+        reconcile();
+        const need = missing();
+        if (need.length === 0) return 0;
+
+        const open = openChannels(await getTuners());
+        if (open.size === 0) return 0;
+
+        let found = 0;
+        for (const service of need) {
+            if (!open.has(service.channel)) continue;
+            if (await collect(service.id, RIDE_TIMEOUT)) found++;
+        }
+        return found;
+    } catch {
+        // mirakc に聞けなければ何もしない。次の知らせでまた来る
+        return 0;
+    } finally {
+        riding = false;
+    }
 }
 
 /**
@@ -163,26 +236,10 @@ export async function sweep(limit = 1): Promise<number> {
     // 立っているだけでファイルが無い局を先に拾い直す。そうしないと
     // 「もう持っている」とみなして永久に取りに行かない
     reconcile();
-    let found = 0;
+    // 開いているチューナーがあるなら、まずそちらに乗る。只で読める
+    let found = await ride();
     for (const service of missing().slice(0, limit)) {
-        const controller = new AbortController();
-        const stop = setTimeout(() => controller.abort(), SWEEP_TIMEOUT);
-        try {
-            const stream = await openServiceStream(service.id, controller.signal, SWEEP_PRIORITY);
-            const collect = watch(service.id);
-            for await (const chunk of chunks(stream)) {
-                collect(chunk);
-                if (readLogo(service.id) !== null) {
-                    found++;
-                    break;
-                }
-            }
-        } catch {
-            // 取れなければ次の機会に。チューナーが空いていないだけのことも多い
-        } finally {
-            clearTimeout(stop);
-            controller.abort();
-        }
+        if (await collect(service.id, SWEEP_TIMEOUT)) found++;
     }
     return found;
 }

@@ -121,8 +121,10 @@ spec:
             # CMは既定ではチャプターを打つだけ。実カットは番組ごとにUIで選ぶ
             - name: CM_CUT_DEFAULT
               value: chapter
+            # ロゴまで見て判定する。無音だけより確かだが、1本目は
+            # その局のロゴを覚えるぶん時間がかかる
             - name: CM_DETECTOR
-              value: silence
+              value: jls
             # 録画のコーデック。非力なノードでは h264 にする
             - name: ENCODE_CODEC
               value: av1
