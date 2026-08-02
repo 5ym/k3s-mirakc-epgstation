@@ -58,7 +58,11 @@ $joined = $global:got.args -join ' '
 Write-Host "VLC:  $($global:got.path)"
 Write-Host "引数: $joined"
 if ($global:got.path -ne $exe) { throw 'プレイヤーのパスが違う' }
-if ($joined -notlike "*--meta-title=$title*") { throw 'タイトルを復元できていない' }
+# 番組名は空白を含む。1つの引数として渡らないと、後ろがもう1つの入力になって
+# プレイヤーが「開けません」と言う
+$titleArg = @($global:got.args | Where-Object { $_ -like '*meta-title*' })
+if ($titleArg.Count -ne 1) { throw 'タイトルが1つの引数になっていない' }
+if ($titleArg[0] -ne "--meta-title=`"$title`"") { throw "タイトルがくくられていない: $($titleArg[0])" }
 if ($joined -notlike "*$url*") { throw 'URLを復元できていない' }
 Write-Host '=> 復号して VLC に渡せている'
 
@@ -71,7 +75,9 @@ if (-not $global:got) { throw 'mpv で開けませんでした' }
 $mpvArgs = $global:got.args -join ' '
 Write-Host "mpv:  $($global:got.path)"
 Write-Host "引数: $mpvArgs"
-if ($mpvArgs -notlike "*--force-media-title=$title*") { throw 'mpv にタイトルを渡せていない' }
+$mpvTitle = @($global:got.args | Where-Object { $_ -like '*media-title*' })
+if ($mpvTitle.Count -ne 1) { throw 'mpv でタイトルが1つの引数になっていない' }
+if ($mpvTitle[0] -ne "--force-media-title=`"$title`"") { throw 'mpv でタイトルがくくられていない' }
 Write-Host '=> 復号して mpv にも渡せている'
 
 $Player = 'vlc'

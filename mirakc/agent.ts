@@ -40,7 +40,14 @@ const PORT = Number(process.env.AGENT_PORT ?? 40773);
 const CONFIG = process.env.MIRAKC_CONFIG ?? '/app-config/config.yml';
 const CONFIG_TEMPLATE = '/app-config-defaults/config.yml';
 const EPG_CACHE = process.env.MIRAKC_EPG_CACHE ?? '/var/lib/mirakc/epg';
-const RECORDED_DIR = resolve(process.env.RECORDED_DIR ?? '/denpa-recorded');
+/**
+ * denpa のファイル置き場。生TSだけでなく保存先も要る。
+ * 引き継いだ録画は生TSを持たず、保存先にあるものが掛かったままのことがある
+ */
+const ROOTS: Record<string, string> = {
+    recorded: resolve(process.env.RECORDED_DIR ?? '/denpa-recorded'),
+    library: resolve(process.env.LIBRARY_DIR ?? '/denpa-library'),
+};
 const RECISDB = process.env.RECISDB ?? 'recisdb';
 const MIRAKC = process.env.MIRAKC_BIN ?? '/usr/local/bin/mirakc';
 const LOG_LIMIT = 400;
@@ -145,11 +152,12 @@ async function cardStatus() {
     return { ok: pcscd && readers.length > 0, pcscd, readers, message };
 }
 
-/** 生TSの置き場の中に収まるパスだけ受け付ける。外を読み書きさせない */
-function insideRecorded(name: unknown): string | null {
-    if (typeof name !== 'string' || name === '') return null;
-    const full = resolve(RECORDED_DIR, name);
-    return full.startsWith(`${RECORDED_DIR}/`) ? full : null;
+/** 置き場の中に収まるパスだけ受け付ける。外を読み書きさせない */
+function inside(root: string, name: unknown): string | null {
+    if (typeof name !== 'string' || name === '' || !(root in ROOTS)) return null;
+    const base = ROOTS[root];
+    const full = resolve(base, name);
+    return full.startsWith(`${base}/`) ? full : null;
 }
 
 /**
@@ -158,16 +166,17 @@ function insideRecorded(name: unknown): string | null {
  * recisdb はカードが読めないとき「黙って素通しする」ので、終了コードだけでは
  * 成否が分からない。出来上がったものを見て判断するのは呼び出し側(denpa)。
  */
-async function decode(body: { input?: unknown; output?: unknown }) {
-    const source = insideRecorded(body.input);
-    const target = insideRecorded(body.output);
+async function decode(body: { root?: unknown; input?: unknown; output?: unknown }) {
+    const root = typeof body.root === 'string' ? body.root : 'recorded';
+    const source = inside(root, body.input);
+    const target = inside(root, body.output);
     if (source === null || target === null) {
-        return { ok: false, error: `生TSの置き場 (${RECORDED_DIR}) の外は解除に回せません` };
+        return { ok: false, error: `${root} の置き場の外は解除に回せません` };
     }
     if (!existsSync(source)) {
         return {
             ok: false,
-            error: `${source} が見えません。denpa と同じ生TSの置き場をこのコンテナにも見せてください`,
+            error: `${source} が見えません。denpa と同じ置き場をこのコンテナにも見せてください`,
         };
     }
 
@@ -359,5 +368,9 @@ if (import.meta.main) {
 
     mirakc.begin();
     serve();
-    log(`listening on :${PORT} (recorded: ${RECORDED_DIR})`);
+    log(
+        `listening on :${PORT} (${Object.entries(ROOTS)
+            .map(([k, v]) => `${k}: ${v}`)
+            .join(', ')})`,
+    );
 }

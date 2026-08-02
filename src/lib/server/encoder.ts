@@ -7,8 +7,9 @@ import { database, now, queryOne } from './db';
 import { emit } from './events';
 import { removeIfExists } from './fsx';
 import { libraryPath } from './library';
-import { writeNfo, writeThumbnail } from './metadata';
+import { sidecarPaths, writeNfo, writeThumbnail } from './metadata';
 import { descramble, isScrambled } from './scramble';
+import { settings } from './settings';
 import { chunks } from './stream';
 import { notify } from './webhook';
 
@@ -439,6 +440,16 @@ export function encodeSource(recording: Recording): string | null {
     return recording.ts_path ?? recording.library_path;
 }
 
+/**
+ * 生TSを残すか。
+ *
+ * 録画ごとの指定ではなく全体設定に従う。録り直すたびに「あのときどうしたか」を
+ * 思い出す必要が無いようにするため。
+ */
+function keepOriginal(): boolean {
+    return settings().keepOriginal;
+}
+
 /** エンコードの失敗を記録して知らせる。理由はそのまま録画の行に出る */
 function fail(jobId: number, recording: Recording, reason: string): void {
     database()
@@ -501,7 +512,7 @@ async function runJob(jobId: number): Promise<void> {
             fail(jobId, recording, `スクランブルを解除できませんでした: ${result.error}`);
             return;
         }
-        if (recording.keep_original && recording.ts_path === input) {
+        if (keepOriginal() && recording.ts_path === input) {
             // 生TSを残す設定なら、残すのは解けたほうだけにする。
             // 掛かったままのTSを取っておいても、あとから解ける保証は無い
             renameSync(target, input);
@@ -570,8 +581,18 @@ async function runJob(jobId: number): Promise<void> {
         return;
     }
 
-    // ここで初めて本来の場所に置く。引き継いだ録画の録り直しでは元を上書きする
+    // ここで初めて本来の場所に置く。同じ名前なら上書きになる
     renameSync(working, output);
+    /*
+     * 番組名が変わっていると置き場所も変わる。前のエンコード済みが別名で残ると
+     * 同じ録画が2本並ぶので、サイドカーごと片付ける
+     */
+    if (recording.library_path !== null && recording.library_path !== output) {
+        removeIfExists(recording.library_path);
+        const stale = sidecarPaths(recording.library_path);
+        removeIfExists(stale.nfo);
+        removeIfExists(stale.thumbnail);
+    }
 
     let size = 0;
     try {
@@ -607,7 +628,7 @@ async function runJob(jobId: number): Promise<void> {
         },
     });
 
-    if (recording.keep_original) {
+    if (keepOriginal()) {
         database()
             .prepare(
                 `UPDATE recordings SET state = 'available', library_path = ?, ts_size = ?, updated_at = ? WHERE id = ?`,

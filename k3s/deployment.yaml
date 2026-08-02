@@ -24,9 +24,12 @@ spec:
           env:
             - name: TZ
               value: Asia/Tokyo
-            # 掛かったまま録れたTSを解く先。denpa の RECORDED_DIR と同じ実体
+            # 掛かったまま録れたTSを解く先。denpa の置き場と同じ実体。
+            # 引き継いだ録画は生TSを持たず、保存先にあるものが掛かったままのことがある
             - name: RECORDED_DIR
               value: /denpa-recorded
+            - name: LIBRARY_DIR
+              value: /denpa-library
           ports:
             - containerPort: 40772
             # チューナー側エージェント。スキャン・カードの状態・スクランブル解除の窓口
@@ -47,6 +50,8 @@ spec:
             # カードを読めるのはこのコンテナだけなので、denpa はパスだけ寄越す
             - name: denpa-recorded
               mountPath: /denpa-recorded
+            - name: denpa-library
+              mountPath: /denpa-library
       volumes:
         - name: mirakc-config
           persistentVolumeClaim:
@@ -57,6 +62,9 @@ spec:
         - name: denpa-recorded
           persistentVolumeClaim:
             claimName: denpa-recorded
+        - name: denpa-library
+          persistentVolumeClaim:
+            claimName: denpa-library
         - name: dev-bus
           hostPath:
             path: /dev/bus

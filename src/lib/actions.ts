@@ -42,8 +42,11 @@ export function submitting(node: HTMLFormElement, submit?: SubmitFunction) {
  * かといって `100vh - 14rem` のように決め打つと、上に何が乗っているか
  * (エンコード中のカード、見出しの折り返し) で余白が大きくずれる。
  * 自分の上端を実際に測って、そこから下を全部使う。
+ *
+ * gap は下に残す余白。`main` の下パディング (md:p-6 = 24px) と同じにしてある。
+ * これより小さいと1画面に収まらず、外側にスクロールバーが生える。
  */
-export function fillViewport(node: HTMLElement, gap = 16) {
+export function fillViewport(node: HTMLElement, gap = 24) {
     /** 直前に入れた値。ResizeObserver が自分の書き込みで再び回るのを止める */
     let applied = 0;
 
@@ -61,7 +64,7 @@ export function fillViewport(node: HTMLElement, gap = 16) {
     window.addEventListener('resize', fit);
 
     return {
-        update(next = 16) {
+        update(next = 24) {
             gap = next;
             fit();
         },

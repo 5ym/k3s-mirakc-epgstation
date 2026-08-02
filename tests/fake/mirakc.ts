@@ -17,8 +17,11 @@ const LOGO_PNG = Uint8Array.from(
 );
 
 const PORT = Number(process.env.FAKE_MIRAKC_PORT ?? 40772);
-/** 生TSの置き場。本物では denpa と同じものを mirakc 側にも見せてある */
-const RECORDED_DIR = resolve(process.env.RECORDED_DIR ?? '/recorded');
+/** denpa の置き場。本物では同じものを mirakc 側にも見せてある */
+const ROOTS: Record<string, string> = {
+    recorded: resolve(process.env.RECORDED_DIR ?? '/recorded'),
+    library: resolve(process.env.LIBRARY_DIR ?? '/library'),
+};
 const SLOTS = Number(process.env.FAKE_SLOTS ?? 60);
 /** 番組表を丸1日ぶん埋めるための追加分。局ごとの尺に応じて増やす */
 const DAY = 30 * 60 * 60 * 1000;
@@ -98,11 +101,13 @@ function packets(count: number, scrambled: boolean): Uint8Array {
  *
  * 本物と同じく、渡されるのは生TSの置き場からの相対パス。
  */
-function unscramble(input: string, output: string): { ok: boolean; error: string } {
-    const from = resolve(RECORDED_DIR, input);
-    const to = resolve(RECORDED_DIR, output);
-    if (!from.startsWith(`${RECORDED_DIR}/`) || !to.startsWith(`${RECORDED_DIR}/`)) {
-        return { ok: false, error: `生TSの置き場 (${RECORDED_DIR}) の外は解除に回せません` };
+function unscramble(root: string, input: string, output: string): { ok: boolean; error: string } {
+    const base = ROOTS[root];
+    if (base === undefined) return { ok: false, error: `知らない置き場です: ${root}` };
+    const from = resolve(base, input);
+    const to = resolve(base, output);
+    if (!from.startsWith(`${base}/`) || !to.startsWith(`${base}/`)) {
+        return { ok: false, error: `${root} の置き場の外は解除に回せません` };
     }
     if (!existsSync(from)) return { ok: false, error: `${from} が見えません` };
 
@@ -329,7 +334,9 @@ Bun.serve({
         if (url.pathname === '/denpa/decode' && request.method === 'POST') {
             return request
                 .json()
-                .then((body: { input: string; output: string }) => json(unscramble(body.input, body.output)));
+                .then((body: { root?: string; input: string; output: string }) =>
+                    json(unscramble(body.root ?? 'recorded', body.input, body.output)),
+                );
         }
         /*
          * チャンネルスキャン。本物はチューナー側のエージェント (mirakc/agent.py) が

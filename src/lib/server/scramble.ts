@@ -114,18 +114,27 @@ export async function cardStatus(): Promise<CardStatus> {
  * 成否が分からない。出来上がったものを見て判断する。
  */
 export async function descramble(input: string, output: string): Promise<{ ok: boolean; error: string }> {
-    // 向こうのマウント先はこちらと同じとは限らないので、置き場からの相対で渡す
-    const from = relative(config.recordedDir, input);
-    const to = relative(config.recordedDir, output);
-    if (from.startsWith('..') || to.startsWith('..')) {
-        return { ok: false, error: `生TSの置き場 (${config.recordedDir}) の外は解除に回せません` };
+    /*
+     * 向こうのマウント先はこちらと同じとは限らないので、置き場からの相対で渡す。
+     * 引き継いだ録画は生TSを持たず、保存先にあるものが掛かったままのことがあるので、
+     * 生TSの置き場と保存先の両方を見る
+     */
+    const roots = { recorded: config.recordedDir, library: config.libraryDir };
+    const entry = Object.entries(roots).find(([, base]) => !relative(base, input).startsWith('..'));
+    if (entry === undefined) {
+        return { ok: false, error: `${input} は denpa の置き場の外にあります` };
+    }
+    const [root, base] = entry;
+    const to = relative(base, output);
+    if (to.startsWith('..')) {
+        return { ok: false, error: `${output} は ${root} の置き場の外です` };
     }
 
     try {
         const res = await fetch(`${config.tunerAgentUrl}/denpa/decode`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ input: from, output: to }),
+            body: JSON.stringify({ root, input: relative(base, input), output: to }),
         });
         const body = (await res.json()) as { ok?: boolean; error?: string };
         if (!res.ok || body.ok !== true) {

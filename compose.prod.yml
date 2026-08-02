@@ -22,14 +22,17 @@ services:
             - /dev/dvb
         environment:
             TZ: Asia/Tokyo
-            # 掛かったまま録れたTSを解く先。denpa と同じ実体を見せる
+            # 掛かったまま録れたTSを解く先。denpa と同じ実体を見せる。
+            # 引き継いだ録画は保存先にあるものが掛かったままのことがある
             RECORDED_DIR: /denpa-recorded
+            LIBRARY_DIR: /denpa-library
         volumes:
             # 設定。スキャン結果が書き戻されるので名前付きボリュームに置く。
             # /etc/mirakc は mirakc 自身の strings.yml が居るので使わない
             - mirakc-config:/app-config
             - mirakc-epg:/var/lib/mirakc/epg
             - denpa-recorded:/denpa-recorded
+            - denpa-library:/denpa-library
         ports:
             - '40772:40772'
 

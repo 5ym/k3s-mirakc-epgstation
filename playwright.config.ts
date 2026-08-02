@@ -41,6 +41,7 @@ export default defineConfig({
                 // スクランブル解除はパスだけ受け取って直接ファイルを触る。
                 // 本物でも denpa と mirakc の両方に同じ置き場を見せている
                 RECORDED_DIR: `${TEST_ROOT}/recorded`,
+                LIBRARY_DIR,
             },
         },
         {

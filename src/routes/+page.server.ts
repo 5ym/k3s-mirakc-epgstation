@@ -1,9 +1,9 @@
 import { fail } from '@sveltejs/kit';
 import { enabled as authEnabled } from '$lib/server/auth';
 import { database, queryAll, queryOne } from '$lib/server/db';
-import { cancel as cancelEncode, encodeSource, enqueue, pump } from '$lib/server/encoder';
+import { cancel as cancelEncode, enqueue, pump } from '$lib/server/encoder';
 import { deleteRecordingFiles, reconcile } from '$lib/server/files';
-import { cancel } from '$lib/server/reservations';
+import { cancel, restore } from '$lib/server/reservations';
 import { resolveConflicts } from '$lib/server/scheduler';
 import { settings } from '$lib/server/settings';
 import type { EncodeJob, Recording, Reservation } from '$lib/types';
@@ -112,10 +112,9 @@ export const actions = {
     reencode: async ({ request }) => {
         const recording = target(await request.formData());
         if (recording === undefined) return fail(400, { message: '録画が見つかりません' });
-        // 生TSが無くても、保存先にあるものを元に録り直せる。
-        // 引き継いだ録画は生TSを持たず、中身がまだ生TSのままのことがある
-        if (encodeSource(recording) === null) {
-            return fail(400, { message: '元のファイルが残っていないため再エンコードできません' });
+        // 元になるのは生TS。エンコード済みを元に録り直しても画質は戻らない
+        if (recording.ts_path === null) {
+            return fail(400, { message: '生TSが残っていないため再エンコードできません' });
         }
         enqueue(recording.id);
         pump();
@@ -133,6 +132,19 @@ export const actions = {
     reconcile: () => {
         // 「実体と照合」ボタン。外から消した分をすぐ一覧に反映したいとき用
         return { success: true, reconcile: reconcile() };
+    },
+
+    /** 取り消した予約を戻す。ルールは作り直さないので、ここからしか戻せない */
+    restore: async ({ request }) => {
+        const form = await request.formData();
+        const id = Number(form.get('id'));
+        if (!Number.isFinite(id)) return fail(400, { message: 'IDが不正です' });
+        try {
+            await restore(id);
+        } catch (error) {
+            return fail(400, { message: String(error) });
+        }
+        return { success: true };
     },
 
     cancel: async ({ request }) => {

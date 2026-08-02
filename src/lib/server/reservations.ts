@@ -65,6 +65,24 @@ export async function reserve(
  * 予約の取り消し。録画中なら止めて、そこまでの分は録画済みとして残す
  * (途中まででも見たいことがあるのでファイルは捨てない)。
  */
+/**
+ * 取り消した予約を戻す。
+ *
+ * ルールが作った予約を手で取り消すと、以後ルールは作り直さない
+ * (`INSERT OR IGNORE` が同じ番組を弾く)。気が変わったときに戻す道がここ。
+ */
+export async function restore(reservationId: number): Promise<void> {
+    const reservation = queryOne<Reservation>('SELECT * FROM reservations WHERE id = ?', reservationId);
+    if (reservation === undefined) throw new Error('予約が見つかりません');
+    if (reservation.state !== 'canceled') throw new Error('取り消した予約ではありません');
+    if (reservation.end_at <= now()) throw new Error('この番組は放送が終わっています');
+
+    database()
+        .prepare(`UPDATE reservations SET state = 'scheduled', updated_at = ? WHERE id = ?`)
+        .run(now(), reservationId);
+    await resolveConflicts();
+}
+
 export async function cancel(reservationId: number): Promise<void> {
     const reservation = queryOne<Reservation>('SELECT * FROM reservations WHERE id = ?', reservationId);
     if (reservation === undefined) return;

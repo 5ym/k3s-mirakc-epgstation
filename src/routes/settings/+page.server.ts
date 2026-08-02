@@ -63,7 +63,13 @@ export const actions = {
         if (!isVideoCodec(codec) || !isCmMode(cmCut)) {
             return fail(400, { message: 'コーデックかCMの指定が不正です' });
         }
-        saveSettings({ codec, cmCut });
+        saveSettings({
+            codec,
+            cmCut,
+            encode: form.get('encode') === 'on',
+            keepOriginal: form.get('keepOriginal') === 'on',
+            freeOnly: form.get('freeOnly') === 'on',
+        });
         return { success: true, saved: true };
     },
 

@@ -57,6 +57,7 @@ export interface PreviewRow {
 }
 
 export function load({ url }) {
+    const defaults = settings();
     // ?edit=<id> のときは、そのルールをフォームに読み込んで書き換えられるようにする
     const editing = queryOne<Rule>('SELECT * FROM rules WHERE id = ?', Number(url.searchParams.get('edit')));
 
@@ -74,7 +75,9 @@ export function load({ url }) {
              WHERE p.start_at > ? ORDER BY p.start_at`,
             now(),
         );
-        const hits = all.filter((program) => matches(conditions, program, program.service_type));
+        const hits = all.filter((program) =>
+            matches(conditions, program, program.service_type, defaults.freeOnly),
+        );
         preview = {
             total: hits.length,
             programs: hits.slice(0, 100).map((p) => ({
@@ -97,7 +100,7 @@ export function load({ url }) {
     const services = database().prepare('SELECT * FROM services ORDER BY type, channel').all() as Service[];
     // フォームの初期値は「編集中のルール」か「URLに載った条件」。
     // preview と別々に組み立てると、画面に出ている結果と保存されるものがズレる
-    return { rules, services, editing: editing ?? null, seed: conditions, preview, defaults: settings() };
+    return { rules, services, editing: editing ?? null, seed: conditions, preview, defaults };
 }
 
 /** 選択されたチャンネルを JSON 配列に。未選択(=全チャンネル)は NULL で表す */

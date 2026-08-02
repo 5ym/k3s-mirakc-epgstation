@@ -1,6 +1,7 @@
 import { type Genre, genreMatches } from '$lib/arib';
 import type { Program, Rule } from '../types';
 import { database, now, queryAll } from './db';
+import { settings } from './settings';
 import { toHalfWidth } from './title';
 
 function parseList(json: string | null): number[] | null {
@@ -45,8 +46,14 @@ function parseStrings(json: string | null): string[] | null {
     }
 }
 
-export function matches(rule: Rule, program: Program, serviceType?: string): boolean {
-    if (rule.free_only && !program.is_free) return false;
+/**
+ * ルールに番組が当てはまるか。
+ *
+ * 有料放送を対象にするかは全体設定なので、呼ぶ側が渡す
+ * (ここで設定を読むと純粋関数でなくなり、テストから条件を作れない)。
+ */
+export function matches(rule: Rule, program: Program, serviceType?: string, freeOnly = true): boolean {
+    if (freeOnly && !program.is_free) return false;
 
     // チャンネルの条件は「種別」と「個別チャンネル」のOR。
     // 「地上波全部 + BS11だけ」のような指定ができるようにするため
@@ -91,6 +98,8 @@ export function applyRules(): number {
     if (rules.length === 0) return 0;
 
     const at = now();
+    // 録画のしかたは全体で1つ。ルールごとに持たせるとどこで決まったか分からなくなる
+    const recording = settings();
     // 種別(GR/BS/CS)でも絞り込めるよう、番組にチャンネル種別を添えて取る
     const programs = queryAll<Program & { service_type: string }>(
         `SELECT p.*, s.type AS service_type FROM programs p
@@ -110,7 +119,7 @@ export function applyRules(): number {
     const tx = database().transaction(() => {
         for (const program of programs) {
             for (const rule of rules) {
-                if (!matches(rule, program, program.service_type)) continue;
+                if (!matches(rule, program, program.service_type, recording.freeOnly)) continue;
                 const res = insert.run(
                     program.id,
                     rule.id,
@@ -120,10 +129,10 @@ export function applyRules(): number {
                     program.start_at,
                     program.end_at,
                     rule.priority,
-                    rule.encode,
-                    rule.keep_original,
-                    rule.cm_cut,
-                    rule.codec,
+                    recording.encode ? 1 : 0,
+                    recording.keepOriginal ? 1 : 0,
+                    recording.cmCut,
+                    recording.codec,
                     at,
                     at,
                 );

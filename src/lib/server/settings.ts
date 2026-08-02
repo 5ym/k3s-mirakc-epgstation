@@ -17,6 +17,12 @@ export interface Settings {
     codec: VideoCodec;
     /** CMの扱い。off / chapter / cut */
     cmCut: CmMode;
+    /** エンコードするか。しないなら生TSのまま置く */
+    encode: boolean;
+    /** エンコードしたあとも生TSを残すか */
+    keepOriginal: boolean;
+    /** 自動予約で無料放送だけを対象にするか */
+    freeOnly: boolean;
     /** ベーシック認証。両方入っているときだけ有効 */
     basicAuthUser: string;
     basicAuthPassword: string;
@@ -32,9 +38,16 @@ export function settings(): Settings {
     const codec = stored('codec');
     const cmCut = stored('cmCut');
     const scope = stored('basicAuthScope') ?? config.basicAuthScope;
+    const flag = (key: string, fallback: boolean) => {
+        const value = stored(key);
+        return value === undefined ? fallback : value === 'true';
+    };
     return {
         codec: isVideoCodec(codec) ? codec : config.encodeCodec,
         cmCut: isCmMode(cmCut) ? cmCut : config.cmCutDefault,
+        encode: flag('encode', true),
+        keepOriginal: flag('keepOriginal', false),
+        freeOnly: flag('freeOnly', true),
         basicAuthUser: stored('basicAuthUser') ?? config.basicAuthUser,
         basicAuthPassword: stored('basicAuthPassword') ?? config.basicAuthPassword,
         basicAuthScope: scope === 'all' ? 'all' : 'files',

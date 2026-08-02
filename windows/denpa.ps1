@@ -268,12 +268,16 @@ function Build-Command([string] $exe) {
 
     # 番組名の渡し方はプレイヤーで違う。
     # 連結は必ず括弧でくくる。@('a','b'+$t) は「配列に $t を足す」と解釈され、
-    # 'b'+$t の連結にならない (, は + より結合が弱い)
+    # 'b'+$t の連結にならない (, は + より結合が弱い)。
+    #
+    # 値は二重引用符でくくる。Start-Process は引数を空白で繋いだ1本の
+    # コマンドラインとして渡すので、くくらないと**番組名の空白で分かれ**、
+    # 後ろがもう1つの入力としてプレイヤーに渡って「開けません」になる
     $playerArgs = if ($Player -eq 'vlc') {
-        "@('--no-video-title-show',('--meta-title='+`$t),`$u)"
+        "@('--no-video-title-show',('--meta-title=`"'+`$t+'`"'),('`"'+`$u+'`"'))"
     }
     else {
-        "@(('--force-media-title='+`$t),'--',`$u)"
+        "@(('--force-media-title=`"'+`$t+'`"'),'--',('`"'+`$u+'`"'))"
     }
 
     $lines = @(
@@ -286,7 +290,8 @@ function Build-Command([string] $exe) {
         "`$u=D `$m.Groups[1].Value"
         # 外から渡ってくるリンクなので、file:// などをそのまま食わせない
         "if(`$u -notmatch '^https?://'){F('http(s) 以外は開きません')}"
-        "`$t=D `$m.Groups[2].Value"
+        # 番組名の " は引用をこわすので落とす。EPG の記号は当てにできない
+        "`$t=(D `$m.Groups[2].Value).Replace('`"','')"
         "if(!(Test-Path '$quoted')){F('プレイヤーが見つかりません: $quoted')}"
         "try{Start-Process '$quoted' $playerArgs}catch{F(`$_.Exception.Message)}"
     )

@@ -241,44 +241,10 @@
                 </details>
             </div>
 
-            <fieldset class="border-base-300 rounded-box border p-4">
-                <legend class="px-2 text-sm font-medium">録画のしかた</legend>
-                <div class="flex flex-wrap gap-x-6 gap-y-2">
-                    <label class="flex cursor-pointer items-center gap-2">
-                        <input
-                            type="checkbox"
-                            name="encode"
-                            class="checkbox checkbox-sm"
-                            checked={data.seed ? data.seed.encode === 1 : true}
-                        />
-                        <span class="text-sm">エンコードする</span>
-                    </label>
-                    <label class="flex cursor-pointer items-center gap-2">
-                        <input
-                            type="checkbox"
-                            name="keepOriginal"
-                            class="checkbox checkbox-sm"
-                            checked={data.seed ? data.seed.keep_original === 1 : false}
-                        />
-                        <span class="text-sm">生TSも残す</span>
-                    </label>
-                    <label class="flex cursor-pointer items-center gap-2">
-                        <input
-                            type="checkbox"
-                            name="freeOnly"
-                            class="checkbox checkbox-sm"
-                            checked={data.seed ? data.seed.free_only === 1 : true}
-                        />
-                        <span class="text-sm">無料放送のみ</span>
-                    </label>
-                    <!-- コーデックとCMの扱いは全体で1つ。ここで選ばせると
-                         どこで決まったのか分からなくなる -->
-                    <span class="text-base-content/60 self-center text-xs">
-                        コーデックとCMの扱いは<a class="link" href="/settings">設定</a>で決めます ({data.defaults.codec.toUpperCase()}
-                        / CM: {CM_LABEL[data.defaults.cmCut]})
-                    </span>
-                </div>
-            </fieldset>
+            <p class="text-base-content/60 text-sm">
+                エンコードのしかたと無料放送の扱いは<a class="link" href="/settings">設定</a>で決めます ({data.defaults.codec.toUpperCase()}
+                / CM: {CM_LABEL[data.defaults.cmCut]}{data.defaults.freeOnly ? ' / 無料放送のみ' : ''})
+            </p>
 
             <div class="flex flex-wrap gap-2">
                 <button class="btn" formmethod="GET" formaction="/rules" data-testid="rule-preview">
@@ -346,7 +312,6 @@
                 <th>除外</th>
                 <th>チャンネル</th>
                 <th>ジャンル</th>
-                <th>録画</th>
                 <th>優先度</th>
                 <th>予約数</th>
                 <th class="w-56"></th>
@@ -364,20 +329,6 @@
                     <td class="text-error text-sm">{rule.ignore_keyword || '-'}</td>
                     <td class="max-w-48 text-sm" data-testid="rule-channels">{channels(rule)}</td>
                     <td class="max-w-48 text-sm" data-testid="rule-genres-label">{genres(rule)}</td>
-                    <!-- 既定と違うところだけ出す。全部並べても見比べにくい -->
-                    <td class="text-sm">
-                        <div class="flex flex-wrap gap-1">
-                            {#if !rule.encode}
-                                <span class="badge badge-ghost badge-sm">TSのみ</span>
-                            {/if}
-                            {#if rule.keep_original}
-                                <span class="badge badge-ghost badge-sm">生TSも残す</span>
-                            {/if}
-                            {#if !rule.free_only}
-                                <span class="badge badge-ghost badge-sm">有料も</span>
-                            {/if}
-                        </div>
-                    </td>
                     <td>{rule.priority}</td>
                     <td>{rule.reservations}</td>
                     <td class="flex flex-nowrap gap-2">
@@ -404,7 +355,7 @@
                     </td>
                 </tr>
             {:else}
-                <tr><td colspan="8" class="text-base-content/60">ルールはまだありません</td></tr>
+                <tr><td colspan="7" class="text-base-content/60">ルールはまだありません</td></tr>
             {/each}
         </tbody>
     </table>

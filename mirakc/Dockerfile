@@ -28,7 +28,7 @@ RUN apt-get update && \
 # PVC を被せると隠れてしまう。
 # イメージが持っているのは初回だけ写す雛形で、チャンネルは空
 ENV MIRAKC_CONFIG=/app-config/config.yml
-COPY config.yml /app-config-defaults/config.yml
+COPY mirakc/config.yml /app-config-defaults/config.yml
 COPY --from=agent /build/denpa-agent /usr/local/bin/denpa-agent
 
 # エージェントが PID 1 になり、mirakc を子として抱える。

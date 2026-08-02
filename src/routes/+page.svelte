@@ -46,6 +46,15 @@
     const downloadUrl = (id: number) =>
         withCredentials(`${origin}/api/recordings/${id}/file?download=1`, data.credentials);
 
+    /** 知らせを出しておく時間。読めるだけ出したら引っ込める */
+    let notice = $state(false);
+    $effect(() => {
+        if (form?.message === undefined && form?.reconcile === undefined) return;
+        notice = true;
+        const timer = setTimeout(() => (notice = false), 6000);
+        return () => clearTimeout(timer);
+    });
+
     /** 行から開いた番組詳細。番組表と同じ見せ方をする */
     let detail = $state<Detail | null>(null);
     /** その行のエンコード失敗の理由。詳細の中で見せる */
@@ -119,8 +128,22 @@
 
 <h1 class="mb-4 text-2xl font-bold">予約と録画</h1>
 
-{#if form?.message}
-    <div class="alert alert-error mb-4" data-testid="dashboard-error">{form.message}</div>
+<!--
+    知らせは重ねて出す。一覧の上に差し込むと、その分だけ表が下にずれて
+    画面からはみ出し、外側にスクロールバーが生える。
+    ナビの下に置き、しばらくしたら自分で消える
+-->
+{#if notice}
+    <div class="toast toast-top toast-center top-20 z-50">
+        {#if form?.message}
+            <div class="alert alert-error" data-testid="dashboard-error">{form.message}</div>
+        {/if}
+        {#if form?.reconcile}
+            <div class="alert alert-info" data-testid="reconcile-result">
+                照合 {form.reconcile.checked} 件 / 実体が無く削除済み {form.reconcile.removed} 件
+            </div>
+        {/if}
+    </div>
 {/if}
 
 <div class="grid gap-6 lg:grid-cols-5">
@@ -186,8 +209,16 @@
                                 {/if}
                                 <!-- 手動なら何も出さない。既定と違うときだけ言う -->
                                 {#if !res.manual}
+                                    <!-- ルール名をそのまま入口にする。行にボタンを足すと窮屈になる -->
                                     <div class="text-base-content/60 text-xs" data-testid="rule-name">
-                                        ルール: {res.rule_name ?? '(削除済み)'}
+                                        ルール:
+                                        {#if res.rule_id !== null}
+                                            <a class="link" href="/rules?edit={res.rule_id}">
+                                                {res.rule_name}
+                                            </a>
+                                        {:else}
+                                            (削除済み)
+                                        {/if}
                                     </div>
                                 {/if}
                                 {#if !res.encode || res.keep_original}
@@ -221,6 +252,17 @@
                                             取消
                                         </button>
                                     </form>
+                                {:else if res.state === 'canceled' && res.end_at > Date.now()}
+                                    <!--
+                                        取り消した予約はルールが作り直さないので、
+                                        気が変わったときに戻せるのはここだけ
+                                    -->
+                                    <form method="POST" action="?/restore" use:submitting>
+                                        <input type="hidden" name="id" value={res.id} />
+                                        <button class="btn btn-sm" data-testid="restore-button">
+                                            戻す
+                                        </button>
+                                    </form>
                                 {/if}
                             </td>
                         </tr>
@@ -245,14 +287,6 @@
                 </form>
             </div>
         </div>
-
-        <!-- エラーは画面の頭に1つだけ出す。予約も録画も同じ form を見るので、
-             ここにも出すと同じ文言が2回並ぶ -->
-        {#if form?.reconcile}
-            <div class="alert alert-info mb-4" data-testid="reconcile-result">
-                照合 {form.reconcile.checked} 件 / 実体が無く削除済み {form.reconcile.removed} 件
-            </div>
-        {/if}
 
         {#if data.jobs.length > 0}
             <div class="card bg-base-100 mb-4 shadow" data-testid="encode-panel">
@@ -405,10 +439,11 @@
                                             </a>
                                         {/if}
                                         <!--
-                                            録画中・エンコード中は元がまだ書かれている最中なので触らせない。
-                                            生TSが無くても保存先にあるものを元に録り直せる
+                                            元になるのは生TS。エンコード済みを元に録り直しても
+                                            画質は戻らないので、生TSがあるときだけ出す。
+                                            録画中・エンコード中は元がまだ書かれている最中なので触らせない
                                         -->
-                                        {#if (rec.ts_path || rec.library_path) && rec.state !== 'recording' && rec.state !== 'encoding'}
+                                        {#if rec.ts_path && rec.state !== 'recording' && rec.state !== 'encoding'}
                                             <form method="POST" action="?/reencode" use:submitting>
                                                 <input type="hidden" name="id" value={rec.id} />
                                                 <button class="btn btn-sm" data-testid="reencode-button"
