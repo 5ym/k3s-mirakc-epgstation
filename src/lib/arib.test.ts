@@ -1,5 +1,32 @@
 import { describe, expect, test } from 'bun:test';
-import { audioLabel, genreLabel, videoLabel } from './arib';
+import { audioLabel, genreLabel, genreName, videoLabel } from './arib';
+
+/**
+ * ルールの条件に出す名前。
+ *
+ * 大分類だけの条件 (「アニメ全部」) は - を含まないので、split の2つ目が
+ * undefined になる。`Number.isNaN(undefined)` は false なので素通りしてしまい、
+ * 「アニメ／特撮 > undefined」と出ていた。
+ */
+describe('genreName', () => {
+    test('大分類だけの条件は大分類だけ出す', () => {
+        expect(genreName('7')).toBe('アニメ／特撮');
+        // 引き継いだルールは数値で入っている
+        expect(genreName(7)).toBe('アニメ／特撮');
+        expect(genreName(0)).toBe('ニュース／報道');
+    });
+
+    test('中分類まであれば繋ぐ', () => {
+        expect(genreName('7-0')).toBe('アニメ／特撮 > 国内アニメ');
+    });
+
+    test('引けない値はそのまま出す', () => {
+        // 12・13 は放送に出てこない予備。表に無くても値だけは見せる
+        expect(genreName(12)).toBe('12');
+        expect(genreName('7-99')).toBe('アニメ／特撮 > 99');
+        expect(genreName('7-x')).toBe('アニメ／特撮');
+    });
+});
 
 describe('genreLabel', () => {
     test('大分類と中分類をつなげる', () => {

@@ -166,11 +166,22 @@ export const GENRE_TREE: {
     })),
 }));
 
-/** ルールの条件の値を人が読める名前に。`"7-0"` → 「アニメ／特撮 > 国内アニメ」 */
+/**
+ * ルールの条件の値を人が読める名前に。`"7-0"` → 「アニメ／特撮 > 国内アニメ」。
+ *
+ * 中分類が無いときは大分類だけを返す。**「7」のように - が無い値では
+ * split の2つ目が undefined になる** ので、`Number.isNaN` では捕まらない
+ * (`Number.isNaN(undefined)` は false)。これを見落として
+ * 「アニメ／特撮 > undefined」と出していた。要素数で見る。
+ */
 export function genreName(value: string | number): string {
-    const [lv1, lv2] = String(value).split('-').map(Number);
+    const parts = String(value).split('-');
+    const lv1 = Number(parts[0]);
     const head = GENRE_LV1[lv1];
     if (head === undefined) return String(value);
+    if (parts.length < 2) return head;
+
+    const lv2 = Number(parts[1]);
     if (Number.isNaN(lv2)) return head;
     return `${head} > ${GENRE_LV2[lv1]?.[lv2] ?? lv2}`;
 }
