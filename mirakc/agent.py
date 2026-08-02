@@ -25,21 +25,14 @@ from pathlib import Path
 
 import yaml
 
+import scan as scanner
+
 PORT = int(os.environ.get('AGENT_PORT', '40773'))
 CONFIG = Path(os.environ.get('MIRAKC_CONFIG', '/etc/mirakc/config.yml'))
 CONFIG_TEMPLATE = Path('/app-config-defaults/config.yml')
 EPG_CACHE = Path(os.environ.get('MIRAKC_EPG_CACHE', '/var/lib/mirakc/epg'))
 RECORDED_DIR = Path(os.environ.get('RECORDED_DIR', '/denpa-recorded')).resolve()
 RECISDB = os.environ.get('RECISDB', 'recisdb')
-SCANNER = os.environ.get('ISDB_SCANNER', 'isdb-scanner')
-SCAN_OUTPUT = Path('/tmp/denpa-scan')
-
-# ISDBScanner が選局する物理チャンネルの数。地上波は 13〜62ch を総当たりし、
-# 衛星は同じネットワークの情報をまとめて取れるので1波につき1回で済む
-GR_CHANNELS = 50
-SATELLITE_CHANNELS = {'free': 1, 'all': 3}
-# 進み具合はこの行を数えて出す。ISDBScanner は選局のたびにこれを出力する
-CHANNEL_LINE = re.compile(r'Channel:\s')
 LOG_LIMIT = 400
 
 
@@ -173,7 +166,6 @@ scan = {
     'scanned': 0,
     'total': 0,
     'channels': 0,
-    'tuners': 0,
     'error': None,
     'startedAt': None,
     'finishedAt': None,
@@ -181,31 +173,40 @@ scan = {
 scan_lock = threading.Lock()
 
 
-def scan_push(line, **fields):
+def scan_push(line=None, scanned=0, channels=0, skipped=0, **fields):
     with scan_lock:
         if line:
             scan['log'] = (scan['log'] + [line])[-LOG_LIMIT:]
-            if CHANNEL_LINE.search(line):
-                scan['scanned'] += 1
+        scan['scanned'] += scanned + skipped
+        scan['channels'] += channels
         scan.update(fields)
 
 
-def merge_config(scanned):
-    """スキャン結果を今の設定に混ぜる。
+def load_config():
+    return yaml.safe_load(CONFIG.read_text()) or {}
 
-    ISDBScanner が出すのは channels と tuners だけ。epg やサーバの設定は
-    こちらのものを残さないと、スキャンのたびに設定が飛ぶ。
+
+def save_channels(channels):
+    """見つけたチャンネルだけ差し替える。
+
+    チューナーの定義はハードウェアの話で、スキャンで分かるものではない。
+    epg やサーバの設定ごと書き換えると、スキャンのたびに設定が飛ぶ。
     """
-    current = yaml.safe_load(CONFIG.read_text()) or {}
-    found = yaml.safe_load(scanned.read_text()) or {}
-    for key in ('channels', 'tuners'):
-        if found.get(key):
-            current[key] = found[key]
-    # 書きかけを読ませない。mirakc は起動時にしか読まないので壊れると起動しなくなる
+    current = load_config()
+    current['channels'] = channels
+    text = yaml.safe_dump(current, allow_unicode=True, sort_keys=False)
+
+    # 書きかけを読ませない。mirakc は起動時にしか読まないので、壊れたものを
+    # 掴むと起動しなくなる
     working = CONFIG.with_suffix('.yml.writing')
-    working.write_text(yaml.safe_dump(current, allow_unicode=True, sort_keys=False))
-    working.replace(CONFIG)
-    return len(current.get('channels') or []), len(current.get('tuners') or [])
+    working.write_text(text)
+    try:
+        working.replace(CONFIG)
+    except OSError:
+        # config.yml をファイル単位で bind mount していると差し替えられない
+        # (compose の例がその形)。その場合は諦めて直接書く
+        CONFIG.write_text(text)
+        working.unlink(missing_ok=True)
 
 
 def clear_epg_cache():
@@ -221,40 +222,23 @@ def clear_epg_cache():
             path.unlink()
 
 
-def run_scan(exclude_pay_tv):
+def run_scan(targets):
     try:
-        # ISDBScanner は mirakc を通さず直接チューナーを開く。動かしたままだと
-        # EPG更新と取り合いになってスキャンが失敗するので、その間だけ止める
+        # 選局は mirakc を通さず recisdb を直接叩く。動かしたままだと EPG 更新と
+        # チューナーの取り合いになるので、スキャンの間だけ止める
         scan_push('mirakc を止めています...', phase='mirakc を停止')
         mirakc.stop()
 
-        shutil.rmtree(SCAN_OUTPUT, ignore_errors=True)
-        command = [SCANNER, str(SCAN_OUTPUT)]
-        if exclude_pay_tv:
-            command.append('--exclude-pay-tv')
-
         scan_push('チャンネルを探しています...', phase='スキャン中')
-        proc = subprocess.Popen(
-            command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
-        )
-        for line in proc.stdout:
-            scan_push(line.rstrip())
-        code = proc.wait()
-        if code != 0:
-            raise RuntimeError(f'isdb-scanner が {code} で終了しました')
+        found = scanner.Scanner(load_config().get('tuners') or [], on_progress=scan_push).run(targets)
 
-        scanned = SCAN_OUTPUT / 'mirakc' / 'config.yml'
-        if not scanned.is_file():
-            raise RuntimeError('スキャン結果が出力されませんでした')
+        # 1件も見つからないまま上書きすると、今まで録れていた局まで消える
+        if not found:
+            raise RuntimeError('チャンネルが1件も見つかりませんでした。チューナーとアンテナを確認してください')
 
         scan_push('設定を書き込んでいます...', phase='設定を反映')
-        channels, tuners = merge_config(scanned)
-        # isdb-scanner はチューナーが1台も無くても 0 で終わる。1件も見つからない
-        # ときに成功扱いにすると「スキャンしたのに空」が普通に見えてしまう
-        if channels == 0:
-            raise RuntimeError('チャンネルが1件も見つかりませんでした。チューナーとアンテナを確認してください')
+        save_channels(found)
         clear_epg_cache()
-        scan_push(f'チャンネル {channels} 件 / チューナー {tuners} 件', channels=channels, tuners=tuners)
     except Exception as error:  # noqa: BLE001 - 何で失敗しても画面に理由を出したい
         scan_push(f'失敗しました: {error}', state='failed', error=str(error), finishedAt=time.time())
     else:
@@ -264,23 +248,29 @@ def run_scan(exclude_pay_tv):
 
 
 def start_scan(body):
+    types = [t for t in (body.get('types') or ['GR', 'BS', 'CS']) if t in scanner.CHANNEL_RANGES]
+    if not types:
+        return {'started': False, 'message': 'チャンネル種別の指定が不正です'}
+    targets = [
+        (channel_type, scanner.channels_for(channel_type, body.get('min'), body.get('max')))
+        for channel_type in types
+    ]
+
     with scan_lock:
         if scan['state'] == 'running':
             return {'started': False, 'message': '既に実行中です'}
-        exclude_pay_tv = body.get('excludePayTv') is True
         scan.update(
             state='running',
             phase='準備中',
             log=[],
             scanned=0,
-            total=GR_CHANNELS + SATELLITE_CHANNELS['free' if exclude_pay_tv else 'all'],
+            total=sum(len(channels) for _, channels in targets),
             channels=0,
-            tuners=0,
             error=None,
             startedAt=time.time(),
             finishedAt=None,
         )
-    threading.Thread(target=run_scan, args=(exclude_pay_tv,), daemon=True).start()
+    threading.Thread(target=run_scan, args=(targets,), daemon=True).start()
     return {'started': True, 'message': 'チャンネルスキャンを始めました'}
 
 
