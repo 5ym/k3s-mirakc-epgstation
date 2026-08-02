@@ -4,7 +4,7 @@ import { pump, requeueOrphanedJobs } from './encoder';
 import { sync } from './epg';
 import { emit } from './events';
 import { pruneHistory, reconcile } from './files';
-import { sweep } from './logo';
+import { reconcile as logoReconcile, sweep } from './logo';
 import { listen } from './mirakc-events';
 import { activeRecordingIds, onOnairChanged, recoverOrphanedRecordings } from './recorder';
 import { tick } from './scheduler';
@@ -82,7 +82,13 @@ export function start(): void {
      * 局ロゴ。mirakc は Mirakurun と違って TS から集めてくれないので、
      * 持っていない局のぶんを少しずつ取りに行く。1回に1局だけ開く
      * (チューナーを塞がないため。録画のついでにも拾っている)
+     *
+     * 起動のたびに、印 (`has_logo`) とファイルを突き合わせ直す。置き場ごと
+     * 消えることは実際にあり、印だけ残っていると番組表に壊れた画像が並ぶ
      */
+    void guard('logo', async () => {
+        logoReconcile();
+    });
     every(config.logoSweepInterval, 'logo', async () => {
         await sweep();
     });
