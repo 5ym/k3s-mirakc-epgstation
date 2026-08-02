@@ -82,10 +82,62 @@ async function watch(): Promise<void> {
         if (current.state === 'done') {
             // mirakc が新しい設定で起動し終わるまで待つ
             await Bun.sleep(5000);
-            await sync();
+            await settle();
         }
     } finally {
         watching = false;
+    }
+}
+
+/** 局が増えなくなったと判断するまでの連続回数 */
+const SETTLE_STABLE = 3;
+/** 様子を見る間隔 */
+const SETTLE_INTERVAL = 30_000;
+/** 諦めるまでの上限。地上波+BS+CS を1局ずつ選局するので、それなりにかかる */
+const SETTLE_TIMEOUT = 30 * 60_000;
+
+/** いま走っている取り込み。二重に回さない */
+let settling = false;
+
+/** 取り込みの途中か。画面で「取り込み中」と出すために見る */
+export function isSettling(): boolean {
+    return settling;
+}
+
+/**
+ * mirakc が局を拾い切るまで取り込み続ける。
+ *
+ * スキャンが見つけるのは**物理チャンネル**まで。そこに何局乗っているかは
+ * mirakc が改めて1局ずつ選局して調べる (scan-services) ので、設定を書き戻して
+ * 起動し直した直後は 0 局から始まり、数分〜数十分かけて埋まっていく。
+ *
+ * 以前は5秒待って1回取り込むだけだったので、**スキャンの直後は必ず空**になり、
+ * その後は10分ごとの定期取り込みが拾うのを待つしかなかった。ここで増えなくなるまで
+ * 見届ける。手動の「局を取り直す」も同じものを呼ぶ。
+ */
+export async function settle(): Promise<number> {
+    if (settling) return 0;
+    settling = true;
+    try {
+        const until = Date.now() + SETTLE_TIMEOUT;
+        let last = -1;
+        let stable = 0;
+        for (;;) {
+            let count = last;
+            try {
+                count = (await sync()).services;
+            } catch {
+                // mirakc がまだ起動途中。次の周回で繋がる
+            }
+            // 取り込むたびに画面へ知らせる。埋まっていく様子がそのまま出る
+            emit('services');
+            stable = count === last ? stable + 1 : 0;
+            last = count;
+            if (stable >= SETTLE_STABLE || Date.now() >= until) return count;
+            await Bun.sleep(SETTLE_INTERVAL);
+        }
+    } finally {
+        settling = false;
     }
 }
 

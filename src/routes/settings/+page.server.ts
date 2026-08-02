@@ -103,7 +103,6 @@ export const actions = {
             codec,
             cmCut,
             cmDetector: form.get('cmDetector') === 'silence' ? 'silence' : 'jls',
-            smoothMotion: form.get('smoothMotion') === 'on',
             encode: form.get('encode') === 'on',
             keepOriginal: form.get('keepOriginal') === 'on',
             freeOnly: form.get('freeOnly') === 'on',

@@ -130,8 +130,12 @@ test.describe('WebDAV', () => {
         await goto(page, '/');
         await expect(page.locator(`[data-recording-id="${id}"]`)).toHaveCount(0);
 
+        // 消した理由は行ではなく詳細に出す (生の文言で行が分厚くならないように)
         await goto(page, '/?deleted=1');
-        await expect(page.locator(`[data-recording-id="${id}"]`)).toContainText('WebDAV から削除されました');
+        const row = page.locator(`[data-recording-id="${id}"]`);
+        await expect(row).toContainText('削除済み');
+        await row.getByTestId('detail-button').click();
+        await expect(page.getByTestId('detail-error')).toContainText('WebDAV から削除されました');
     });
 
     test('denpa が知らないファイルは消させない', async ({ request }) => {

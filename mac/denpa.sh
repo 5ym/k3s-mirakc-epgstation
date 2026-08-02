@@ -28,7 +28,7 @@ LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchSe
 VLC=${DENPA_VLC:-/Applications/VLC.app/Contents/MacOS/VLC}
 
 # 確認なしで開くことを許す denpa の origin
-ORIGINS=${DENPA_ORIGINS:-'http://dp.home.arpa,https://dp.doany.io'}
+ORIGINS=${DENPA_ORIGINS:-'https://dp.l.doany.io,https://dp.doany.io'}
 
 # 自分自身の取得元。パイプで流し込まれたときは $0 が使えないのでここから取り直す
 SOURCE_URL=${DENPA_SOURCE_URL:-https://raw.githubusercontent.com/DAnything/denpa/main/mac/denpa.sh}

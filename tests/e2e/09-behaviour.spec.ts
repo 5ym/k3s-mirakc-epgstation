@@ -53,6 +53,35 @@ test.describe('操作したときの反応', () => {
         await expect(block).toContainText('予約済み');
     });
 
+    test('番組表の時刻は縦横どちらへスクロールしても左に残る', async ({ page }) => {
+        // 24時間ぶんを1画面には出せないので、どこを見ていても時刻が分かる必要がある。
+        // 横は列ごと、縦は数字を1時間の枠の中で下ろして追従させている
+        await page.setViewportSize({ width: 900, height: 700 });
+        await goto(page, '/guide?type=GR');
+
+        const grid = page.getByTestId('guide-grid');
+        const hours = grid.locator('div[style^="grid-column: 1;"] > span.sticky');
+        const frame = (await grid.boundingBox())!;
+
+        for (const top of [0, 400, 900]) {
+            await grid.evaluate((el, t) => {
+                el.scrollTop = t;
+                // 横に流しても時刻の列は左に残る
+                el.scrollLeft = 300;
+            }, top);
+            // 画面の上端付近に、いま見ているところの時刻がちょうど1つ出ていること
+            const shown: string[] = [];
+            for (let i = 0; i < (await hours.count()); i++) {
+                const box = await hours.nth(i).boundingBox();
+                if (box === null) continue;
+                if (box.y >= frame.y - 1 && box.y < frame.y + 60 && box.x < frame.x + 60) {
+                    shown.push((await hours.nth(i).textContent())?.trim() ?? '');
+                }
+            }
+            expect(shown).toHaveLength(1);
+        }
+    });
+
     test('ダッシュボードで取り消すと、その場で一覧から消える', async ({ page, request }) => {
         await reserveSoon(page, request, 'GR', 6);
 

@@ -23,13 +23,16 @@ test.describe('外で消された録画の反映', () => {
         await page.getByTestId('reconcile-button').click();
         await expect(page.getByTestId('reconcile-result')).toContainText('削除済み 1 件');
 
-        // 現存一覧からは消え、「削除済みも表示」にすると理由付きで残っている
+        // 現存一覧からは消え、「削除済みも表示」にすると履歴として残っている
         await goto(page, '/');
         await expect(page.locator(`[data-recording-id="${recordingId}"]`)).toHaveCount(0);
 
         await goto(page, '/?deleted=1');
-        await expect(page.locator(`[data-recording-id="${recordingId}"]`)).toContainText(
-            '保存先から消えていました',
-        );
+        const row = page.locator(`[data-recording-id="${recordingId}"]`);
+        await expect(row).toContainText('削除済み');
+
+        // 消えた理由は行ではなく詳細に出す (生の文言で行が分厚くならないように)
+        await row.getByTestId('detail-button').click();
+        await expect(page.getByTestId('detail-error')).toContainText('保存先から消えていました');
     });
 });

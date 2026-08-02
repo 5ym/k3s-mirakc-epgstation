@@ -122,24 +122,12 @@
                             ロゴまで見ると録画1本あたり数分かかります
                         </span>
                     </label>
-                    <label class="flex flex-col gap-1">
-                        <span class="text-sm font-medium">動きのなめらかさ</span>
-                        <select
-                            name="smoothMotion"
-                            class="select select-bordered w-full"
-                            data-testid="global-motion"
-                        >
-                            <option value="off" selected={!recording.smoothMotion}> 30コマ/秒 (標準) </option>
-                            <option value="on" selected={recording.smoothMotion}>
-                                60コマ/秒 (なめらか)
-                            </option>
-                        </select>
-                        <span class="text-base-content/60 text-xs">
-                            放送は毎秒60フィールドなので、60コマにすると動きが滑らかになります。 そのぶん<strong
-                                >エンコードの時間もファイルも約2倍</strong
-                            >です
-                        </span>
-                    </label>
+                    <!--
+                        コマ数は選ばせない。放送は毎秒60フィールドなので実写は60コマで
+                        撮られたとおりになるが、アニメは元が24コマ前後で、コマを起こしても
+                        同じ絵が並ぶだけで時間とサイズが倍になる。番組のジャンルで決まる
+                        (src/lib/server/encoder.ts の smoothMotionFor)
+                    -->
                     <!--
                         エンコードするか・生TSを残すか・無料放送だけにするかも、ここで決める。
                         画面に出していなかった頃は、保存を押すたびに未送信のチェックボックスとして

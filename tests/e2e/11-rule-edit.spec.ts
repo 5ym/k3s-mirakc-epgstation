@@ -87,7 +87,7 @@ test.describe('ルールの編集', () => {
         }
     });
 
-    test('ルールが立てた予約をまとめて取り消せる', async ({ page }) => {
+    test('ルールが立てた予約を1件ずつ取り消せる', async ({ page }) => {
         /*
          * ここで立てた予約は取り消しで残る (ルールは作り直さないため)。
          * 他のテストが使う「テストアニメ」を消費すると、そちらで予約が
@@ -101,21 +101,36 @@ test.describe('ルールの編集', () => {
         await page.getByTestId('rule-edit').first().click();
         await page.waitForURL(/edit=/);
 
-        // 条件を狭めても既存の予約は残るので、要らないときはここから畳む
-        const cancelAll = page.getByTestId('rule-cancel-reservations');
-        await expect(cancelAll).toBeVisible();
-        await cancelAll.click();
+        /*
+         * 条件を狭めても既存の予約は残るので、要らないものをここで外す。
+         *
+         * **まとめてではなく1件ずつ**。1つだけ要らないときに全部消してから
+         * 条件を作り直す、ということにならないように。押すたびにちょうど
+         * 1件だけ減ることを見る (まとめて畳んでいたら一気に0になる)
+         */
+        const rows = page.getByTestId('rule-pending-row');
+        await expect(rows.first()).toBeVisible();
+        const before = await rows.count();
+        expect(before).toBeGreaterThan(2);
 
-        // 予約が無くなればボタン自体が消える
-        await page.waitForURL(/edit=/);
-        await expect(page.getByTestId('rule-cancel-reservations')).toHaveCount(0);
+        for (let left = before; left > before - 2; left--) {
+            await page.getByTestId('rule-pending-cancel').first().click();
+            // 送信中はボタンが無効になる。減るのを待たずに次を押すと空振りする
+            await expect(rows).toHaveCount(left - 1);
+        }
 
+        // 取り消したぶんだけ予約一覧からも消える (残りはそのまま)
         await goto(page, '/');
-        await expect(page.getByTestId('reservation-row').filter({ hasText: 'テスト番組C' })).toHaveCount(0);
+        await expect(page.getByTestId('reservation-row').filter({ hasText: 'テスト番組C' })).toHaveCount(
+            before - 2,
+        );
 
+        // 残りはルールごと畳む。まだ始まっていない予約は行ごと消える
         await goto(page, '/rules');
         await page.getByTestId('rule-delete').first().click();
         await expect(page.getByTestId('rule-row')).toHaveCount(0);
+        await goto(page, '/');
+        await expect(page.getByTestId('reservation-row').filter({ hasText: 'テスト番組C' })).toHaveCount(0);
     });
 });
 

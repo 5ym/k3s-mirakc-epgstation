@@ -4,8 +4,9 @@
 
     let { data, form } = $props();
 
-    // スキャンは数十分かかることがある。進み具合はサーバから push される
-    liveUpdates(['scan']);
+    // スキャンは数十分かかることがある。進み具合はサーバから push される。
+    // 局の取り込みも1回では終わらないので、増えるたびに描き直す
+    liveUpdates(['scan', 'services']);
     const scan = $derived(data.scan);
 
     const TYPE_LABEL: Record<string, string> = { GR: '地上波', BS: 'BS', CS: 'CS' };
@@ -68,16 +69,36 @@
 {#if form?.message}
     <div class="alert alert-error mb-4" data-testid="tuner-error">{form.message}</div>
 {/if}
+{#if form?.scan}
+    <div class="alert alert-info mb-4" data-testid="tuner-notice">{form.scan}</div>
+{/if}
 
 <div class="grid items-start gap-6 xl:grid-cols-2">
     <div class="flex flex-col gap-6">
         <section class="card bg-base-100 shadow" data-testid="channel-card">
             <div class="card-body">
-                <h2 class="card-title">取れているチャンネル</h2>
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <h2 class="card-title">取れているチャンネル</h2>
+                    <!--
+                        mirakc が拾った局を denpa に取り込み直す。
+                        普段は10分ごとに取り込んでいるので押す必要は無いが、
+                        スキャンの直後だけは埋まるのを待たずに追いつきたい
+                    -->
+                    <form method="POST" action="?/resync" use:submitting>
+                        <button
+                            class="btn btn-sm"
+                            disabled={data.settling || scan.state === 'running'}
+                            data-testid="resync-services"
+                        >
+                            {data.settling ? '取り込み中…' : '局を取り直す'}
+                        </button>
+                    </form>
+                </div>
                 <p class="text-base-content/70 text-sm">
                     mirakc の設定に入っている物理チャンネルと、mirakc がそこから
                     今どこまで局と番組表を拾えているかです。<strong>スキャンの直後は空になり</strong
-                    >、数十分かけて埋まっていきます。
+                    >、数十分かけて埋まっていきます。スキャンが終わったあとは、増えなくなるまで denpa
+                    が自動で取り込み続けます。
                 </p>
                 {#await coverage}
                     <p class="text-base-content/60 text-sm">確認中…</p>
@@ -284,6 +305,31 @@
                                 </dd>
                             {/if}
                         {/await}
+                    </div>
+                    <!--
+                        局ロゴ。mirakc は集めないので denpa が放送波から拾っている。
+                        番組表に出ないとき、取れていないのか出し方が悪いのかを
+                        ここで見分けられるようにする
+                    -->
+                    <div class="flex flex-wrap items-center gap-2">
+                        <dt class="w-28 text-sm font-medium">局ロゴ</dt>
+                        <dd
+                            class="badge {data.logos.have === data.logos.total
+                                ? 'badge-success'
+                                : 'badge-ghost'}"
+                            data-testid="status-logos"
+                        >
+                            {data.logos.have} / {data.logos.total} 局
+                        </dd>
+                        <dd>
+                            <form method="POST" action="?/logoSweep" use:submitting>
+                                <button class="btn btn-xs" data-testid="logo-sweep">いま取りに行く</button>
+                            </form>
+                        </dd>
+                        <dd class="text-base-content/60 w-full text-xs">
+                            ロゴが放送波に流れてくるのは数十秒〜数分に一度です。10分ごとに少しずつ拾っているので、
+                            全部揃うまでには時間がかかります。
+                        </dd>
                     </div>
                     <div class="flex flex-wrap items-center gap-2">
                         <dt class="w-28 text-sm font-medium">カードリーダー</dt>

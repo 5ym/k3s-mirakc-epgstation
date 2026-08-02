@@ -19,8 +19,13 @@ import { chunks } from './stream';
  * 残っていれば、空いている時間に短く開いて取りに行く。
  */
 
-/** 1局あたりの取得にかける上限。長く開くとチューナーを塞ぐ */
-const SWEEP_TIMEOUT = 60_000;
+/**
+ * 1チャンネルあたりの取得にかける上限。
+ *
+ * ロゴが放送波に流れてくるのは数十秒〜数分に一度で、1つのTSに乗っている局の
+ * ぶんが順に来る。60秒では1局ぶん拾ったところで閉じることが多かった
+ */
+const SWEEP_TIMEOUT = 120_000;
 /**
  * 相乗りのときの上限。向こうの都合でいつ閉じてもおかしくないので短くする。
  * ロゴは数十秒に一度流れてくるので、拾えるときはこの中で拾える
@@ -265,17 +270,30 @@ export async function ride(): Promise<number> {
  * 録画と同じ口を短く開くだけ。優先度を下げてあるので、チューナーが足りなければ
  * mirakc が録画のほうを通す。
  */
-export async function sweep(limit = 1): Promise<number> {
+export async function sweep(limit = 2): Promise<number> {
     // 立っているだけでファイルが無い局を先に拾い直す。そうしないと
     // 「もう持っている」とみなして永久に取りに行かない
     reconcile();
     // 開いているチューナーがあるなら、まずそちらに乗る。只で読める
     let found = await ride();
-    // 自分で開くのは1チャンネルずつ。長く掴むと録画に響く
+    /*
+     * 自分で開くのは数チャンネルずつ。1回に1つだけ開いていた頃は、BS/CS が
+     * 30チャンネル残っていると全部埋まるのに半日かかっていた。
+     * 優先度は 0 なので、録画 (2) が要るときは mirakc がこちらを切る
+     */
     const channels = [...new Set(missing().map((service) => service.channel))].slice(0, limit);
     for (const channel of channels) {
         const service = missing().find((row) => row.channel === channel);
         if (service !== undefined) found += await collect(channel, service.id, SWEEP_TIMEOUT);
     }
+    if (found > 0) console.log(`[logo] ${found} 局ぶん拾いました (残り ${missing().length} 局)`);
     return found;
+}
+
+/** 何局ぶん持っているか。「本当に取れているのか」を画面で確かめられるように */
+export function stats(): { have: number; total: number } {
+    const row = queryOne<{ have: number; total: number }>(
+        `SELECT SUM(has_logo) AS have, COUNT(*) AS total FROM services WHERE ${CURRENT_SERVICES}`,
+    );
+    return { have: row?.have ?? 0, total: row?.total ?? 0 };
 }

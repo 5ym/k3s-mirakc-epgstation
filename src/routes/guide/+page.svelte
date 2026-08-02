@@ -222,7 +222,10 @@
                 .length}, minmax(11rem, 1fr)); grid-template-rows: auto repeat({slots}, 0.75rem);"
         >
             <!-- 左上の角。時刻列とチャンネル行の交点で、どちらにも追従させる -->
-            <div class="bg-base-100 sticky top-0 left-0 z-30" style="grid-column: 1; grid-row: 1;"></div>
+            <div
+                class="bg-base-100 border-base-300 sticky top-0 left-0 z-30 border-r"
+                style="grid-column: 1; grid-row: 1;"
+            ></div>
             {#each data.services as service, i (service.id)}
                 <div
                     class="bg-base-100 border-base-300 sticky top-0 z-20 flex items-center gap-1.5 truncate border-b px-2 py-2 text-sm font-medium"
@@ -247,12 +250,24 @@
                 </div>
             {/each}
 
+            <!--
+                時刻の列。**横にも縦にも追従させる。**
+
+                横は列そのものを `sticky left-0` で置いておけば済む。縦は
+                そうはいかない。1マス(5分)ずつでは細かすぎるので1時間を1つの
+                グリッド領域にしているが、そうすると数字はその領域の先頭に
+                書かれるだけで、時間の途中まで下ろすと画面の外へ出てしまい、
+                いま何時のところを見ているのか分からなくなっていた。
+
+                中の数字をもう一段 `sticky` にして、その1時間ぶんの領域の中で
+                下りてくるようにする。上端はチャンネル名の行のぶんだけ空ける
+            -->
             {#each hourMarks as mark (mark.at)}
                 <div
-                    class="bg-base-100 border-base-300 sticky left-0 z-10 border-t px-1 text-xs"
+                    class="bg-base-100 border-base-300 sticky left-0 z-10 border-t border-r px-1 text-xs"
                     style="grid-column: 1; grid-row: {mark.row} / span {mark.span};"
                 >
-                    {new Date(mark.at).getHours()}
+                    <span class="sticky top-9 block">{new Date(mark.at).getHours()}</span>
                 </div>
             {/each}
 

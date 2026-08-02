@@ -7,6 +7,7 @@ import {
     failureReason,
     isVideoCodec,
     parseProgressBlock,
+    smoothMotionFor,
 } from './encoder';
 
 function argValue(args: string[], key: string): string | undefined {
@@ -26,6 +27,26 @@ describe('録画エンコードの引数', () => {
     test('なめらかにすると1フィールドごとに1コマ出す', () => {
         const args = buildArgs('/in.m2ts', '/out.mkv', 1, null, 'av1', { smoothMotion: true });
         expect(argValue(args, '-vf')).toBe('bwdif,format=yuv420p10le');
+    });
+});
+
+describe('コマ数の決め方', () => {
+    test('アニメ／特撮だけコマ数を倍にしない', () => {
+        // 元が毎秒24コマ前後なので、フィールドごとに起こしても同じ絵が並ぶだけ
+        expect(smoothMotionFor('[7]')).toBe(false);
+        expect(smoothMotionFor('[0,7]')).toBe(false);
+    });
+
+    test('それ以外は60コマで出す', () => {
+        expect(smoothMotionFor('[0]')).toBe(true);
+        expect(smoothMotionFor('[9]')).toBe(true);
+    });
+
+    test('ジャンルが分からないものは実写として扱う', () => {
+        // 引き継いだ録画や番組情報の無い放送。放送の大半は実写のほう
+        expect(smoothMotionFor(null)).toBe(true);
+        expect(smoothMotionFor('')).toBe(true);
+        expect(smoothMotionFor('こわれている')).toBe(true);
     });
 
     test('入れ物は拡張子ではなく引数で決める', () => {

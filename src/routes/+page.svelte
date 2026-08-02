@@ -66,8 +66,8 @@
 
     /** 行から開いた番組詳細。番組表と同じ見せ方をする */
     let detail = $state<Detail | null>(null);
-    /** その行のエンコード失敗の理由。詳細の中で見せる */
-    let detailError = $state<string | null>(null);
+    /** その行が失敗・削除された理由。詳細の中で見せる */
+    let detailNotes = $state<{ title: string; text: string }[]>([]);
     /** その行で検出したCM区間。長いので一覧には出さず、詳細でだけ見せる */
     let detailCm = $state<string | null>(null);
     /** 何で検出したか。ロゴが効いているかどうかがここで分かる */
@@ -101,13 +101,13 @@
     async function openDetail(
         programId: number | null,
         row: Row,
-        error: string | null = null,
+        notes: { title: string; text: string }[] = [],
         cm: string | null = null,
         logo: typeof detailLogo = null,
         cmNote: string | null = null,
     ): Promise<void> {
         const token = ++opened;
-        detailError = error;
+        detailNotes = notes;
         detailCm = cm;
         detailLogo = logo;
         detailCmNote = cmNote;
@@ -154,10 +154,15 @@
         else open();
     }
 
-    /** その録画をいま再生できるなら、プレイヤーに渡すURL */
-    function playHref(rec: (typeof data.recordings)[number]): string | null {
+    /**
+     * その録画を開くリンク。再生できないものには無い。
+     *
+     * ブラウザは MPEG-2 も AV1+Opus の mkv も素直には再生できないので、
+     * 端末に入っているプレイヤーに URL を渡して開かせる (play.ts)
+     */
+    function playLink(rec: (typeof data.recordings)[number]) {
         if (!playable(rec)) return null;
-        return playLinks(fileUrl(rec.id), rec.name, platform, data.credentials)[0]?.href ?? null;
+        return playLinks(fileUrl(rec.id), rec.name, platform, data.credentials)[0] ?? null;
     }
 
     /**
@@ -185,17 +190,34 @@
         };
     }
 
-    /** 録画の詳細。失敗の理由は録画そのものとエンコードの両方が出るようにする */
+    /**
+     * 録画の詳細。
+     *
+     * 失敗の理由は**ここでしか出さない**。一覧の行に生のエラーを並べていた頃は、
+     * 数行ぶんの高さを1行が占めて、他の録画が画面から押し出されていた。
+     *
+     * 理由は3種類あって、それぞれ別物。見出しを付けて分けて渡す。
+     * 「エンコードに失敗しました」で全部まとめていた頃は、録画そのものが
+     * 失敗した行を開いても嘘の見出しが出ていた
+     */
     function openRecording(rec: (typeof data.recordings)[number]): void {
+        const notes: { title: string; text: string }[] = [];
         /*
-         * 録画が失敗した理由 (recordings.error) と、エンコードが失敗した理由
-         * (encode_jobs.error) は別物。以前は後者しか渡していなかったので、
-         * 録画そのものが失敗した行は詳細を開いても何も出なかった
+         * error 列は録り直して成功しても残るので、いま失敗している行にだけ出す。
+         *
+         * エンコードで落ちたときは、この列にも「エンコードに失敗しました」と
+         * 入る (encoder.fail)。中身の入っている encode_error のほうだけ出せば足りる
          */
-        const reason = [rec.state === 'failed' ? rec.error : null, rec.encode_error]
-            .filter(Boolean)
-            .join('\n\n');
-        void openDetail(rec.program_id, rec, reason || null, rec.cm_ranges, logoOf(rec), rec.cm_note);
+        if (rec.state === 'failed' && rec.error && !rec.encode_error) {
+            notes.push({ title: '録画に失敗しました', text: rec.error });
+        }
+        if (rec.deleted_at !== null && rec.error) {
+            notes.push({ title: '削除された理由', text: rec.error });
+        }
+        if (rec.encode_error) {
+            notes.push({ title: 'エンコードに失敗しました', text: rec.encode_error });
+        }
+        void openDetail(rec.program_id, rec, notes, rec.cm_ranges, logoOf(rec), rec.cm_note);
     }
 </script>
 
@@ -386,31 +408,48 @@
                 <div class="divide-base-300 divide-y" data-testid="recording-list">
                     {#each data.recordings as rec (rec.id)}
                         <!--
-                            理由はいま失敗している行にだけ出す。「エラーが残っているか」を
-                            error 列だけで決めていた頃は、録り直して成功しても赤い文字が
-                            残っていた。削除済みの行では error に削除理由が入る (赤くしない)。
-
                             録り直しの元になるのは生TS。エンコード済みを元にしても画質は
                             戻らないので、生TSがあるときだけ出す。
                             録画中は元がまだ書かれている最中なので触らせない
                         -->
-                        {@const failing = rec.error && (rec.state === 'failed' || rec.deleted_at !== null)}
-                        {@const canReencode =
-                            playable(rec) && rec.job_id === null && encodeSource(rec) !== null}
-                        <!-- 行を押すと番組表と同じ詳細が出る -->
+                        {@const link = playLink(rec)}
+                        {@const canPlay = link !== null}
+                        {@const canReencode = canPlay && rec.job_id === null && encodeSource(rec) !== null}
+                        <!-- 押すと再生。中身を読みたいときは行の中の「詳細」から -->
                         <div
                             data-testid="recording-row"
                             data-recording-id={rec.id}
                             data-program-id={rec.program_id}
                             data-library-path={rec.library_path}
                             data-duration-ms={rec.duration_ms}
-                            class="hover:bg-base-200/60 relative cursor-pointer p-3"
+                            class="group hover:bg-base-200/60 relative cursor-pointer p-3"
                             role="button"
                             tabindex="0"
-                            onclick={(event) => rowClick(event, playHref(rec), () => openRecording(rec))}
-                            onkeydown={(event) => rowClick(event, playHref(rec), () => openRecording(rec))}
+                            title={link === null
+                                ? '押すと詳細が出ます'
+                                : `押すと再生します${link.note ? ` (${link.note})` : ''}`}
+                            onclick={(event) => rowClick(event, link?.href ?? null, () => openRecording(rec))}
+                            onkeydown={(event) =>
+                                rowClick(event, link?.href ?? null, () => openRecording(rec))}
                         >
                             <div class="flex flex-wrap items-start gap-x-3 gap-y-2">
+                                <!--
+                                    再生の印。**押すもの (button) にはしない。**
+                                    行そのものが再生なので、同じ働きの的を二重に置くと
+                                    「印を外すと再生されない」ように見える。
+                                    行に指を乗せると色が反転して、押す先がここだと分かる
+                                -->
+                                {#if canPlay}
+                                    <span
+                                        class="bg-primary/15 text-primary group-hover:bg-primary group-hover:text-primary-content mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full transition-colors"
+                                        aria-hidden="true"
+                                        data-testid="play-hint"
+                                    >
+                                        <svg viewBox="0 0 24 24" class="size-4" fill="currentColor">
+                                            <path d="M8 5v14l11-7z" />
+                                        </svg>
+                                    </span>
+                                {/if}
                                 <div class="min-w-0 flex-1 basis-56" data-testid="row-body">
                                     <!-- 消したものは「視聴可能」のままだと嘘になる。
                                          行は履歴として残るので、状態のほうを差し替える -->
@@ -442,31 +481,10 @@
                                         rec.deleted_at !== null ? `${date(rec.deleted_at)} に削除` : '',
                                     ])}
                                     <!--
-                                        録り直しは失敗の理由の**左**に並べる。右端のボタンの列に
-                                        置いていた頃は、失敗した行からいちばん遠い場所に押すものがあった
+                                        失敗や削除の理由は行に出さない。生のエラーは数行あって、
+                                        1行がその高さを占めると他の録画が画面から押し出される。
+                                        状態はバッジで分かるので、中身は「詳細」に回す (openRecording)
                                     -->
-                                    {#if failing || canReencode}
-                                        <div class="mt-1 flex flex-wrap items-center gap-2">
-                                            {#if canReencode}
-                                                <form method="POST" action="?/reencode" use:submitting>
-                                                    <input type="hidden" name="id" value={rec.id} />
-                                                    <button class="btn btn-sm" data-testid="reencode-button">
-                                                        再エンコード
-                                                    </button>
-                                                </form>
-                                            {/if}
-                                            {#if failing}
-                                                <span
-                                                    class="line-clamp-2 text-sm {rec.deleted_at === null
-                                                        ? 'text-error'
-                                                        : 'text-base-content/60'}"
-                                                    data-testid="recording-error"
-                                                >
-                                                    {rec.error}
-                                                </span>
-                                            {/if}
-                                        </div>
-                                    {/if}
                                     <!-- CM をどこで検出したかは行に出さない。長くて場所を食う割に
                                          普段は見ないので、行を押したときの詳細に回す -->
                                     {#if rec.logo_missing && rec.deleted_at === null}
@@ -498,6 +516,11 @@
                                     {/if}
                                 </div>
 
+                                <!--
+                                    押すものはすべて枠付きにする。btn-ghost は枠も背景も
+                                    無いので、行の文字と見分けが付かず、どこからどこまでが
+                                    押せるのか分からなかった
+                                -->
                                 <div class="flex shrink-0 flex-wrap items-center gap-2">
                                     <!--
                                         中身を読むのはこちら。行を押すと再生に行くので、
@@ -505,7 +528,7 @@
                                     -->
                                     <button
                                         type="button"
-                                        class="btn btn-ghost"
+                                        class="btn btn-outline"
                                         onclick={() => openRecording(rec)}
                                         data-testid="detail-button"
                                     >
@@ -518,29 +541,32 @@
                                             どちらかがあれば開ける。
                                             失敗した録画には出さない (playable)
                                         -->
-                                        {#if playable(rec)}
+                                        {#if canPlay}
                                             <!--
-                                                ブラウザは MPEG-2 も AV1+Opus の mkv も素直には再生できない。
-                                                端末に入っているプレイヤーに URL を渡して開かせる
+                                                再生ボタンは置いていない。行そのものが再生なので、
+                                                同じ働きのものを2つ並べると、どちらを押すのが
+                                                正しいのか考えさせることになる
                                             -->
-                                            {#each playLinks(fileUrl(rec.id), rec.name, platform, data.credentials) as link (link.href)}
-                                                <a
-                                                    class="btn btn-primary"
-                                                    href={link.href}
-                                                    data-testid="play-link"
-                                                    title={link.note ?? ''}
-                                                >
-                                                    {link.label}
-                                                </a>
-                                            {/each}
                                             <a
-                                                class="btn btn-ghost"
+                                                class="btn btn-outline"
                                                 href={downloadUrl(rec.id)}
                                                 download
                                                 data-testid="download-link"
                                             >
                                                 ダウンロード
                                             </a>
+                                        {/if}
+                                        {#if canReencode}
+                                            <!--
+                                                録り直しの元になるのは生TS。エンコード済みを元に
+                                                しても画質は戻らないので、生TSがあるときだけ出す
+                                            -->
+                                            <form method="POST" action="?/reencode" use:submitting>
+                                                <input type="hidden" name="id" value={rec.id} />
+                                                <button class="btn btn-outline" data-testid="reencode-button">
+                                                    再エンコード
+                                                </button>
+                                            </form>
                                         {/if}
                                         {#if rec.job_id !== null}
                                             <!--
@@ -613,7 +639,7 @@
 {#if detail}
     <ProgramDetail
         program={detail}
-        error={detailError}
+        notes={detailNotes}
         cm={detailCm}
         cmNote={detailCmNote}
         onclose={() => (detail = null)}

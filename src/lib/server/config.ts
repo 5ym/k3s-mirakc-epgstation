@@ -136,8 +136,11 @@ export const config = {
     schedulerTick: num('SCHEDULER_TICK', 5 * SEC),
     /** 保存先の実体とDBを突き合わせる間隔。外から消されたものをここで拾う */
     reconcileInterval: num('RECONCILE_INTERVAL', 5 * MIN),
-    /** 局ロゴを取りに行く間隔。放送波に流れてくるのを待つので、急いでも取れない */
-    logoSweepInterval: 30 * MIN,
+    /**
+     * 局ロゴを取りに行く間隔。放送波に流れてくるのを待つので、急いでも取れない。
+     * ただし1回に開けるのは数チャンネルなので、間隔が長いと BS/CS が埋まらない
+     */
+    logoSweepInterval: 10 * MIN,
     /** 終了した番組情報をDBに残しておく期間。番組表の遡り表示にしか使わないので短くてよい */
     programRetention: 24 * 60 * MIN,
     /**

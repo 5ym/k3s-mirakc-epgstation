@@ -107,7 +107,7 @@ function Test-Path { param($p) $true }
 
 # --- まともなリンク -------------------------------------------------------
 
-$url = 'http://denpa:p%40ss@dp.home.arpa/api/recordings/12/file'
+$url = 'https://denpa:p%40ss@dp.l.doany.io/api/recordings/12/file'
 $title = 'アニメ 青のオーケストラ シーズン2(20)「超える」'
 $link = "denpa://play/$(ConvertTo-Base64Url $url)/?title=$(ConvertTo-Base64Url $title)"
 

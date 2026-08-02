@@ -1,7 +1,8 @@
 import { fail } from '@sveltejs/kit';
 import { queryAll } from '$lib/server/db';
+import { stats as logoStats, sweep } from '$lib/server/logo';
 import { getChannels, getEpgProgress, getServices, getTuners, ping } from '$lib/server/mirakc';
-import { refresh, start, stop } from '$lib/server/scan';
+import { isSettling, refresh, settle, start, stop } from '$lib/server/scan';
 import { cardStatus } from '$lib/server/scramble';
 import type { ChannelType, Service } from '$lib/types';
 
@@ -28,6 +29,16 @@ export async function load() {
         epg: getEpgProgress().catch(() => []),
         // denpa が取り込み済みの局。mirakc が見つけたものとの差が分かる
         services: queryAll<Service>('SELECT * FROM services ORDER BY type, channel, service_id'),
+        // 局を取り込み続けている最中か。押した後どうなっているのかを出すため
+        settling: isSettling(),
+        /*
+         * 局ロゴを何局ぶん持っているか。
+         *
+         * mirakc はロゴを集めないので denpa が放送波から拾っているが、
+         * 拾えたかどうかを確かめる場所がどこにも無かった。番組表にロゴが
+         * 出ないとき、取れていないのか出し方が悪いのかを見分けられるようにする
+         */
+        logos: logoStats(),
     };
 }
 
@@ -50,5 +61,28 @@ export const actions = {
         const result = await stop();
         if (!result.stopped) return fail(409, { message: result.message });
         return { success: true, scan: result.message };
+    },
+
+    /**
+     * 局を取り直す。
+     *
+     * mirakc 側が1局ずつ選局して調べ終えるのを待つので、押した瞬間には終わらない。
+     * ここでは待たずに始めるだけにして、埋まっていく様子は画面が知らせで受け取る
+     * (取り込むたびに `services` が飛ぶ)。
+     */
+    resync: () => {
+        void settle();
+        return { success: true, scan: '局を取り込んでいます。増えなくなるまで続けます' };
+    },
+
+    /**
+     * 局ロゴを取りに行く。
+     *
+     * ロゴは放送波に数十秒〜数分に一度しか流れてこないので、押しても
+     * その場では出ない。普段は10分ごとに少しずつ拾っている
+     */
+    logoSweep: () => {
+        void sweep(3);
+        return { success: true, scan: '局ロゴを取りに行っています。届くまで数分かかります' };
     },
 };

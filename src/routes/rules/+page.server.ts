@@ -13,6 +13,9 @@ interface Row extends Rule {
     reservations: number;
 }
 
+/** これから録るぶん。終わったものも取り消したものも数えない */
+const PENDING_STATES = "('scheduled', 'conflict', 'recording')";
+
 /**
  * 入力中の条件を、保存していないルールとして組み立てる。
  *
@@ -48,6 +51,16 @@ function conditionsFrom(params: URLSearchParams): Rule | null {
         source: null,
         created_at: 0,
     };
+}
+
+/** 編集中のルールが押さえている予約。1件ずつ取り消せるように出す */
+export interface PendingRow {
+    id: number;
+    name: string;
+    service_name: string;
+    start_at: number;
+    end_at: number;
+    state: string;
 }
 
 export interface PreviewRow {
@@ -105,9 +118,20 @@ export function load({ url }) {
             })),
         };
     }
+    /*
+     * 予約数は**これから録るぶんだけ**。
+     *
+     * 全部の行を数えていた頃は、録り終えたものも取り消したものも混ざるので、
+     * ルールを止めても数が減らず、編集画面に出る件数とも合わなかった。
+     * この列を見るのは「このルールがいま何を押さえているか」を知りたいときなので、
+     * 履歴は数えない
+     */
     const rules = database()
         .prepare(
-            `SELECT r.*, (SELECT COUNT(*) FROM reservations WHERE rule_id = r.id) AS reservations
+            `SELECT r.*, (
+                 SELECT COUNT(*) FROM reservations
+                 WHERE rule_id = r.id AND state IN ${PENDING_STATES}
+             ) AS reservations
              FROM rules r ORDER BY r.id DESC`,
         )
         .all() as Row[];
@@ -116,19 +140,24 @@ export function load({ url }) {
         .prepare(`SELECT * FROM services WHERE ${CURRENT_SERVICES} ORDER BY type, channel`)
         .all() as Service[];
     /*
-     * 編集中のルールがこれから録る予定の件数。
+     * 編集中のルールがこれから録る予定。
      *
      * 条件を狭めても、既に立った予約はそのまま残る(意図して個別に残していることが
-     * あるため勝手に消さない)。まとめて取り消す口をここに置くので、何件あるかを出す。
+     * あるため勝手に消さない)。**1件ずつ取り消せるようにここへ並べる。**
+     * まとめて畳む口しか無かった頃は、1つだけ要らない予約を外すのに
+     * 全部消してから条件をいじり直すしかなかった
      */
     const pending =
         editing === undefined
-            ? 0
-            : (queryOne<{ n: number }>(
-                  `SELECT COUNT(*) AS n FROM reservations
-                   WHERE rule_id = ? AND state IN ('scheduled', 'conflict', 'recording')`,
+            ? []
+            : queryAll<PendingRow>(
+                  `SELECT r.id, r.name, r.start_at, r.end_at, r.state, s.name AS service_name
+                   FROM reservations r
+                   JOIN services s ON s.id = r.service_id
+                   WHERE r.rule_id = ? AND r.state IN ${PENDING_STATES}
+                   ORDER BY r.start_at`,
                   editing.id,
-              )?.n ?? 0);
+              );
     // フォームの初期値は preview と同じものを使う。別々に組み立てると、
     // 画面に出ている結果と保存されるものがズレる
     return { rules, services, editing: editing ?? null, seed: conditions, preview, defaults, pending };
@@ -296,24 +325,21 @@ export const actions = {
     },
 
     /**
-     * このルールが立てた予約をまとめて取り消す。
+     * このルールが立てた予約を**1件だけ**取り消す。
      *
      * 条件を狭めても既存の予約は残る(意図して個別に残していることがあるため)ので、
-     * 「もう要らない」ときにここから畳む。取り消しであって削除ではないので、
-     * ルールが同じ番組を作り直すことはなく、1件ずつなら予約一覧から戻せる。
+     * 要らないものだけここで外す。まとめて畳む口しか無かった頃は、1つだけ外すのに
+     * 全部消してから条件をいじり直すことになっていた。
+     *
+     * 取り消しであって削除ではない。ルールが同じ番組を作り直すことはなく、
+     * 気が変わったら予約一覧の「戻す」で戻せる。
      */
-    cancelReservations: async ({ request }) => {
+    cancelReservation: async ({ request }) => {
         const form = await request.formData();
-        const id = Number(form.get('id'));
-        if (!Number.isFinite(id)) return fail(400, { message: 'ルールIDが不正です' });
-
-        const targets = queryAll<{ id: number }>(
-            `SELECT id FROM reservations
-             WHERE rule_id = ? AND state IN ('scheduled', 'conflict', 'recording')`,
-            id,
-        );
-        for (const target of targets) await cancel(target.id);
-        return { success: true, canceled: targets.length };
+        const id = Number(form.get('reservationId'));
+        if (!Number.isFinite(id)) return fail(400, { message: '予約IDが不正です' });
+        await cancel(id);
+        return { success: true };
     },
 
     toggle: async ({ request }) => {

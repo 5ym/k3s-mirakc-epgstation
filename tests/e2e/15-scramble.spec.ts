@@ -44,7 +44,11 @@ test.describe('スクランブルされたまま録れたとき', () => {
             await expect(page.locator(row).getByTestId('recording-state')).toHaveText('視聴可能');
         }).toPass({ timeout: 120_000 });
 
-        await expect(page.locator(row).getByTestId('recording-error')).toHaveCount(0);
+        // 失敗の理由は詳細にしか出ない。何も起きていないので1つも無いこと
+        await page.locator(row).getByTestId('detail-button').click();
+        await expect(page.getByTestId('program-detail')).toBeVisible();
+        await expect(page.getByTestId('detail-error')).toHaveCount(0);
+        await page.getByTestId('detail-close').click();
     });
 
     test('生TSを残す設定なら、残るのは解除済みのTSだけ', async ({ page, request, stack }) => {

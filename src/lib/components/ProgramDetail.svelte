@@ -14,7 +14,7 @@
     let {
         program,
         onclose,
-        error = null,
+        notes = [],
         cm = null,
         cmNote = null,
         extra,
@@ -22,7 +22,14 @@
     }: {
         program: ProgramDetail;
         onclose: () => void;
-        error?: string | null;
+        /**
+         * 失敗や削除の理由。一覧には状態だけを出して、中身はここで見せる。
+         *
+         * 見出しを一緒に渡す。録画そのものの失敗とエンコードの失敗は別物で、
+         * どちらも「エンコードに失敗しました」と書いていた頃は、録画が失敗した
+         * 行を開くと嘘の見出しが出ていた
+         */
+        notes?: { title: string; text: string }[];
         /** 検出したCM区間 (JSON)。録画から開いたときだけ入る */
         cm?: string | null;
         /** 何を使って検出したか (無音 / join_logo_scp)。判定の当てにできるか分かる */
@@ -122,14 +129,14 @@
             </div>
         {/if}
 
-        {#if error}
-            <!-- エンコードが失敗した理由。一覧には「失敗」とだけ出して、中身はここで見せる -->
+        {#each notes as note (note.title)}
+            <!-- 失敗や削除の理由。一覧には状態だけを出して、中身はここで見せる -->
             <div class="mt-3" data-testid="detail-error">
-                <div class="text-error text-sm font-medium">エンコードに失敗しました</div>
+                <div class="text-error text-sm font-medium">{note.title}</div>
                 <pre
-                    class="bg-base-200 mt-1 max-h-48 overflow-auto rounded p-2 font-mono text-xs whitespace-pre-wrap">{error}</pre>
+                    class="bg-base-200 mt-1 max-h-48 overflow-auto rounded p-2 font-mono text-xs whitespace-pre-wrap">{note.text}</pre>
             </div>
-        {/if}
+        {/each}
 
         {#if extra}
             {@render extra()}

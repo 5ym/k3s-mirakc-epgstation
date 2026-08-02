@@ -96,31 +96,19 @@ spec:
             - name: TZ
               value: Asia/Tokyo
             # SvelteKit の CSRF 判定は Origin ヘッダと自分の origin を突き合わせる。
-            # adapter-node は ORIGIN も PROTOCOL_HEADER も無いと決め打ちになり、
-            # 食い違った側からの POST が全部 403 になる
+            # adapter-node は ORIGIN も PROTOCOL_HEADER も無いと http と決め打つので、
+            # https で来た POST が全部 403 になる
             # (画面上は「押しても何も起きない」に見える)。
-            # 名前は2つある (dp.doany.io と dp.l.doany.io) ので ORIGIN では書けず、
+            # **名前は2つある** (dp.doany.io と dp.l.doany.io) ので ORIGIN では書けない。
             # Traefik が付ける x-forwarded-proto をリクエストごとに見る。
             # HOST_HEADER は既定の host のままにする。Traefik は元の Host を渡すし、
             # kubelet のヘルスチェックは x-forwarded-host を付けないため
             - name: PROTOCOL_HEADER
               value: x-forwarded-proto
-            - name: MIRAKC_URL
-              value: http://mirakc:40772
-            # チューナーに触る仕事はすべて向こうに頼む。カードも tuner デバイスも
-            # このコンテナからは開けない
-            - name: TUNER_AGENT_URL
-              value: http://mirakc:40773
-            # DBと、放送波から拾った局ロゴの置き場
-            - name: DENPA_DB
-              value: /app/data/denpa.db
-            - name: RECORDED_DIR
-              value: /app/recorded
-            - name: LIBRARY_DIR
-              value: /library
-            # コーデック・CMの扱い・CMの探し方・動きのなめらかさは設定画面で決める。
-            # ここに置いていた頃は、画面で変えたのに env が勝つのか負けるのかが
-            # 分かりにくかった
+            # mirakc の居場所も置き場所も、既定値がそのままここの構成になっている
+            # (src/lib/server/config.ts)。同じ値を書き写すと、片方だけ直したときに
+            # どちらが効いているのか分からなくなる。
+            # コーデック・CMの扱いも設定画面で決める
             - name: ENCODE_CONCURRENCY
               value: '2'
           ports:

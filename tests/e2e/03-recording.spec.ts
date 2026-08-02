@@ -78,9 +78,9 @@ test.describe('録画とエンコード', () => {
         expect(nfo).toContain('<studio>BS11イレブン</studio>');
         expect(nfo).toContain('<aired>');
 
-        // 外部プレイヤーに渡す再生リンクが出ていること。
-        // 行そのものを押しても同じところへ行く (観るために開く一覧なので)
-        await expect(recording.getByTestId('play-link').first()).toBeVisible();
+        // 観られる録画には再生の印が出ていること。
+        // 再生ボタンは置いていない (行そのものを押すと再生する)
+        await expect(recording.getByTestId('play-hint')).toBeVisible();
 
         // 行を押すと番組表と同じ詳細が出る
         await recording.getByTestId('detail-button').click();

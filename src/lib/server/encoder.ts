@@ -27,14 +27,37 @@ export function isVideoCodec(value: unknown): value is VideoCodec {
  * インタレ解除の出し方。
  *
  * `bwdif` の既定は `send_field` で、**1フィールドから1コマ作って 59.94p にする**。
- * 動きは滑らかになるが、コマ数が倍なのでエンコードの時間もサイズも倍になる。
- * 実測 (地上波1分、AV1 10bit): 31.8秒 26MB ↔ send_frame なら 16.9秒 15MB。
+ * 放送は 1080i (毎秒60フィールド) なので、実写・スポーツ・報道はこれで
+ * 撮られたとおりの動きになる。コマ数が倍なのでエンコードの時間もサイズも
+ * およそ倍になる (実測・地上波1分・AV1 10bit: 31.8秒 26MB ↔ 16.9秒 15MB)。
  *
- * EPGStation の enc.js は `yadif` (= 29.97p) だったので、そちらに合わせたのが既定。
- * 滑らかさが要るときだけ設定画面で 60p にする。
+ * **アニメだけは倍にしない。** 元が毎秒24コマ前後で描かれていて、それを
+ * プルダウンして60フィールドに乗せているだけなので、フィールドごとにコマを
+ * 起こしても同じ絵が並ぶだけになる。滑らかさは1つも増えず、時間とサイズだけ倍になる。
  */
 function deinterlace(smooth: boolean): string {
     return smooth ? 'bwdif' : 'bwdif=mode=send_frame';
+}
+
+/** アニメ／特撮 (ARIB の大分類 7)。プルダウンされた24コマなのでコマ数を倍にしない */
+const GENRE_ANIME = 7;
+
+/**
+ * その録画を 60コマ/秒 で出すか。
+ *
+ * 番組表から写したジャンルで決める。ジャンルが分からない録画 (引き継いだもの、
+ * 番組情報の無い放送) は実写として扱う — 放送の大半は実写で、
+ * アニメを実写扱いにしても絵は変わらない (無駄が出るだけ) が、逆は動きが落ちる。
+ */
+export function smoothMotionFor(genres: string | null): boolean {
+    if (genres === null || genres === '') return true;
+    try {
+        const parsed = JSON.parse(genres) as unknown;
+        if (!Array.isArray(parsed)) return true;
+        return !parsed.map(Number).includes(GENRE_ANIME);
+    } catch {
+        return true;
+    }
 }
 
 function videoArgs(codec: VideoCodec, smooth: boolean): { filter: string; encoder: string[] } {
@@ -83,7 +106,7 @@ export interface EncodeOptions {
     keep?: Range[] | null;
     /** チャプター(CM位置)を書き込む ffmetadata ファイル */
     chaptersFile?: string | null;
-    /** 60コマ/秒で出す。滑らかになる代わりに時間もサイズも約2倍 */
+    /** 60コマ/秒で出す。滑らかになる代わりに時間もサイズも約2倍 (smoothMotionFor) */
     smoothMotion?: boolean;
 }
 
@@ -715,8 +738,8 @@ async function runJob(jobId: number): Promise<void> {
 
     const encodeOptions = {
         ...(await prepareCm(jobId, recording, sourceTs, signal)),
-        // 60コマ/秒で出すかどうか。設定画面で決める (時間もサイズも約2倍)
-        smoothMotion: settings().smoothMotion,
+        // コマ数は番組のジャンルで決まる。アニメだけ倍にしない (deinterlace)
+        smoothMotion: smoothMotionFor(recording.genres),
     };
     if (canceled.has(jobId)) return finishCanceled(jobId, recording, decoded);
 

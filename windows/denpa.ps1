@@ -34,7 +34,7 @@
 
 .PARAMETER Origins
     -Policy のときに、確認なしで開くことを許す denpa の origin。
-    既定は dp.home.arpa と dp.doany.io。
+    既定は dp.l.doany.io と dp.doany.io。
 
 .PARAMETER Remove
     確認せずに登録を解除する。
@@ -48,7 +48,7 @@
 .EXAMPLE
     .\denpa.ps1
     .\denpa.ps1 -PlayerPath "C:\Program Files\VideoLAN\VLC\vlc.exe"
-    .\denpa.ps1 -Test https://dp.home.arpa/api/recordings/12/file
+    .\denpa.ps1 -Test https://dp.l.doany.io/api/recordings/12/file
     .\denpa.ps1 -Remove
 
 .EXAMPLE
@@ -59,7 +59,7 @@
 [CmdletBinding()]
 param(
     [string] $PlayerPath,
-    [string[]] $Origins = @('http://dp.home.arpa', 'https://dp.doany.io'),
+    [string[]] $Origins = @('https://dp.l.doany.io', 'https://dp.doany.io'),
     [switch] $NoPause,
     [switch] $NoElevate,
     [switch] $Policy,

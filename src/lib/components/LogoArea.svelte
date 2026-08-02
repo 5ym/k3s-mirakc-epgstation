@@ -34,23 +34,60 @@
     let box = $state<{ x: number; y: number; w: number; h: number } | null>(null);
     let dragFrom: { x: number; y: number } | null = null;
 
-    const src = $derived(`/api/recordings/${recordingId}/frame?at=${at}`);
+    /**
+     * コマを取り出して出す。
+     *
+     * `<img src>` で直に読まず fetch を通すのは、**記録されているコマの大きさ**を
+     * 応答の見出し (X-Source-Width/Height) から受け取るため。地上波のHDは
+     * 1440×1080 に記録されていて画素が正方形ではないので、放送どおりの
+     * 縦横比で出した絵の大きさからは元の大きさを逆算できない。
+     * logoframe が見るのは記録されているほうなので、送るときはそこへ戻す。
+     */
+    let frame = $state<{ url: string; width: number; height: number } | null>(null);
+    $effect(() => {
+        const position = at;
+        const controller = new AbortController();
+        let url: string | null = null;
+        void (async () => {
+            try {
+                const res = await fetch(`/api/recordings/${recordingId}/frame?at=${position}`, {
+                    signal: controller.signal,
+                });
+                if (!res.ok) throw new Error(String(res.status));
+                const blob = await res.blob();
+                url = URL.createObjectURL(blob);
+                frame = {
+                    url,
+                    width: Number(res.headers.get('X-Source-Width')) || 0,
+                    height: Number(res.headers.get('X-Source-Height')) || 0,
+                };
+                failed = false;
+            } catch {
+                if (controller.signal.aborted) return;
+                frame = null;
+                failed = true;
+            }
+        })();
+        return () => {
+            controller.abort();
+            if (url !== null) URL.revokeObjectURL(url);
+        };
+    });
 
-    /** 表示は縮めてあるので、送るときは元の大きさに戻す */
-    const scale = $derived(
-        image === null || image.clientWidth === 0 ? 1 : image.naturalWidth / image.clientWidth,
-    );
-
-    const value = $derived(
-        box === null
-            ? ''
-            : [
-                  Math.round(box.x * scale),
-                  Math.round(box.y * scale),
-                  Math.round(box.w * scale),
-                  Math.round(box.h * scale),
-              ].join(','),
-    );
+    /** 囲ってもらった矩形を、記録されているコマの座標に直す */
+    const value = $derived.by(() => {
+        if (box === null || image === null || frame === null) return '';
+        if (image.clientWidth === 0 || image.clientHeight === 0) return '';
+        // 縦横比を直してあるので、横と縦で伸び方が違う。別々に戻す
+        const x = frame.width / image.clientWidth;
+        const y = frame.height / image.clientHeight;
+        return [
+            Math.round(box.x * x),
+            Math.round(box.y * y),
+            Math.round(box.w * x),
+            Math.round(box.h * y),
+        ].join(',');
+    });
 
     function at_(event: PointerEvent): { x: number; y: number } {
         const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
@@ -117,15 +154,20 @@
         onpointerup={up}
         role="presentation"
     >
-        <img
-            {src}
-            alt="ロゴの位置を選ぶためのコマ"
-            class="block max-w-full"
-            bind:this={image}
-            onerror={() => (failed = true)}
-            onload={() => (failed = false)}
-            data-testid="logo-frame"
-        />
+        {#if frame !== null}
+            <img
+                src={frame.url}
+                alt="ロゴの位置を選ぶためのコマ"
+                class="block max-w-full"
+                bind:this={image}
+                data-testid="logo-frame"
+            />
+        {:else}
+            <!-- 取り出している間も掴む場所を残しておく。出た瞬間に大きさが変わらないように -->
+            <div class="flex h-48 w-80 items-center justify-center text-sm" data-testid="logo-frame-loading">
+                {failed ? '' : 'コマを取り出しています…'}
+            </div>
+        {/if}
         {#if box !== null}
             <div
                 class="border-primary bg-primary/20 pointer-events-none absolute border-2"

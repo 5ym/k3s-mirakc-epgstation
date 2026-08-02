@@ -278,20 +278,6 @@
                         更新
                     </button>
                     <a class="btn" href="/rules" data-testid="rule-cancel-edit">やめる</a>
-                    {#if data.pending > 0}
-                        <!--
-                            条件を狭めても、既に立った予約はそのまま残る(意図して個別に
-                            残していることがあるので勝手には消さない)。要らないときはここから畳む
-                        -->
-                        <button
-                            class="btn btn-error btn-outline ml-auto"
-                            formaction="?/cancelReservations"
-                            formnovalidate
-                            data-testid="rule-cancel-reservations"
-                        >
-                            このルールの予約 {data.pending} 件を取り消す
-                        </button>
-                    {/if}
                 {:else}
                     <button class="btn btn-primary" formaction="?/create" data-testid="rule-submit">
                         追加
@@ -299,6 +285,53 @@
                 {/if}
             </div>
         </form>
+
+        <!--
+            このルールが押さえている予約。**フォームの外に出す。**
+            中に入れると form が入れ子になって、1件取り消すつもりで
+            ルールの更新まで送ってしまう。
+
+            条件を狭めても既に立った予約は残る (意図して個別に残していることが
+            あるので勝手には消さない) ので、要らないものだけここで外す
+        -->
+        {#if data.editing && data.pending.length > 0}
+            <div class="mt-4" data-testid="rule-pending">
+                <div class="text-sm font-medium">
+                    このルールが押さえている予約 ({data.pending.length} 件)
+                </div>
+                <p class="text-base-content/60 mt-1 text-xs">
+                    条件を変えても、既に立った予約はそのまま残ります。要らないものはここで取り消せます
+                    (取り消した番組をルールが取り直すことはありません)。
+                </p>
+                <div
+                    class="border-base-300 divide-base-300 mt-2 max-h-64 divide-y overflow-y-auto rounded-box border"
+                >
+                    {#each data.pending as reservation (reservation.id)}
+                        <div
+                            class="flex flex-wrap items-center gap-x-3 gap-y-1 p-2"
+                            data-testid="rule-pending-row"
+                            data-reservation-id={reservation.id}
+                        >
+                            <div class="min-w-0 flex-1 basis-48">
+                                <div class="truncate text-sm">{reservation.name}</div>
+                                <div class="text-base-content/60 text-xs">
+                                    {reservation.service_name} ・ {dateTime(reservation.start_at)}
+                                </div>
+                            </div>
+                            <form method="POST" action="?/cancelReservation" use:submitting>
+                                <input type="hidden" name="reservationId" value={reservation.id} />
+                                <button
+                                    class="btn btn-sm btn-error btn-outline"
+                                    data-testid="rule-pending-cancel"
+                                >
+                                    取消
+                                </button>
+                            </form>
+                        </div>
+                    {/each}
+                </div>
+            </div>
+        {/if}
     </div>
 </div>
 
