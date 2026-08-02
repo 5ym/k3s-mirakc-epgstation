@@ -46,4 +46,29 @@ test.describe('PWA', () => {
         });
         expect(cached.some((url) => url.includes('/api/'))).toBeFalsy();
     });
+
+    test('狭い画面ではナビを畳んで、ページが横にはみ出さない', async ({ page }) => {
+        /*
+         * 5項目を横に並べると、スマートフォンの幅ではヘッダーのほうが画面より
+         * 広くなり、ページ全体が横にスクロールしていた。番組表を横に流すのと
+         * 混ざって扱いにくいので、狭い画面ではハンバーガーに畳む
+         */
+        for (const width of [390, 430, 768, 1280]) {
+            await page.setViewportSize({ width, height: 780 });
+            await goto(page, '/guide?type=GR');
+            const doc = await page.evaluate(() => ({
+                scrollW: document.documentElement.scrollWidth,
+                clientW: document.documentElement.clientWidth,
+            }));
+            expect(doc.scrollW).toBeLessThanOrEqual(doc.clientW);
+        }
+
+        // 畳んだメニューからも行けること
+        await page.setViewportSize({ width: 390, height: 780 });
+        await goto(page, '/');
+        const menu = page.getByTestId('nav-menu');
+        await menu.locator('summary').click();
+        await menu.getByRole('link', { name: '番組表' }).click();
+        await page.waitForURL(/guide/);
+    });
 });

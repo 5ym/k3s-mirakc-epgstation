@@ -146,6 +146,32 @@ export function openServiceStream(
 }
 
 /**
+ * 物理チャンネル丸ごとのTSストリーム。**ロゴを拾うのはこちら。**
+ *
+ * サービス単位で開くと、mirakc がその局に要るPIDだけを通す。局ロゴを載せている
+ * CDT (PID 0x0029) はどの局のPMTにも載っていないので**まるごと落とされる**。
+ * 実機で確かめると、BS を3分・427MB 読んでも CDT は1つも来ず、同じ局を
+ * チャンネル丸ごとで開くと通った。
+ *
+ * ロゴはもともと物理チャンネル単位で集めるもの (1本のTSにその中継に乗っている
+ * 局のぶんが順に流れてくる) なので、開き方もこちらに揃える。
+ */
+export function openChannelStream(
+    type: string,
+    channel: string,
+    signal: AbortSignal,
+    priority = RECORDING_PRIORITY,
+): Promise<ReadableStream<Uint8Array>> {
+    // decode=1 は付けない。スクランブルを解く必要があるのは映像と音声で、
+    // ロゴが載っている表は元から素のまま流れてくる
+    return openStream(
+        `/api/channels/${encodeURIComponent(type)}/${encodeURIComponent(channel)}/stream`,
+        signal,
+        priority,
+    );
+}
+
+/**
  * 番組単位のTSストリーム。**放送に追従する。**
  *
  * mirakc は EIT[p/f] (いま流れている番組) を見て、番組が始まるまで1バイトも出さず、

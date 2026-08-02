@@ -5,7 +5,7 @@ import { config } from './config';
 import { database, now, queryAll, queryOne } from './db';
 import { CURRENT_SERVICES } from './epg';
 import { emit } from './events';
-import { getTuners, type MirakcTuner, openServiceStream } from './mirakc';
+import { getTuners, type MirakcTuner, openChannelStream } from './mirakc';
 import { chunks } from './stream';
 
 /**
@@ -22,17 +22,28 @@ import { chunks } from './stream';
 /**
  * 1チャンネルあたりの取得にかける上限。
  *
- * ロゴが放送波に流れてくるのは数十秒〜数分に一度で、1つのTSに乗っている局の
- * ぶんが順に来る。60秒では1局ぶん拾ったところで閉じることが多かった
+ * **ロゴ (CDT) は滅多に流れてこない。** 実機で測ると、地上波を100秒読んで
+ * 0〜2セクション、BS は4つの中継を100秒ずつ読んで0でした。分単位で待つ前提の
+ * ものなので、数十秒開いて諦めていた頃は当たるほうが偶然でした。
+ *
+ * 衛星は**1つの中継で網羅できます**。BS/CS の CDT はそのネットワークの局の
+ * ぶんをまとめて流すので (Mirakurun も同じ前提)、当たれば一度に埋まります。
+ * そのぶん長く開く価値があります。地上波は中継ごとに乗っている局が違うので、
+ * 1つずつ回ることになり、1回を短めにして数を稼ぎます。
  */
-const SWEEP_TIMEOUT = 120_000;
+const SWEEP_TIMEOUT: Record<string, number> = { GR: 3 * 60_000 };
+const SWEEP_TIMEOUT_SATELLITE = 10 * 60_000;
 /**
  * 相乗りのときの上限。向こうの都合でいつ閉じてもおかしくないので短くする。
- * ロゴは数十秒に一度流れてくるので、拾えるときはこの中で拾える
+ * こちらはチューナーを増やさない (同じチャンネルなら mirakc が配っているものへ混ぜる)
  */
-const RIDE_TIMEOUT = 30_000;
+const RIDE_TIMEOUT = 3 * 60_000;
 /** ロゴを取りに行くときの優先度。録画より低くして、必要なら奪われるようにする */
 const SWEEP_PRIORITY = 0;
+
+function timeoutFor(type: string): number {
+    return SWEEP_TIMEOUT[type] ?? SWEEP_TIMEOUT_SATELLITE;
+}
 
 function logoDir(): string {
     return join(config.dataDir, 'logos');
@@ -84,20 +95,13 @@ function store(networkId: number, serviceIds: number[], data: Uint8Array): numbe
 }
 
 /**
- * ストリームに相乗りしてロゴを拾う。
+ * 流れてくるTSからロゴを拾う。
  *
- * 録画の本流を邪魔しないよう、失敗しても黙って諦める。ロゴが無くても
- * 番組表は出るし、録画には何の関係も無い。
+ * 失敗しても黙って諦める。ロゴが無くても番組表は出るし、録画には何の関係も無い。
  */
-export function watch(serviceId: number): (chunk: Uint8Array) => void {
+export function watch(networkId: number): (chunk: Uint8Array) => void {
     const collector = new LogoCollector();
-    // 放送波の service_id は ARIB のもので、denpa の services.id とは別物。
-    // どのネットワークの話かはこちらが知っている
-    const service = queryOne<{ network_id: number }>(
-        'SELECT network_id FROM services WHERE id = ?',
-        serviceId,
-    );
-    let broken = service === undefined;
+    let broken = false;
     /** 同じものを何度も書きに行かない。ロゴは滅多に変わらない */
     const written = new Set<string>();
 
@@ -109,9 +113,9 @@ export function watch(serviceId: number): (chunk: Uint8Array) => void {
             if (found.length === 0) return;
 
             /*
-             * **チューナーが開いている間は拾い続ける。**
+             * **開いている間は拾い続ける。**
              *
-             * 1つ拾った時点で打ち切っていた頃は、1本の録画で1局ぶんしか入らなかった。
+             * 1つ拾った時点で打ち切っていた頃は、1回に1局ぶんしか入らなかった。
              * 1つのTSには**その物理チャンネルに相乗りしている局が全部**流れていて、
              * ロゴも局ごとに別々のタイミングで来る。開いているのはこちらの都合とは
              * 関係なく只なので、来たものは全部取っておく
@@ -121,7 +125,7 @@ export function watch(serviceId: number): (chunk: Uint8Array) => void {
                 const key = `${logo.logoId}:${logo.logoType}:${logo.logoVersion}`;
                 if (written.has(key)) continue;
                 written.add(key);
-                saved += store(service!.network_id, serviceIds, logo.data);
+                saved += store(networkId, serviceIds, logo.data);
             }
             if (saved > 0) emit('services');
         } catch (error) {
@@ -166,40 +170,61 @@ export function reconcile(): number {
  * もう選局できないチャンネルを1局ずつ60秒かけて開いては諦めることになり、
  * 本当に要る局まで順番が回ってこない。
  */
-export function missing(): { id: number; network_id: number; name: string; channel: string }[] {
-    return queryAll<{ id: number; network_id: number; name: string; channel: string }>(
-        `SELECT id, network_id, name, channel FROM services
+/** ロゴを取りに行く単位。1つの物理チャンネルと、そこに乗っている局 */
+export interface Target {
+    type: string;
+    channel: string;
+    network_id: number;
+}
+
+export function missing(): Target[] {
+    return queryAll<Target>(
+        `SELECT type, channel, MIN(network_id) AS network_id FROM services
          WHERE has_logo = 0 AND ${CURRENT_SERVICES}
-         ORDER BY type, channel, service_id`,
+         GROUP BY type, channel
+         ORDER BY type, channel`,
     );
 }
 
-/** その物理チャンネルに相乗りしている局のうち、まだロゴを持っていないもの */
-function missingOn(channel: string): number[] {
-    return queryAll<{ id: number }>(
-        `SELECT id FROM services WHERE channel = ? AND has_logo = 0 AND ${CURRENT_SERVICES}`,
-        channel,
-    ).map((row) => row.id);
+/** その物理チャンネルに相乗りしている局のうち、まだロゴを持っていない数 */
+function missingOn(channel: string): number {
+    return (
+        queryOne<{ n: number }>(
+            `SELECT COUNT(*) AS n FROM services
+             WHERE channel = ? AND has_logo = 0 AND ${CURRENT_SERVICES}`,
+            channel,
+        )?.n ?? 0
+    );
 }
 
 /**
  * 1つの物理チャンネルを開いて、そこに乗っている局のロゴを拾う。
  *
- * **1局取れた時点では閉じない。** 1つのTSにはその物理チャンネルの局が全部
+ * **サービス単位では開かない。** mirakc はサービス単位のストリームでは
+ * その局に要るPIDだけを通すので、ロゴを載せている CDT (PID 0x0029) は
+ * どの局のPMTにも載っていない都合でまるごと落ちる。実機で確かめると、
+ * BS をサービス単位で3分・427MB 読んでも CDT は1つも来なかった。
+ *
+ * **1局取れた時点でも閉じない。** 1つのTSにはその物理チャンネルの局が全部
  * 流れていて、ロゴは局ごとに別々のタイミングで来る。せっかく開いたのだから、
  * 揃うか時間切れになるまで読む。
  */
-async function collect(channel: string, serviceId: number, timeout: number): Promise<number> {
-    const before = missingOn(channel).length;
+async function collect(target: Target, timeout: number): Promise<number> {
+    const before = missingOn(target.channel);
     const controller = new AbortController();
     const stop = setTimeout(() => controller.abort(), timeout);
     try {
-        const stream = await openServiceStream(serviceId, controller.signal, SWEEP_PRIORITY);
-        const feed = watch(serviceId);
+        const stream = await openChannelStream(
+            target.type,
+            target.channel,
+            controller.signal,
+            SWEEP_PRIORITY,
+        );
+        const feed = watch(target.network_id);
         for await (const chunk of chunks(stream)) {
             feed(chunk);
             // 全部揃ったら、これ以上開けておく理由がない
-            if (missingOn(channel).length === 0) break;
+            if (missingOn(target.channel) === 0) break;
         }
     } catch {
         // 取れなければ次の機会に。チューナーが空いていないだけのことも多い
@@ -207,7 +232,17 @@ async function collect(channel: string, serviceId: number, timeout: number): Pro
         clearTimeout(stop);
         controller.abort();
     }
-    return before - missingOn(channel).length;
+    return before - missingOn(target.channel);
+}
+
+/** 空いているチューナーがあるか。無ければ自分では開かない */
+async function hasFreeTuner(): Promise<boolean> {
+    try {
+        return (await getTuners()).some((tuner) => tuner.isFree === true);
+    } catch {
+        // mirakc に聞けないなら開きに行かない
+        return false;
+    }
 }
 
 /** いま mirakc が開けている物理チャンネル。選局コマンドから読む */
@@ -222,6 +257,11 @@ function openChannels(tuners: MirakcTuner[]): Set<string> {
 
 /** 同時に2つ走らせない。相乗りの合図 (tuner.status-changed) は連続して飛んでくる */
 let riding = false;
+/**
+ * こちらも同時に2つ走らせない。BS/CS は1チャンネルに数分かけるので、
+ * 定期実行と画面からの「いま取りに行く」が重なるとチューナーを食い合う
+ */
+let sweeping = false;
 
 /**
  * **いま開いている選局に相乗りして**ロゴを拾う。
@@ -244,16 +284,10 @@ export async function ride(): Promise<number> {
         const open = openChannels(await getTuners());
         if (open.size === 0) return 0;
 
-        /*
-         * 開いているチャンネルごとに1回だけ乗る。同じチャンネルの局を
-         * 1つずつ開き直しても、読むものは同じ1本のTSでしかない
-         */
         let found = 0;
-        const done = new Set<string>();
-        for (const service of need) {
-            if (!open.has(service.channel) || done.has(service.channel)) continue;
-            done.add(service.channel);
-            found += await collect(service.channel, service.id, RIDE_TIMEOUT);
+        for (const target of need) {
+            if (!open.has(target.channel)) continue;
+            found += await collect(target, RIDE_TIMEOUT);
         }
         return found;
     } catch {
@@ -267,27 +301,32 @@ export async function ride(): Promise<number> {
 /**
  * 持っていない局のロゴを取りに行く。
  *
- * 録画と同じ口を短く開くだけ。優先度を下げてあるので、チューナーが足りなければ
- * mirakc が録画のほうを通す。
+ * 分単位で開くので、**空いているチューナーがあるときだけ**にする。優先度は 0 に
+ * してあるので録画 (2) には割り込まれるが、mirakc 自身の番組表集め (-1) は
+ * こちらに追い出されてしまう。空きが無ければ次の機会に回す。
  */
-export async function sweep(limit = 2): Promise<number> {
-    // 立っているだけでファイルが無い局を先に拾い直す。そうしないと
-    // 「もう持っている」とみなして永久に取りに行かない
-    reconcile();
-    // 開いているチューナーがあるなら、まずそちらに乗る。只で読める
-    let found = await ride();
-    /*
-     * 自分で開くのは数チャンネルずつ。1回に1つだけ開いていた頃は、BS/CS が
-     * 30チャンネル残っていると全部埋まるのに半日かかっていた。
-     * 優先度は 0 なので、録画 (2) が要るときは mirakc がこちらを切る
-     */
-    const channels = [...new Set(missing().map((service) => service.channel))].slice(0, limit);
-    for (const channel of channels) {
-        const service = missing().find((row) => row.channel === channel);
-        if (service !== undefined) found += await collect(channel, service.id, SWEEP_TIMEOUT);
+export async function sweep(limit = 1): Promise<number> {
+    if (sweeping) return 0;
+    sweeping = true;
+    try {
+        // 立っているだけでファイルが無い局を先に拾い直す。そうしないと
+        // 「もう持っている」とみなして永久に取りに行かない
+        reconcile();
+        // 開いているチューナーがあるなら、まずそちらに乗る。只で読める
+        let found = await ride();
+
+        const targets = missing().slice(0, limit);
+        if (targets.length > 0 && !(await hasFreeTuner())) return found;
+        for (const target of targets) {
+            found += await collect(target, timeoutFor(target.type));
+        }
+        if (found > 0) {
+            console.log(`[logo] ${found} 局ぶん拾いました (残り ${missing().length} チャンネル)`);
+        }
+        return found;
+    } finally {
+        sweeping = false;
     }
-    if (found > 0) console.log(`[logo] ${found} 局ぶん拾いました (残り ${missing().length} 局)`);
-    return found;
 }
 
 /** 何局ぶん持っているか。「本当に取れているのか」を画面で確かめられるように */

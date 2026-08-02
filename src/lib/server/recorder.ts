@@ -8,7 +8,6 @@ import { enqueue } from './encoder';
 import { emit } from './events';
 import { moveFile } from './fsx';
 import { libraryPath, recordedPath } from './library';
-import { watch as watchLogo } from './logo';
 import { writeNfo, writeThumbnail } from './metadata';
 import { getProgram, openProgramStream, openServiceStream } from './mirakc';
 import { chunks } from './stream';
@@ -296,8 +295,15 @@ async function pump(recording: Recording, controller: AbortController): Promise<
         // 途中で止めたときや掴むのに手間取ったときは実物と合わない。
         // 再開したときは足していく(ファイルも追記なので合計が実物になる)
         const from = Date.now();
-        // 局ロゴのために別途チューナーを開かずに済む (logo.ts)
-        const collectLogo = watchLogo(recording.service_id);
+        /*
+         * 局ロゴはここでは拾わない。
+         *
+         * 録画はサービス単位で開くので、mirakc がその局に要るPIDだけを通す。
+         * ロゴを載せている CDT (PID 0x0029) はどの局のPMTにも載っていないため
+         * まるごと落ちる (実機で BS を3分読んでも1つも来なかった)。
+         * ロゴは物理チャンネルを丸ごと開いて拾う (logo.ts)。同じチャンネルなら
+         * mirakc が配っているものへ混ぜるので、チューナーは増えない
+         */
         try {
             for (;;) {
                 try {
@@ -308,7 +314,6 @@ async function pump(recording: Recording, controller: AbortController): Promise<
                             watchdog = undefined;
                         }
                         written += chunk.byteLength;
-                        collectLogo(chunk);
                         if (!sink.write(chunk)) await once(sink, 'drain');
                     }
                 } catch (error) {

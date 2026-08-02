@@ -27,10 +27,6 @@ $s="$env:TEMP\denpa.ps1"; irm https://raw.githubusercontent.com/DAnything/denpa/
 
 VLC が見つからないときは `-PlayerPath "C:\...\vlc.exe"` で場所を渡します。
 
-聞かれること自体を無くしたいときは `-Policy` を足します。ブラウザのポリシーに
-書き込むので **UAC の確認が出て、書いたあとブラウザの再起動が要ります**。
-別の場所から開いているなら `-Origins http://denpa.example` も一緒に渡してください。
-
 > 登録の中身は**レジストリの値そのもの**です。ファイルを置かないので、後から消えたり
 > 移動したりして壊れません。登録先は HKCU なので、登録自体に管理者権限は要りません。
 > 開くのは http(s) だけで、失敗したらメッセージボックスを出します
@@ -48,9 +44,6 @@ sh denpa.sh --show     # 登録されている中身を見る
 sh denpa.sh --remove   # 解除
 ```
 
-- 聞かれること自体を無くしたいときは `DENPA_POLICY=1`。ブラウザのポリシーに書くので
-  **一度終了してから開き直す**まで反映されません。許す origin は `DENPA_ORIGINS` で
-  変えられます (Safari にこれに当たる設定はありません)
 - VLC は `/Applications/VLC.app/Contents/MacOS/VLC` を見ます。違うところに
   入れているなら `DENPA_VLC` で渡してください
 

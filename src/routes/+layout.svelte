@@ -63,6 +63,23 @@
      * 普通にページごとスクロールさせる
      */
     const fill = $derived(page.url.pathname === '/');
+
+    /**
+     * 狭い画面ではナビを畳む。
+     *
+     * 5項目を横に並べると、スマートフォンの幅ではヘッダーそのものが画面より
+     * 広くなり、ページ全体が横スクロールしていた (実測で 390px の端末に対して
+     * 420px)。番組表を横に流すのと、ページごと横に動くのが混ざって扱いにくい。
+     *
+     * `<details>` で作る。開閉に JS が要らないので、読み込み途中でも押せる
+     */
+    let menu = $state<HTMLDetailsElement | null>(null);
+    /** 行き先を選んだら閉じる。開いたままだと次の画面の頭が隠れる */
+    $effect(() => {
+        // 画面が変わったことをこの参照で拾う
+        page.url.pathname;
+        if (menu !== null) menu.open = false;
+    });
 </script>
 
 <svelte:head>
@@ -88,7 +105,12 @@
             >
                 {ICON[mode]}
             </button>
-            <ul class="menu menu-horizontal px-1">
+            <!--
+                広い画面はそのまま並べる。狭い画面では下のハンバーガーに畳む。
+                同じリンクを2つ出すことになるが、data-testid は横並びのほうにだけ
+                付けて、テストがどちらを指すのか迷わないようにする
+            -->
+            <ul class="menu menu-horizontal hidden px-1 sm:flex">
                 {#each links as link (link.href)}
                     <li>
                         <a
@@ -101,6 +123,30 @@
                     </li>
                 {/each}
             </ul>
+
+            <details class="dropdown dropdown-end sm:hidden" bind:this={menu} data-testid="nav-menu">
+                <summary class="btn btn-ghost btn-sm" aria-label="メニュー">
+                    <svg
+                        viewBox="0 0 24 24"
+                        class="size-5"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                    >
+                        <path d="M4 6h16M4 12h16M4 18h16" />
+                    </svg>
+                </summary>
+                <ul class="menu dropdown-content rounded-box bg-base-100 z-50 mt-2 w-48 shadow">
+                    {#each links as link (link.href)}
+                        <li>
+                            <a href={link.href} class={page.url.pathname === link.href ? 'active' : ''}>
+                                {link.label}
+                            </a>
+                        </li>
+                    {/each}
+                </ul>
+            </details>
         </nav>
 
         <!--

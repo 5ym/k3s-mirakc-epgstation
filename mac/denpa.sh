@@ -27,9 +27,6 @@ BUNDLE_ID=io.denpa.handler
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 VLC=${DENPA_VLC:-/Applications/VLC.app/Contents/MacOS/VLC}
 
-# 確認なしで開くことを許す denpa の origin
-ORIGINS=${DENPA_ORIGINS:-'https://dp.l.doany.io,https://dp.doany.io'}
-
 # 自分自身の取得元。パイプで流し込まれたときは $0 が使えないのでここから取り直す
 SOURCE_URL=${DENPA_SOURCE_URL:-https://raw.githubusercontent.com/DAnything/denpa/main/mac/denpa.sh}
 
@@ -116,9 +113,6 @@ remove() {
     rm -rf "$APP" "$SUPPORT"
     # 消したことを Launch Services にも伝える。残っていると古いほうが呼ばれる
     [ -x "$LSREGISTER" ] && "$LSREGISTER" -u "$APP" >/dev/null 2>&1
-    for domain in com.google.Chrome com.microsoft.Edge; do
-        defaults delete "$domain" AutoLaunchProtocolsFromOrigins >/dev/null 2>&1 || true
-    done
     echo '解除しました。'
 }
 
@@ -130,10 +124,6 @@ show() {
         echo '登録されていません。'
     fi
     [ -f "$HANDLER" ] && echo "渡し役: $HANDLER"
-    for domain in com.google.Chrome com.microsoft.Edge; do
-        printf '%s: ' "$domain"
-        defaults read "$domain" AutoLaunchProtocolsFromOrigins 2>/dev/null || echo '(ポリシー未設定)'
-    done
 }
 
 test_link() {
@@ -144,25 +134,16 @@ test_link() {
 }
 
 <<'NOTE' true
-ブラウザに「この origin からの denpa:// は確認なしで開いてよい」と教える。
+ブラウザのポリシー (AutoLaunchProtocolsFromOrigins) は書かない。
 
 独自スキームを開くと Chrome も Edge も確認を出すが、その確認には「常に許可」の
-チェックが付いていて、1回入れれば以後は出ない。ここを書くのは、
-プロファイルを作り直しても初回から出したくない場合のため
-(DENPA_POLICY=1)。反映にはブラウザの再起動が要る。
+チェックが付いていて、1回入れれば以後は出ない。**このチェックは https の
+ページからしか出ない**ので、denpa を https で開いている限り必ず使える。
 
-macOS では管理者権限が要らないので、Windows 版と違って書くこと自体は安い。
-それでも既定で書かないのは、**ブラウザの設定をこちらが勝手に変えないため**。
+以前は確認そのものを消すためにポリシーを書けるようにしていたが、
+1回チェックを入れれば済むことのために、こちらがブラウザの設定を書き換えて
+再起動まで要求する理由が無い。
 NOTE
-allow_origins() {
-    entries=$(printf %s "$ORIGINS" | tr ',' '\n' | sed 's/.*/"&"/' | paste -sd, -)
-    for domain in com.google.Chrome com.microsoft.Edge; do
-        defaults write "$domain" AutoLaunchProtocolsFromOrigins \
-            "[{\"protocol\":\"denpa\",\"allowed_origins\":[$entries]}]" >/dev/null 2>&1 ||
-            echo "$domain: ポリシーを書けませんでした (再生自体はできます)"
-    done
-    echo "確認なしで開く origin: $ORIGINS"
-}
 
 install_scheme() {
     command -v osacompile >/dev/null 2>&1 || { echo 'macOS でのみ登録できます。' >&2; exit 1; }
@@ -224,14 +205,8 @@ case ${1:---install} in
     --install)
         install_scheme
         echo ''
-        if [ "${DENPA_POLICY:-0}" = 1 ]; then
-            allow_origins
-            echo '確認を出さずに開くには、ブラウザを一度終了してから開き直してください。'
-        else
-            echo '初めて再生ボタンを押すと、ブラウザが「開きますか?」と聞いてきます。'
-            echo '  そこで「常に許可」にチェックを入れて開いてください。以後は聞かれません。'
-            echo '  (聞かれること自体を無くしたいときは DENPA_POLICY=1)'
-        fi
+        echo '初めて再生を押すと、ブラウザが「開きますか?」と聞いてきます。'
+        echo '  そこで「常に許可」にチェックを入れて開いてください。以後は聞かれません。'
         echo '確認は sh denpa.sh --test'
         echo '解除は sh denpa.sh --remove'
         ;;

@@ -18,23 +18,17 @@
 
     登録先は HKCU なので管理者権限は要らない。ログインユーザーにだけ効く。
 
+    **ブラウザのポリシーは書かない。** 以前は確認そのものを出さないよう
+    AutoLaunchProtocolsFromOrigins を書く -Policy を持っていたが、denpa は
+    https で開くようになったので、確認に「常に許可」のチェックが必ず出る
+    (このチェックは https のページからしか出ない)。1回入れれば以後は出ないので、
+    管理者権限とブラウザの再起動を要求してまで書く理由が無くなった。
+
 .PARAMETER PlayerPath
     vlc.exe の場所。省略すると PATH と既定の場所から探す。
 
 .PARAMETER NoPause
     終わったあとに Enter を待たない。自動実行やパイプから使うとき用。
-
-.PARAMETER NoElevate
-    管理者に上げ直さない。-Policy と一緒に使ったときだけ意味がある。
-
-.PARAMETER Policy
-    確認そのものを出さないよう、ブラウザのポリシーに書く。
-    **普通は要らない** (初回の「常に許可」で足りる)。管理者権限と
-    ブラウザの再起動が要る代わりに、どのプロファイルでも初回から確認が出なくなる。
-
-.PARAMETER Origins
-    -Policy のときに、確認なしで開くことを許す denpa の origin。
-    既定は dp.l.doany.io と dp.doany.io。
 
 .PARAMETER Remove
     確認せずに登録を解除する。
@@ -59,10 +53,7 @@
 [CmdletBinding()]
 param(
     [string] $PlayerPath,
-    [string[]] $Origins = @('https://dp.l.doany.io', 'https://dp.doany.io'),
     [switch] $NoPause,
-    [switch] $NoElevate,
-    [switch] $Policy,
     [switch] $Remove,
     [switch] $Show,
     [string] $Test
@@ -96,122 +87,6 @@ trap {
 $Root = 'HKCU:\Software\Classes\denpa'
 $CommandKey = "$Root\shell\open\command"
 
-<#
-    ブラウザに「この origin からの denpa:// は確認なしで開いてよい」と教える。
-
-    **既定では通らない。** 独自スキームを開くとき Edge も Chrome も確認を出すが、
-    その確認には「常に許可」のチェックが付いていて、1回入れれば以後は出ない。
-    それで足りるので、普段はブラウザに任せる。
-
-    ここを通すのは -Policy を渡したときだけ。プロファイルを作り直しても
-    初回から確認を出したくない、といった場合用。
-    HKCU\Software\Policies は普通のユーザーには書けない(ポリシーを自分で足せると
-    意味が無いので ACL で守られている)ので、管理者権限と、書いたあとの
-    ブラウザ再起動が要る。
-#>
-$Policies = @{
-    Edge   = 'HKCU:\Software\Policies\Microsoft\Edge'
-    Chrome = 'HKCU:\Software\Policies\Google\Chrome'
-}
-$PolicyName = 'AutoLaunchProtocolsFromOrigins'
-
-function Set-AutoLaunchPolicy([string[]] $origins) {
-    if (-not (Test-Elevated)) {
-        Write-Host 'ポリシーは書けませんでした (管理者権限が要ります)。'
-        Write-Host '  初回の確認で「常に許可」にチェックを入れれば、これは無くても構いません。'
-        return
-    }
-
-    # 値は JSON の配列。他のスキームの設定が入っていれば残す
-    $entry = [ordered]@{ protocol = 'denpa'; allowed_origins = @($origins) }
-
-    foreach ($browser in $Policies.GetEnumerator()) {
-        $path = $browser.Value
-        try { New-Item -Path $path -Force | Out-Null }
-        catch {
-            Write-Warning @"
-確認ダイアログを黙らせる設定は書けませんでした (管理者権限が要ります)。
-再生はこのままでもできます。毎回の確認を消したい場合は、
-PowerShell を「管理者として実行」して、もう一度これを実行してください。
-"@
-            return
-        }
-
-        $existing = @()
-        $current = (Get-ItemProperty -Path $path -Name $PolicyName -ErrorAction SilentlyContinue).$PolicyName
-        if ($current) {
-            try { $existing = @($current | ConvertFrom-Json) | Where-Object { $_.protocol -ne 'denpa' } }
-            catch { $existing = @() }
-        }
-
-        # 1件だけだと ConvertTo-Json が配列にしてくれない
-        $value = ConvertTo-Json -InputObject (@($existing) + $entry) -Depth 5 -Compress
-        if ($value -notmatch '^\[') { $value = "[$value]" }
-        Set-ItemProperty -Path $path -Name $PolicyName -Value $value
-        Write-Host "$($browser.Key): $value"
-    }
-}
-
-function Test-Elevated {
-    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-    return ([Security.Principal.WindowsPrincipal]$identity).IsInRole(
-        [Security.Principal.WindowsBuiltInRole]::Administrator)
-}
-
-<#
-    自分を管理者として起動し直す。
-
-    確認ダイアログの抑止 (AutoLaunchProtocolsFromOrigins) は HKCU\Software\Policies に
-    書くが、ここは普通のユーザーには書けない。「管理者として実行し直してください」と
-    言うだけだと、たいていそのまま毎回確認が出る側で使われる。UAC を1回出して済ませる。
-
-    断られても再生自体はできるので、そのまま先へ進む。
-    上げた先は別の窓なので、-NoPause は渡さない (読めないまま閉じてしまう)。
-#>
-function Invoke-Elevated {
-    # iex でパイプから流し込まれた場合は自分の場所が無い。上げ直しようがない
-    if (-not $PSCommandPath) {
-        Write-Host 'ポリシーを書くには管理者権限が要ります。'
-        Write-Host '  いったんファイルに保存してから実行してください (README のワンライナー参照)。'
-        return $false
-    }
-
-    $argv = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"", '-NoElevate')
-    if ($Policy) { $argv += '-Policy' }
-    if ($PlayerPath) { $argv += @('-PlayerPath', "`"$PlayerPath`"") }
-    if ($Origins) { $argv += @('-Origins', (($Origins | ForEach-Object { "`"$_`"" }) -join ',')) }
-    if ($Remove) { $argv += '-Remove' }
-
-    try {
-        Write-Host '管理者の窓で続けます (UAC の確認が出ます)。'
-        Start-Process -FilePath (Get-Command powershell.exe).Source -ArgumentList $argv -Verb RunAs -Wait
-        return $true
-    }
-    catch {
-        Write-Host '管理者にはなりませんでした。このまま続けます。' -ForegroundColor Yellow
-        Write-Host '  (毎回の確認は出たままになります)'
-        return $false
-    }
-}
-
-function Remove-AutoLaunchPolicy {
-    foreach ($browser in $Policies.GetEnumerator()) {
-        $path = $browser.Value
-        $current = (Get-ItemProperty -Path $path -Name $PolicyName -ErrorAction SilentlyContinue).$PolicyName
-        if (-not $current) { continue }
-        # 書くのと同じく管理者権限が要る。消せなくても他の後始末は続ける
-        try { $null = Get-Item -Path $path } catch { continue }
-        $rest = @()
-        try { $rest = @($current | ConvertFrom-Json) | Where-Object { $_.protocol -ne 'denpa' } } catch { }
-        if ($rest.Count -eq 0) { Remove-ItemProperty -Path $path -Name $PolicyName -ErrorAction SilentlyContinue }
-        else {
-            $value = ConvertTo-Json -InputObject @($rest) -Depth 5 -Compress
-            if ($value -notmatch '^\[') { $value = "[$value]" }
-            Set-ItemProperty -Path $path -Name $PolicyName -Value $value
-        }
-    }
-}
-
 function Get-RegisteredCommand {
     if (-not (Test-Path $CommandKey)) { return $null }
     return (Get-ItemProperty -Path $CommandKey -Name '(default)' -ErrorAction SilentlyContinue).'(default)'
@@ -232,8 +107,6 @@ function Remove-Registration {
     # 昔の版が起動役を置いていた場所
     $old = Join-Path $env:LOCALAPPDATA 'denpa'
     if (Test-Path $old) { Remove-Item -Path $old -Recurse -Force; $removed = $true }
-
-    Remove-AutoLaunchPolicy
 
     if ($removed) { Write-Host '解除しました。' } else { Write-Host '登録されていません。' }
 }
@@ -357,21 +230,6 @@ function Build-RegistryCommand([string] $exe, [string] $powershell, [string] $co
 }
 
 
-# --- 管理者に上げ直す -----------------------------------------------------
-
-<#
-    普段は上げない。登録先は HKCU なので管理者権限は要らず、毎回の確認は
-    ブラウザ側の「常に許可」で消えるため。
-
-    -Policy を渡したときだけ、ポリシーを書くために上げ直す。
-#>
-if ($Policy -and -not $NoElevate -and -not (Test-Elevated)) {
-    if (Invoke-Elevated) {
-        # 上げた先で全部やり終えている。こちらは黙って終わる
-        return
-    }
-}
-
 # --- 解除 -----------------------------------------------------------------
 
 if ($Remove) {
@@ -385,10 +243,6 @@ if ($Remove) {
 if ($Show) {
     $value = Get-RegisteredCommand
     if ($value) { Write-Host $value } else { Write-Host '登録されていません。' }
-    foreach ($browser in $Policies.GetEnumerator()) {
-        $policy = (Get-ItemProperty -Path $browser.Value -Name $PolicyName -ErrorAction SilentlyContinue).$PolicyName
-        Write-Host "$($browser.Key): $(if ($policy) { $policy } else { '(ポリシー未設定)' })"
-    }
     Wait-Enter
     return
 }
@@ -414,9 +268,6 @@ if ($PSBoundParameters.ContainsKey('Test')) {
     いた。入れ直したつもりが外れているうえ、消しているだけなのに
     「確認を出さずに開くには…」という案内まで出ていた。
     もう一度実行するのは新しくするためなので、そのまま最後まで通す。
-
-    先に消してから書く。Remove-Registration はブラウザのポリシーも消すので、
-    順番を逆にすると、書いたばかりの許可を自分で消してしまう。
 #>
 $existing = Get-RegisteredCommand
 if ($existing) {
@@ -424,8 +275,6 @@ if ($existing) {
     Write-Host "  $existing"
     Remove-Registration
 }
-
-if ($Policy) { Set-AutoLaunchPolicy $Origins }
 
 $exe = Find-Player
 Write-Host "VLC: $exe"
@@ -446,17 +295,9 @@ if (-not (Get-RegisteredCommand)) { throw '登録に失敗しました。' }
 
 Write-Host ''
 Write-Host '登録しました。'
-if ($Policy) {
-    Write-Host '確認を出さずに開くには、ブラウザを一度終了してから開き直してください。'
-    Write-Host "許可した origin: $($Origins -join ', ')"
-    Write-Host '(違う場所から開くなら -Origins で渡してください)'
-}
-else {
-    Write-Host ''
-    Write-Host '初めて再生ボタンを押すと、ブラウザが「開きますか?」と聞いてきます。'
-    Write-Host '  そこで「常に許可」にチェックを入れて開いてください。以後は聞かれません。'
-    Write-Host '  (聞かれること自体を無くしたいときは -Policy。管理者権限が要ります)'
-}
+Write-Host ''
+Write-Host '初めて再生を押すと、ブラウザが「開きますか?」と聞いてきます。'
+Write-Host '  そこで「常に許可」にチェックを入れて開いてください。以後は聞かれません。'
 Write-Host ''
 Write-Host '確認は .\denpa.ps1 -Test'
 Write-Host '中身は .\denpa.ps1 -Show'

@@ -130,6 +130,8 @@ const TUNERS = [
         types: ['BS', 'CS'],
         isAvailable: true,
         isFault: false,
+        // 本物と同じ形にしておく。ロゴ収集は空きがあるときだけ自分で開く
+        isFree: true,
         isUsing: false,
         users: [],
     },
@@ -139,6 +141,8 @@ const TUNERS = [
         types: ['GR'],
         isAvailable: true,
         isFault: false,
+        // 本物と同じ形にしておく。ロゴ収集は空きがあるときだけ自分で開く
+        isFree: true,
         isUsing: false,
         users: [],
     },
@@ -148,6 +152,8 @@ const TUNERS = [
         types: ['BS', 'CS'],
         isAvailable: true,
         isFault: false,
+        // 本物と同じ形にしておく。ロゴ収集は空きがあるときだけ自分で開く
+        isFree: true,
         isUsing: false,
         users: [],
     },
@@ -157,6 +163,8 @@ const TUNERS = [
         types: ['GR'],
         isAvailable: true,
         isFault: false,
+        // 本物と同じ形にしておく。ロゴ収集は空きがあるときだけ自分で開く
+        isFree: true,
         isUsing: false,
         users: [],
     },
@@ -262,8 +270,17 @@ function logoPackets(service: FakeService): Uint8Array {
     return Uint8Array.from([...packetize(0x0029, cdt), ...packetize(0x0011, sdt, 5)]);
 }
 
-function fakeStream(signal: AbortSignal, service?: FakeService): ReadableStream<Uint8Array> {
-    const logo = service === undefined ? new Uint8Array(0) : logoPackets(service);
+/**
+ * TSを流す。
+ *
+ * `services` を渡すのは**物理チャンネルを丸ごと開いたときだけ**。
+ * 本物の mirakc はサービス単位・番組単位のストリームではその局に要るPIDだけを
+ * 通すので、ロゴを載せている CDT (PID 0x0029) はどの局のPMTにも載っていない都合で
+ * まるごと落ちる。実機で BS をサービス単位で3分読んでも1つも来なかった。
+ * ここでも同じようにしておかないと、テストだけ通って現物では永久に集まらない。
+ */
+function fakeStream(signal: AbortSignal, services: FakeService[] = []): ReadableStream<Uint8Array> {
+    const logo = Uint8Array.from(services.flatMap((service) => [...logoPackets(service)]));
     const chunk = packets(20, scrambled);
     return new ReadableStream({
         start(controller) {
@@ -481,6 +498,7 @@ Bun.serve({
                     if (tuner.index === 1) {
                         return {
                             ...tuner,
+                            isFree: false,
                             isUsing: true,
                             users: [{ id: 'denpa', priority: 2, agent: 'denpa' }],
                         };
@@ -523,8 +541,8 @@ Bun.serve({
                     { headers: { 'Content-Type': 'video/MP2T' } },
                 );
             }
-            const service = SERVICES.find((s) => s.serviceId === found.serviceId);
-            return new Response(fakeStream(request.signal, service), {
+            // サービス単位・番組単位のストリームにロゴは載らない (fakeStream)
+            return new Response(fakeStream(request.signal), {
                 headers: { 'Content-Type': 'video/MP2T' },
             });
         }
@@ -534,8 +552,23 @@ Bun.serve({
             if (!SERVICES.some((s) => s.id === Number(stream[1]))) {
                 return new Response('unknown service', { status: 404 });
             }
-            const service = SERVICES.find((s) => s.id === Number(stream[1]));
-            return new Response(fakeStream(request.signal, service), {
+            return new Response(fakeStream(request.signal), {
+                headers: { 'Content-Type': 'video/MP2T' },
+            });
+        }
+
+        /*
+         * 物理チャンネルを丸ごと。**ロゴが載るのはこちらだけ。**
+         * 1本のTSにその中継に乗っている局が全部流れているので、
+         * そこに居る局のぶんをまとめて出す
+         */
+        const channelStream = url.pathname.match(/^\/api\/channels\/([^/]+)\/([^/]+)\/stream$/);
+        if (channelStream !== null) {
+            const type = decodeURIComponent(channelStream[1]);
+            const channel = decodeURIComponent(channelStream[2]);
+            const on = SERVICES.filter((s) => s.type === type && s.channel === channel);
+            if (on.length === 0) return new Response('unknown channel', { status: 404 });
+            return new Response(fakeStream(request.signal, on), {
                 headers: { 'Content-Type': 'video/MP2T' },
             });
         }
