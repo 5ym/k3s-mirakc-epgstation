@@ -49,10 +49,11 @@ test.describe('ルールで立った予約', () => {
         // 進行中の一覧からは消える
         await expect(page.locator(`[data-reservation-id="${id}"]`)).toHaveCount(0);
 
-        // ルールは作り直さないので、戻せるのはここだけ
+        // ルールは作り直さないので、戻せるのはここだけ。
+        // 状態の表示そのものは見ない (番組が始まっていると録画中を経由する)
         await goto(page, '/?all=1');
         const canceled = page.locator(`[data-reservation-id="${id}"]`);
-        await expect(canceled.getByTestId('reservation-state')).toHaveText('キャンセル');
+        await expect(canceled.getByTestId('restore-button')).toBeVisible();
         await canceled.getByTestId('restore-button').click();
 
         await goto(page, '/');
