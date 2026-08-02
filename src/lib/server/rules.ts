@@ -29,7 +29,7 @@ function extendedText(json: string | null): string {
 }
 
 /** 検索対象のテキスト */
-function haystack(
+export function haystack(
     program: Pick<Program, 'name' | 'description' | 'extended'>,
     fields: SearchField[],
 ): string {
@@ -67,18 +67,57 @@ function parseStrings(json: string | null): string[] | null {
 }
 
 /**
- * ルールに番組が当てはまるか。
+ * 判定に使う形にほどいたルール。
  *
- * 有料放送を対象にするかは全体設定なので、呼ぶ側が渡す
- * (ここで設定を読むと純粋関数でなくなり、テストから条件を作れない)。
+ * ほどく作業 (JSON の読み出し、キーワードの分割、全角の直し) を**ルール1つにつき
+ * 1回**にするために分けてある。以前は判定のたびにやっていて、実機では
+ * 有効なルール 318 × これから放送される番組 25,608 = **810万回**それをやっていた。
+ * ルールを1つ足すだけで十数秒待たされていたのはこれが理由。
  */
-export function matches(rule: Rule, program: Program, serviceType?: string, freeOnly = true): boolean {
+export interface CompiledRule {
+    rule: Rule;
+    services: number[] | null;
+    types: string[] | null;
+    genres: string[] | null;
+    fields: SearchField[];
+    keywords: string[];
+    ignores: string[];
+}
+
+export function compile(rule: Rule): CompiledRule {
+    return {
+        rule,
+        services: parseList(rule.service_ids),
+        types: parseStrings(rule.service_types),
+        genres: parseStrings(rule.genres),
+        fields: parseSearchFields(rule.search_fields),
+        // キーワードは空白区切りの AND。「アニメ 再放送」で両方含むものだけ拾える
+        keywords: toHalfWidth(rule.keyword).toLowerCase().split(/\s+/).filter(Boolean),
+        // 除外キーワードは OR。1つでも当たれば落とす
+        ignores: toHalfWidth(rule.ignore_keyword).toLowerCase().split(/\s+/).filter(Boolean),
+    };
+}
+
+/**
+ * ほどいたルールに番組が当てはまるか。
+ *
+ * 検索用テキストは**関数で受け取る**。文字を作るのが一番高くつくので、
+ * チャンネルやジャンルで落ちる番組にはそもそも作らせない。
+ * 同じ番組に何本ものルールを当てるときは、呼ぶ側が作ったものを使い回せる。
+ */
+export function matchesCompiled(
+    compiled: CompiledRule,
+    program: Program,
+    serviceType: string | undefined,
+    freeOnly: boolean,
+    textOf: (fields: SearchField[]) => string,
+): boolean {
     if (freeOnly && !program.is_free) return false;
+
+    const { services, types, genres, keywords, ignores } = compiled;
 
     // チャンネルの条件は「種別」と「個別チャンネル」のOR。
     // 「地上波全部 + BS11だけ」のような指定ができるようにするため
-    const services = parseList(rule.service_ids);
-    const types = parseStrings(rule.service_types);
     if (services !== null || types !== null) {
         const byService = services?.includes(program.service_id) ?? false;
         const byType = serviceType !== undefined && (types?.includes(serviceType) ?? false);
@@ -87,25 +126,49 @@ export function matches(rule: Rule, program: Program, serviceType?: string, free
 
     // ジャンルは "7"(大分類だけ)と "7-0"(中分類まで)の2通りで持つ。
     // 昔のルールは数値の配列だが、String() を通せばそのまま大分類として読める
-    const genres = parseStrings(rule.genres);
     if (genres !== null) {
         const detail = parseGenreDetail(program);
         if (detail.length === 0) return false;
         if (!genreMatches(genres, detail)) return false;
     }
 
-    const text = haystack(program, parseSearchFields(rule.search_fields));
-
-    // キーワードは空白区切りの AND。「アニメ 再放送」で両方含むものだけ拾える
-    const keywords = toHalfWidth(rule.keyword).toLowerCase().split(/\s+/).filter(Boolean);
-    if (!keywords.every((k) => text.includes(k))) return false;
-
-    // 除外キーワードは OR。1つでも当たれば落とす
-    const ignores = toHalfWidth(rule.ignore_keyword).toLowerCase().split(/\s+/).filter(Boolean);
-    if (ignores.some((k) => text.includes(k))) return false;
-
     // 全条件が空のルールは全番組にマッチしてしまうので無効扱いにする
-    return keywords.length > 0 || services !== null || types !== null || genres !== null;
+    if (keywords.length === 0 && services === null && types === null && genres === null) return false;
+
+    if (keywords.length === 0 && ignores.length === 0) return true;
+
+    const text = textOf(compiled.fields);
+    if (!keywords.every((k) => text.includes(k))) return false;
+    return !ignores.some((k) => text.includes(k));
+}
+
+/**
+ * ルールに番組が当てはまるか。1件だけ見るとき用。
+ *
+ * 有料放送を対象にするかは全体設定なので、呼ぶ側が渡す
+ * (ここで設定を読むと純粋関数でなくなり、テストから条件を作れない)。
+ */
+export function matches(rule: Rule, program: Program, serviceType?: string, freeOnly = true): boolean {
+    return matchesCompiled(compile(rule), program, serviceType, freeOnly, (fields) =>
+        haystack(program, fields),
+    );
+}
+
+/**
+ * 番組1つぶんの検索用テキストを、対象範囲ごとに1度だけ作って使い回す。
+ * ほとんどのルールは同じ範囲 (番組名だけ) を見るので、実際にはほぼ1回で済む。
+ */
+function textCache(program: Program): (fields: SearchField[]) => string {
+    const cache = new Map<string, string>();
+    return (fields) => {
+        const key = fields.join(',');
+        let text = cache.get(key);
+        if (text === undefined) {
+            text = haystack(program, fields);
+            cache.set(key, text);
+        }
+        return text;
+    };
 }
 
 /**
@@ -135,11 +198,16 @@ export function applyRules(): number {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 'scheduled', ?, ?)
     `);
 
+    const compiled = rules.map(compile);
+
     let created = 0;
     const tx = database().transaction(() => {
         for (const program of programs) {
-            for (const rule of rules) {
-                if (!matches(rule, program, program.service_type, recording.freeOnly)) continue;
+            const textOf = textCache(program);
+            for (const candidate of compiled) {
+                if (!matchesCompiled(candidate, program, program.service_type, recording.freeOnly, textOf))
+                    continue;
+                const rule = candidate.rule;
                 const res = insert.run(
                     program.id,
                     rule.id,

@@ -2,9 +2,8 @@ import { fail, redirect } from '@sveltejs/kit';
 import { genreName } from '$lib/arib';
 import { parseSearchFields } from '$lib/search';
 import { database, now, queryAll, queryOne } from '$lib/server/db';
-import { sync } from '$lib/server/epg';
 import { cancel } from '$lib/server/reservations';
-import { matches } from '$lib/server/rules';
+import { applyRules, compile, haystack, matchesCompiled } from '$lib/server/rules';
 import { resolveConflicts } from '$lib/server/scheduler';
 import { settings } from '$lib/server/settings';
 import type { Program, Rule, Service } from '$lib/types';
@@ -85,8 +84,12 @@ export function load({ url }) {
              WHERE p.start_at > ? ORDER BY p.start_at`,
             now(),
         );
+        // 条件のほどきは1回だけ。番組ごとにやり直すと、番組の数だけ JSON を読むことになる
+        const compiled = compile(conditions);
         const hits = all.filter((program) =>
-            matches(conditions, program, program.service_type, defaults.freeOnly),
+            matchesCompiled(compiled, program, program.service_type, defaults.freeOnly, (fields) =>
+                haystack(program, fields),
+            ),
         );
         preview = {
             total: hits.length,
@@ -184,12 +187,18 @@ function ruleName(
 }
 
 /**
- * ルールを当て直す。先に番組表を取り直してから当てる。
- * 押す動機はたいてい「新しい番組に当ててほしい」なので、古い番組表のまま
- * 当てても期待どおりにならない。
+ * ルールを当て直して、チューナーの取り合いを解き直す。
+ *
+ * 以前はここで番組表を丸ごと取り直していた (`sync()`)。押す動機はたいてい
+ * 「新しい番組に当ててほしい」だから、というつもりだったが、そのぶん
+ * 数MBの取得と2万件の書き戻しを待たされていた。
+ *
+ * いまは mirakc が番組表の更新を知らせてくるので (`/events`)、手元の番組表は
+ * 常に新しい。取り直す理由がなくなったので当てるだけにする。
  */
 async function reapply(): Promise<void> {
-    await sync();
+    applyRules();
+    await resolveConflicts();
 }
 
 export const actions = {
