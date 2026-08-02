@@ -1,6 +1,5 @@
 import { fail } from '@sveltejs/kit';
 import { isCmMode } from '$lib/server/cm';
-import { config } from '$lib/server/config';
 import { database, now, queryAll, queryOne } from '$lib/server/db';
 import { isVideoCodec } from '$lib/server/encoder';
 import { available as migrateAvailable, source, start, status } from '$lib/server/migrate';
@@ -14,10 +13,18 @@ export function load() {
         recording: current,
         auth: {
             user: current.basicAuthUser,
-            // パスワードそのものは返さない。設定済みかどうかだけ分かればよい
-            hasPassword: current.basicAuthPassword !== '',
+            /*
+             * パスワードそのものを返す。
+             *
+             * Kodi や VLC に登録するときに必要になるが、覚えていないと入れ直すしかなく、
+             * 入れ直せば既に登録した端末が全部つながらなくなる。
+             *
+             * 隠す意味も薄い。範囲が files なら録画一覧の再生リンクに同じものが
+             * 埋まっている (画面を開ければ見える)。範囲が all ならこの画面自体に
+             * 認証がかかっているので、見えている時点で持っている人
+             */
+            password: current.basicAuthPassword,
             scope: current.basicAuthScope,
-            fromEnv: !isStored('basicAuthPassword') && config.basicAuthPassword !== '',
         },
         fromEnv: { codec: !isStored('codec'), cmCut: !isStored('cmCut') },
         webhooks: queryAll<Webhook>('SELECT * FROM webhooks ORDER BY id'),
@@ -43,15 +50,12 @@ export const actions = {
         if (scope !== 'files' && scope !== 'all') {
             return fail(400, { message: '適用範囲の指定が不正です' });
         }
-        if (user !== '' && password === '' && settings().basicAuthPassword === '') {
+        // 画面にはいま入っているものが出ている。空にしたのは「消したい」ということ。
+        // ただしユーザー名だけ残ると認証が黙って無効になるので、そこは断る
+        if (user !== '' && password === '') {
             return fail(400, { message: 'パスワードを入力してください' });
         }
-        // パスワード欄が空なら今のものを変えない(URLだけ直したいことがある)
-        saveSettings(
-            password === ''
-                ? { basicAuthUser: user, basicAuthScope: scope }
-                : { basicAuthUser: user, basicAuthPassword: password, basicAuthScope: scope },
-        );
+        saveSettings({ basicAuthUser: user, basicAuthPassword: password, basicAuthScope: scope });
         return { success: true, saved: true };
     },
 

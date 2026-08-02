@@ -1,8 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test } from '@playwright/test';
-import { MIRAKC_URL, TEST_ROOT } from '../../playwright.config';
-import { goto, reserveSoon, syncEpg } from './helpers';
+import { expect, goto, reserveSoon, setRecording, syncEpg, test } from './helpers';
 
 /** 残っているTSのうち、スクランブルが掛かったままのもの */
 function scrambledFiles(dir: string): string[] {
@@ -26,16 +24,16 @@ function scrambledFiles(dir: string): string[] {
  * (カードを読めるのはあちらのコンテナだけ)。
  */
 test.describe('スクランブルされたまま録れたとき', () => {
-    test.afterEach(async ({ request }) => {
-        await request.post(`${MIRAKC_URL}/__control/scrambled?on=0`);
+    test.afterEach(async ({ request, stack }) => {
+        await request.post(`${stack.mirakcUrl}/__control/scrambled?on=0`);
     });
 
-    test('録画は止めず、エンコードの前に自動で解除する', async ({ page, request }) => {
+    test('録画は止めず、エンコードの前に自動で解除する', async ({ page, request, stack }) => {
         test.setTimeout(180_000);
         await syncEpg(request);
 
         // カードが読めていない状態にする
-        await request.post(`${MIRAKC_URL}/__control/scrambled?on=1`);
+        await request.post(`${stack.mirakcUrl}/__control/scrambled?on=1`);
 
         const programId = await reserveSoon(page, request, 'BS');
         const row = `[data-testid="recording-row"][data-program-id="${programId}"]`;
@@ -49,20 +47,25 @@ test.describe('スクランブルされたまま録れたとき', () => {
         await expect(page.locator(row).getByTestId('recording-error')).toHaveCount(0);
     });
 
-    test('生TSを残す設定なら、残るのは解除済みのTSだけ', async ({ page, request }) => {
+    test('生TSを残す設定なら、残るのは解除済みのTSだけ', async ({ page, request, stack }) => {
         test.setTimeout(180_000);
         await syncEpg(request);
-        await request.post(`${MIRAKC_URL}/__control/scrambled?on=1`);
+        await request.post(`${stack.mirakcUrl}/__control/scrambled?on=1`);
 
-        const programId = await reserveSoon(page, request, 'BS', 0, { encode: 'on', keepOriginal: 'on' });
-        const row = `[data-testid="recording-row"][data-program-id="${programId}"]`;
+        await setRecording(request, { keepOriginal: true });
+        try {
+            const programId = await reserveSoon(page, request, 'BS');
+            const row = `[data-testid="recording-row"][data-program-id="${programId}"]`;
 
-        await expect(async () => {
-            await goto(page, '/');
-            await expect(page.locator(row).getByTestId('recording-state')).toHaveText('視聴可能');
-        }).toPass({ timeout: 120_000 });
+            await expect(async () => {
+                await goto(page, '/');
+                await expect(page.locator(row).getByTestId('recording-state')).toHaveText('視聴可能');
+            }).toPass({ timeout: 120_000 });
 
-        // 掛かったままのTSを取っておいても、あとから解ける保証は無いので置き換える
-        expect(scrambledFiles(`${TEST_ROOT}/recorded`)).toEqual([]);
+            // 掛かったままのTSを取っておいても、あとから解ける保証は無いので置き換える
+            expect(scrambledFiles(stack.recordedDir)).toEqual([]);
+        } finally {
+            await setRecording(request);
+        }
     });
 });

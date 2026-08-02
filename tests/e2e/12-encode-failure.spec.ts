@@ -1,9 +1,6 @@
 import { existsSync, rmSync, writeFileSync } from 'node:fs';
-import { expect, type Page, test } from '@playwright/test';
-import { TEST_ROOT } from '../../playwright.config';
-import { goto, reserveSoon, syncEpg } from './helpers';
-
-const FAIL_MARKER = `${TEST_ROOT}/fail-encode`;
+import type { Page } from '@playwright/test';
+import { expect, goto, reserveSoon, syncEpg, test } from './helpers';
 
 /** 状態が変わるのを待つ。画面は知らせで自分で書き換わるので、開き直さない */
 async function waitForRow(page: Page, selector: string, expected: string, timeoutMs = 90_000) {
@@ -16,16 +13,16 @@ async function waitForRow(page: Page, selector: string, expected: string, timeou
  * 失敗の表示が消せないと、直したあとも延々と残って邪魔になる。
  */
 test.describe('エンコードの失敗', () => {
-    test.afterAll(() => {
-        if (existsSync(FAIL_MARKER)) rmSync(FAIL_MARKER);
+    test.afterAll(({ stack }) => {
+        if (existsSync(stack.failFile)) rmSync(stack.failFile);
     });
 
-    test('失敗したエンコードは録画の行に出て、理由は詳細で見られる', async ({ page, request }) => {
+    test('失敗したエンコードは録画の行に出て、理由は詳細で見られる', async ({ page, request, stack }) => {
         test.setTimeout(180_000);
         await syncEpg(request);
 
         // ここから先のエンコードを失敗させる
-        writeFileSync(FAIL_MARKER, '1');
+        writeFileSync(stack.failFile, '1');
 
         await reserveSoon(page, request, 'BS');
 
@@ -60,6 +57,6 @@ test.describe('エンコードの失敗', () => {
         await failed.getByTestId('delete-confirm').click();
         await expect(page.locator(`[data-recording-id="${id}"]`)).toHaveCount(0);
 
-        rmSync(FAIL_MARKER);
+        rmSync(stack.failFile);
     });
 });

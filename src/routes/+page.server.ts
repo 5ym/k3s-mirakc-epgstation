@@ -42,19 +42,25 @@ export function load({ url, request }) {
     const states = showFinished
         ? "('scheduled','conflict','recording','done','failed','canceled','missed')"
         : "('scheduled','conflict','recording')";
+    /*
+     * 並び。
+     *
+     * 「進行中のみ」は**これから録るものを近い順**に出す。まだ何も終わっていないので
+     * 放送日時の降順にすると、いちばん先の予約が先頭に来てしまう。
+     * 録画中だけは真っ先に見たいので先頭に固定する。
+     *
+     * 「完了分も表示」にすると終わったものが混ざる。ここで近い順を続けると、
+     * 昔の録画と明日の予約が入り混じって時系列として読めなくなるので、
+     * 録画一覧と同じ**放送日時の新しい順**に切り替える
+     */
+    const order = showFinished ? 'r.start_at DESC' : `(r.state = 'recording') DESC, r.start_at ASC`;
     const reservations = queryAll<ReservationRow>(
         `SELECT r.*, s.name AS service_name, rules.name AS rule_name
          FROM reservations r
          JOIN services s ON s.id = r.service_id
          LEFT JOIN rules ON rules.id = r.rule_id
          WHERE r.state IN ${states}
-         -- 録画中は真っ先に見たいので先頭に固定する。
-         -- そのあとは「これから」を近い順に、「終わったもの」を新しい順に。
-         -- 全部まとめて降順にすると、これからの予約が一番遠いものから並んでしまう
-         ORDER BY (r.state = 'recording') DESC,
-                  CASE WHEN r.state IN ('scheduled', 'conflict') THEN 0 ELSE 1 END,
-                  CASE WHEN r.state IN ('scheduled', 'conflict') THEN r.start_at END ASC,
-                  r.start_at DESC
+         ORDER BY ${order}
          LIMIT 300`,
     );
 
@@ -90,9 +96,13 @@ export function load({ url, request }) {
                  WHERE recording_id = r.id AND state IN ('queued','running')
                  ORDER BY id DESC LIMIT 1
              )
-             WHERE r.deleted_at IS ${showDeleted ? 'NOT NULL' : 'NULL'}
              -- 録画中のものは予約一覧に出ている。ここにも出すと同じ番組が2箇所に並ぶ
-             AND r.state != 'recording'
+             WHERE r.state != 'recording'
+             /*
+              * 「削除済みも表示」は消したものを**足す**。消したものだけに切り替えていた頃は、
+              * 消したかどうかを確かめるのに一覧を行き来することになっていた
+              */
+             ${showDeleted ? '' : 'AND r.deleted_at IS NULL'}
              /*
               * 並びは放送日順に固定する。エンコードが始まったものを上へ動かしていた頃は、
               * 眺めている間に行が飛んで、どれを見ていたのか分からなくなっていた

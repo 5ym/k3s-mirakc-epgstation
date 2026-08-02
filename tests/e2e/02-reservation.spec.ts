@@ -1,5 +1,4 @@
-import { expect, test } from '@playwright/test';
-import { cellOf, goto, past, syncEpg, upcoming } from './helpers';
+import { cellOf, expect, goto, past, setRecording, syncEpg, test, upcoming } from './helpers';
 
 test.describe('手動予約', () => {
     test.beforeEach(async ({ request }) => {
@@ -72,28 +71,29 @@ test.describe('予約の細かい指定', () => {
         await syncEpg(request);
     });
 
-    test('この番組だけ録画のしかたを変えられる', async ({ page }) => {
-        await goto(page, '/guide?type=GR');
-        const [target] = await upcoming(page);
+    test('録画のしかたは設定画面で決めて、そこから予約に入る', async ({ page, request }) => {
+        // 番組ごとの指定は置いていない。同じ選択肢が予約・ルール・設定にあると
+        // 「どれで決まったのか」が分からなくなるため
+        await setRecording(request, { keepOriginal: true });
+        try {
+            await goto(page, '/guide?type=GR');
+            const [target] = await upcoming(page);
 
-        await cellOf(page, target.programId).getByTestId('program-button').click();
-        // 既定のままでいいことがほとんどなので畳んである
-        await expect(page.getByTestId('reserve-options')).not.toBeVisible();
-        await page.getByTestId('reserve-options-summary').click();
+            await cellOf(page, target.programId).getByTestId('program-button').click();
+            await expect(page.getByTestId('reserve-options')).toHaveCount(0);
+            await page.getByTestId('detail-reserve').click();
 
-        // コーデックとCMは全体設定。ここで選べるのは録画のしかただけ
-        await expect(page.getByTestId('reserve-options')).toContainText('設定');
-        await page.getByTestId('reserve-keep').check();
-        await page.getByTestId('detail-reserve').click();
+            await goto(page, '/');
+            const reservation = page.locator(
+                `[data-testid="reservation-row"][data-program-id="${target.programId}"]`,
+            );
+            await expect(reservation).toContainText('生TSも残す');
 
-        await goto(page, '/');
-        const reservation = page.locator(
-            `[data-testid="reservation-row"][data-program-id="${target.programId}"]`,
-        );
-        await expect(reservation).toContainText('生TSも残す');
-
-        await reservation.getByTestId('cancel-button').click();
-        await expect(reservation).toHaveCount(0);
+            await reservation.getByTestId('cancel-button').click();
+            await expect(reservation).toHaveCount(0);
+        } finally {
+            await setRecording(request);
+        }
     });
 
     test('予約の行を押すと番組表と同じ詳細が出る', async ({ page }) => {
@@ -136,20 +136,16 @@ test.describe('予約の細かい指定', () => {
         await expect(detail).toHaveCount(0);
     });
 
-    test('放送が終わった番組は予約できない', async ({ page }) => {
-        // 番組表には過去の番組も並んでいる。予約できてしまうと、
-        // 録れないものが予約一覧に残り続ける
+    test('放送が終わった番組には予約する口を出さない', async ({ page }) => {
+        // 番組表には過去の番組も並んでいる。押せてしまうと、押した先で断られるだけ
         await goto(page, '/guide?type=GR');
         const done = await past(page);
 
         await cellOf(page, done[0].programId).getByTestId('program-button').click();
-        await page.getByTestId('detail-reserve').click();
-
-        // 断る理由は詳細を開いたまま、その中に出す。番組表にインラインで足すと
-        // グリッドが押し下げられてスクロールバーが出る
         const detail = page.getByTestId('program-detail');
         await expect(detail).toBeVisible();
-        await expect(detail.getByTestId('guide-error')).toContainText('放送が終わっています');
+        await expect(detail.getByTestId('detail-ended')).toHaveText('放送終了');
+        await expect(detail.getByTestId('detail-reserve')).toHaveCount(0);
         await page.getByTestId('detail-close').click();
         await expect(detail).toHaveCount(0);
 

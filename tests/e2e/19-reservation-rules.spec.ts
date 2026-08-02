@@ -1,5 +1,4 @@
-import { expect, test } from '@playwright/test';
-import { goto, syncEpg } from './helpers';
+import { expect, goto, syncEpg, test } from './helpers';
 
 /**
  * ルールで立った予約まわり。

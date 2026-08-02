@@ -1,6 +1,5 @@
-import { expect, test } from '@playwright/test';
 import { BS11 } from '../fake/services';
-import { goto, syncEpg } from './helpers';
+import { expect, goto, syncEpg, test } from './helpers';
 
 test.describe('自動予約ルール', () => {
     test('条件が空のルールは作れない', async ({ page }) => {

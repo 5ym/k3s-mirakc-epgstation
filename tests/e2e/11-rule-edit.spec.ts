@@ -1,6 +1,5 @@
-import { expect, test } from '@playwright/test';
 import { BS11 } from '../fake/services';
-import { goto, syncEpg } from './helpers';
+import { expect, goto, syncEpg, test } from './helpers';
 
 test.describe('ルールの編集', () => {
     test.beforeEach(async ({ page, request }) => {

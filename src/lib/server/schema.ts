@@ -204,6 +204,9 @@ CREATE TABLE IF NOT EXISTS recordings (
 );
 CREATE INDEX IF NOT EXISTS recordings_state ON recordings (state);
 CREATE INDEX IF NOT EXISTS recordings_start ON recordings (start_at DESC);
+-- 番組表は1マスごとに「この番組で録れたものはあるか」を引く。
+-- 無いと24時間ぶんのマスの数だけ録画一覧を舐めることになる
+CREATE INDEX IF NOT EXISTS recordings_program ON recordings (program_id);
 
 CREATE TABLE IF NOT EXISTS encode_jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -222,4 +225,6 @@ CREATE TABLE IF NOT EXISTS encode_jobs (
     finished_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS encode_jobs_state ON encode_jobs (state, id);
+-- 録画一覧は1行ごとに「この録画の最新のジョブ」を2回引く (状態と失敗の理由)
+CREATE INDEX IF NOT EXISTS encode_jobs_recording ON encode_jobs (recording_id, id);
 `;

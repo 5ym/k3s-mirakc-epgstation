@@ -1,7 +1,7 @@
 <script lang="ts">
     import type { Snippet } from 'svelte';
     import { type Audio, audioLabel, type Genre, genreLabel, videoLabel } from '$lib/arib';
-    import { cmRanges, dateTime, duration, time } from '$lib/format';
+    import { cmRanges, dateTime, duration, linkify, time } from '$lib/format';
     import type { ProgramDetail } from '$lib/types';
 
     /**
@@ -63,6 +63,19 @@
     const cmText = $derived(cmRanges(cm));
 </script>
 
+<!--
+    説明文。中に書かれたURLはリンクにする。
+    `{@html}` は使わない。EPG の文面は放送局が書いたものをそのまま持ってきているので、
+    そのまま流し込めるものとして扱わない
+-->
+{#snippet body(text: string)}{#each linkify(text) as part, i (i)}{#if part.href}<a
+                class="link link-primary break-all"
+                href={part.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="detail-link">{part.text}</a
+            >{:else}{part.text}{/if}{/each}{/snippet}
+
 <div class="modal modal-open" role="dialog" data-testid="program-detail">
     <div class="modal-box max-w-2xl">
         <h3 class="text-lg font-bold">{program.name}</h3>
@@ -88,13 +101,13 @@
         </div>
 
         {#if program.description}
-            <p class="mt-3 text-sm whitespace-pre-wrap">{program.description}</p>
+            <p class="mt-3 text-sm whitespace-pre-wrap">{@render body(program.description)}</p>
         {/if}
 
-        {#each extended(program.extended) as [heading, body] (heading)}
+        {#each extended(program.extended) as [heading, text] (heading)}
             <div class="mt-3">
                 <div class="text-sm font-medium">{heading}</div>
-                <div class="text-base-content/70 text-sm whitespace-pre-wrap">{body}</div>
+                <div class="text-base-content/70 text-sm whitespace-pre-wrap">{@render body(text)}</div>
             </div>
         {/each}
 

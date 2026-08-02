@@ -20,10 +20,11 @@ export async function reserve(
     // 終わった番組を予約しても録れない。予約表に並べても取り消す手間が増えるだけ
     if (program.end_at <= at) throw new Error('この番組は放送が終わっています');
     const priority = options.priority ?? 3;
-    const encode = options.encode === false ? 0 : 1;
-    const keepOriginal = options.keepOriginal === true ? 1 : 0;
-    // コーデックとCMの扱いは全体で1つ。予約ごとには持たせない
-    const { cmCut, codec } = settings();
+    // 録画のしかたは全体で1つ。指定が無ければ設定画面の値をそのまま使う
+    const current = settings();
+    const { cmCut, codec } = current;
+    const encode = (options.encode ?? current.encode) ? 1 : 0;
+    const keepOriginal = (options.keepOriginal ?? current.keepOriginal) ? 1 : 0;
 
     database()
         .prepare(

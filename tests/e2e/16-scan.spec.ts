@@ -1,6 +1,4 @@
-import { expect, test } from '@playwright/test';
-import { MIRAKC_URL } from '../../playwright.config';
-import { goto, syncEpg } from './helpers';
+import { expect, goto, syncEpg, test } from './helpers';
 
 /**
  * チューナー画面。
@@ -10,8 +8,8 @@ import { goto, syncEpg } from './helpers';
  * から起動し直す。denpa は開始を投げて進み具合を見せるだけ。
  */
 test.describe('チューナー画面', () => {
-    test.afterEach(async ({ request }) => {
-        await request.post(`${MIRAKC_URL}/__control/tuners?busy=0`);
+    test.afterEach(async ({ request, stack }) => {
+        await request.post(`${stack.mirakcUrl}/__control/tuners?busy=0`);
     });
 
     test('チャンネルスキャンを実行でき、進み具合と結果が出る', async ({ page, request }) => {
@@ -40,9 +38,9 @@ test.describe('チューナー画面', () => {
         await expect(page.getByTestId('tuner-error')).toContainText('種別を選んでください');
     });
 
-    test('チューナーの空きと取れているチャンネルが出る', async ({ page, request }) => {
+    test('チューナーの空きと取れているチャンネルが出る', async ({ page, request, stack }) => {
         await syncEpg(request);
-        await request.post(`${MIRAKC_URL}/__control/tuners?busy=1`);
+        await request.post(`${stack.mirakcUrl}/__control/tuners?busy=1`);
         await goto(page, '/tuners');
 
         const tuners = page.getByTestId('tuner-list');

@@ -136,10 +136,9 @@ COPY --from=ffmpeg /usr/share/fonts/truetype/rounded-mplus-arib /usr/share/fonts
 RUN ldconfig && fc-cache -f
 
 # CM検出を join_logo_scp に切り替えるための一式 (CM_DETECTOR=jls)。
-# 既定では使わないので、入っていても何も起きない
+# 既定では使わないので、入っていても何も起きない。
+# 3つのコマンドは denpa (src/lib/server/cm-jls.ts) から直接起動する
 COPY --from=jls /opt/jls /opt/jls
-COPY jls/detect.sh /opt/jls/detect.sh
-RUN chmod +x /opt/jls/detect.sh
 
 COPY --from=build /app/build ./build
 COPY --from=build /app/node_modules ./node_modules

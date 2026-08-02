@@ -1,4 +1,10 @@
-import { type APIRequestContext, expect, type Page } from '@playwright/test';
+import type { APIRequestContext, APIResponse, Page } from '@playwright/test';
+import { expect, test } from '../stack';
+
+export type { Stack } from '../stack';
+// テストは必ずここから test / expect を取る。素の @playwright/test から取ると
+// ワーカーごとのアプリ (tests/stack.ts) が立たず、宛先も決まらない
+export { expect, test };
 
 /**
  * ページを開いてハイドレーション完了まで待つ。
@@ -10,10 +16,19 @@ export async function goto(page: Page, url: string): Promise<void> {
     await page.locator('[data-hydrated="true"]').waitFor();
 }
 
+/**
+ * 投げた先が断ったときに、何を言われたのかまで出す。
+ * 「false であるはず」とだけ出ても、状態番号も本文も分からず追いようがない
+ */
+async function ok(res: APIResponse, what: string): Promise<void> {
+    if (res.ok()) return;
+    throw new Error(`${what} が ${res.status()} で返しました: ${(await res.text()).slice(0, 500)}`);
+}
+
 /** EPG を取り込む。定期取得は止めてあるので、テストは必ずこれを先に呼ぶ */
 export async function syncEpg(request: APIRequestContext): Promise<void> {
     const res = await request.post('/api/sync');
-    expect(res.ok()).toBeTruthy();
+    await ok(res, 'EPG の取り込み');
     const body = await res.json();
     expect(body.services).toBeGreaterThan(0);
     expect(body.programs).toBeGreaterThan(0);
@@ -84,23 +99,61 @@ export function cellOf(page: Page, programId: string) {
  * BSの偽番組は10秒しかなく、番組表のグリッドではマスが潰れて押せない。
  * ここで見たいのは録画そのものなので、予約は画面ではなくアクションに直接投げる。
  */
-export async function reserveSoon(
-    page: Page,
-    request: APIRequestContext,
-    type: string,
-    skip = 0,
-    /** 録画のしかた。画面のチェックボックスと同じキーを渡す */
-    options: Record<string, string> = {},
-) {
+export async function reserveSoon(page: Page, request: APIRequestContext, type: string, skip = 0) {
     await goto(page, `/guide?type=${type}`);
     const cells = await upcoming(page);
     const target = cells[Math.min(skip, cells.length - 1)];
-    // options=1 は「画面のフォームから来た」印。無いと既定のまま扱われる
-    const form =
-        Object.keys(options).length === 0
-            ? { programId: target.programId }
-            : { programId: target.programId, options: '1', ...options };
-    const res = await request.post('/guide?/reserve', { form });
-    expect(res.ok()).toBeTruthy();
+    const res = await request.post('/guide?/reserve', { form: { programId: target.programId } });
+    await ok(res, '予約');
     return target.programId;
+}
+
+/**
+ * 1本録って、視聴可能になるまで待つ。
+ *
+ * 「外から消されたとき」や「WebDAV から消したとき」を試すには、実体のある録画が要る。
+ * 以前は録画の通しテスト(03)が残した1本を借りていたが、ワーカーごとに別のアプリが
+ * 立つようになったので、自分のぶんは自分で用意する
+ */
+export async function recordOne(
+    page: Page,
+    request: APIRequestContext,
+): Promise<{ id: string; libraryPath: string }> {
+    await syncEpg(request);
+    // BS の偽番組は10秒。すぐ録り終わる
+    const programId = await reserveSoon(page, request, 'BS');
+    const row = page.locator(`[data-testid="recording-row"][data-program-id="${programId}"]`);
+    await expect(async () => {
+        await goto(page, '/');
+        await expect(row.getByTestId('recording-state')).toHaveText('視聴可能');
+    }).toPass({ timeout: 120_000 });
+    return {
+        id: (await row.getAttribute('data-recording-id')) ?? '',
+        libraryPath: (await row.getAttribute('data-library-path')) ?? '',
+    };
+}
+
+/**
+ * 録画のしかたを変える。全体で1つの設定なので、番組ごとの指定は無い。
+ * 設定画面のフォームと同じものを投げる (チェックを外した状態はキーごと消える)
+ */
+export async function setRecording(
+    request: APIRequestContext,
+    patch: {
+        codec?: string;
+        cmCut?: string;
+        encode?: boolean;
+        keepOriginal?: boolean;
+        freeOnly?: boolean;
+    } = {},
+): Promise<void> {
+    const form: Record<string, string> = {
+        codec: patch.codec ?? 'av1',
+        cmCut: patch.cmCut ?? 'chapter',
+    };
+    if (patch.encode ?? true) form.encode = 'on';
+    if (patch.keepOriginal === true) form.keepOriginal = 'on';
+    if (patch.freeOnly ?? true) form.freeOnly = 'on';
+    const res = await request.post('/settings?/saveRecording', { form });
+    await ok(res, '録画のしかたの保存');
 }

@@ -24,7 +24,6 @@ EPGStation の置き換えとして作ったもので、エンコード設定は
 | `src/lib/server/recorder.ts` | TS の受信とファイル書き出し |
 | `src/lib/server/cm.ts` | CM検出 (無音 + CM尺) |
 | `src/lib/server/cm-jls.ts` | CM検出 (join_logo_scp。任意) |
-| `jls/detect.sh` | join_logo_scp 一式を順に回す実行役 (イメージの `/opt/jls`) |
 | `src/lib/server/encoder.ts` | 録画のエンコード (AV1 / H.264) |
 | `src/lib/play.ts` | 外部プレイヤーを開くURLの組み立て |
 | `src/lib/server/library.ts` | 保存先でのファイル配置 |
@@ -102,11 +101,10 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 | `CM_SILENCE_DURATION` | `0.4` | 無音とみなす最短の長さ(秒) |
 | `CM_TOLERANCE` | `0.6` | 「15秒の倍数」判定の許容誤差(秒) |
 | `CM_MIN_BLOCK` | `30` | CMブロックとして採用する最短の長さ(秒) |
-| `CM_JLS_COMMAND` | `/opt/jls/detect.sh '{input}' '{channel}'` | jls検出器の起動コマンド。`{channel}` を渡すとロゴを自分で覚える |
+| `JLS_BIN` | `/opt/jls/bin` | `chapter_exe` / `logoframe` / `join_logo_scp` の置き場 |
+| `JLS_RULE` | `/opt/jls/JL/JL_標準.txt` | join_logo_scp の判定規則 |
 | `JLS_LOGO_DIR` | `/app/data/logos/jls` | logoframe が作るロゴデータ (`.lgd`) の置き場 |
-| `JLS_LOGO_AREA` | (空) | ロゴの位置を手で教える (`x,y,w,h`)。自動で見つからないとき用 |
 | `JLS_LOGO_SAMPLES` | `600` | ロゴを作るときに見るコマ数 |
-| `CM_JLS_OUTPUT_DIR` | (空) | jls が avs を吐く場所。空なら入力と同じ場所と標準出力から探す |
 | `CM_JLS_FALLBACK_FPS` | `29.97` | fps を取れなかったときに使う値 |
 | `CM_DETECT_TIMEOUT` | `1800000` | CM検出を打ち切るまで(ms) |
 | `PROGRAM_RETENTION` | `86400000` | 終わった番組をDBに残す期間(ms) |
@@ -117,11 +115,11 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 
 | 画面 | 役割 |
 | --- | --- |
-| `/` | **予約と録画**を2ペインで並べる。予約の取消/競合再計算、再生リンク・再エンコード・削除。エンコード中のものは録画一覧の行に進み具合が出る |
-| `/guide` | 番組表(グリッド)と番組検索、EPG取得。検索はルールと同じ条件で絞り込め、そのままルールにできる |
+| `/` | **予約と録画**を2ペインで並べる。予約の取消、再生リンク・再エンコード・削除。エンコード中のものは録画一覧の行に進み具合が出る |
+| `/guide` | 番組表(グリッド)と番組検索。マスはジャンルごとに色を変える。詳細から予約・取消と、録れているものはそのまま再生できる |
 | `/rules` | 自動予約ルールの一覧と作成 |
 | `/tuners` | チャンネルスキャン、チューナーの空き、取れているチャンネル (mirakc 側の局と番組表の集まり具合つき)、mirakc とカードリーダーの状態 |
-| `/settings` | 録画のしかた(コーデック/CM)、通知先(Webhook)、ベーシック認証、EPGStation からの引き継ぎ |
+| `/settings` | 録画のしかた(コーデック/CM/エンコードするか/生TSを残すか/無料放送だけか)、通知先(Webhook)、ベーシック認証、EPGStation からの引き継ぎ |
 | `/api/recordings/<id>/file` | 録画ファイル。Range 対応 |
 | `/api/recordings/<id>/frame?at=<秒>` | 録画から1コマ (JPEG)。ロゴの位置を指定するときに使う |
 | `/dav` | WebDAV (PROPFIND / GET / HEAD)。Kodi 用。書き込みは受けない |
@@ -143,6 +141,7 @@ mirakc の親として動くエージェント。なぜ親を置いているか�
 | 場所 | 何 |
 | --- | --- |
 | `tests/e2e/` | Playwright。番号順に、予約 → 録画 → ルール → 引き継ぎ → 放送の延長 |
+| `tests/stack.ts` | ワーカーごとに denpa と偽 mirakc を1式立てる (これでファイル単位に並べられる) |
 | `tests/fake/` | 偽mirakc・偽の通知先・偽ffmpeg |
 | `src/**/*.test.ts` | 純粋関数の境界条件 (bun test) |
 | `mirakc/*.test.ts` | チューナー側 (設定の読み書き、スキャン) |

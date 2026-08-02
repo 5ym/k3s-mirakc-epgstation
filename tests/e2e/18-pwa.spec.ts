@@ -1,5 +1,4 @@
-import { expect, test } from '@playwright/test';
-import { goto } from './helpers';
+import { expect, goto, test } from './helpers';
 
 /**
  * ホーム画面に置いて、アプリのように開けること。

@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { LogoCollector } from '../ts/logo';
 import { config } from './config';
 import { database, now, queryAll, queryOne } from './db';
+import { CURRENT_SERVICES } from './epg';
 import { emit } from './events';
 import { openServiceStream } from './mirakc';
 import { chunks } from './stream';
@@ -109,10 +110,46 @@ export function watch(serviceId: number): (chunk: Uint8Array) => void {
     };
 }
 
-/** ロゴをまだ持っていない局 */
+/**
+ * `has_logo` を実際のファイルに合わせ直す。
+ *
+ * この列は「番組表にロゴを出すかどうか」の判断にそのまま使われるので、
+ * ファイルが無いのに立っていると番組表に壊れた画像が並ぶ。しかも
+ * `missing()` が「もう持っている」とみなして取りに行かなくなるため、
+ * 放っておくと永久に埋まらない。実機では32局中29局がこの状態だった。
+ *
+ * 置き場ごと消えることは実際に起きる (PVCの作り直しなど)。
+ * DBとファイルのどちらが正しいかを迷わないよう、**ファイルを正とする**。
+ */
+export function reconcile(): number {
+    const rows = queryAll<{ id: number; has_logo: number }>('SELECT id, has_logo FROM services');
+    const fix = database().prepare('UPDATE services SET has_logo = ? WHERE id = ?');
+    let changed = 0;
+    const tx = database().transaction(() => {
+        for (const row of rows) {
+            const actual = existsSync(logoPath(row.id)) ? 1 : 0;
+            if (actual === row.has_logo) continue;
+            fix.run(actual, row.id);
+            changed++;
+        }
+    });
+    tx();
+    if (changed > 0) emit('services');
+    return changed;
+}
+
+/**
+ * ロゴをまだ持っていない局。
+ *
+ * いま mirakc が知っている局だけを対象にする。取り残しの局まで見に行くと、
+ * もう選局できないチャンネルを1局ずつ60秒かけて開いては諦めることになり、
+ * 本当に要る局まで順番が回ってこない。
+ */
 export function missing(): { id: number; network_id: number; name: string }[] {
     return queryAll<{ id: number; network_id: number; name: string }>(
-        'SELECT id, network_id, name FROM services WHERE has_logo = 0 ORDER BY type, channel, service_id',
+        `SELECT id, network_id, name FROM services
+         WHERE has_logo = 0 AND ${CURRENT_SERVICES}
+         ORDER BY type, channel, service_id`,
     );
 }
 
@@ -123,6 +160,9 @@ export function missing(): { id: number; network_id: number; name: string }[] {
  * mirakc が録画のほうを通す。
  */
 export async function sweep(limit = 1): Promise<number> {
+    // 立っているだけでファイルが無い局を先に拾い直す。そうしないと
+    // 「もう持っている」とみなして永久に取りに行かない
+    reconcile();
     let found = 0;
     for (const service of missing().slice(0, limit)) {
         const controller = new AbortController();

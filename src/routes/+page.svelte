@@ -327,7 +327,7 @@
                 <h2 class="text-lg font-bold">録画</h2>
                 <div class="flex gap-2">
                     <a class="btn btn-sm" href={data.showDeleted ? '/' : '/?deleted=1'}>
-                        {data.showDeleted ? '現存分を表示' : '削除済みを表示'}
+                        {data.showDeleted ? '削除済みを隠す' : '削除済みも表示'}
                     </a>
                     <form method="POST" action="?/reconcile" use:submitting>
                         <button class="btn btn-sm" data-testid="reconcile-button">実体と照合</button>
@@ -411,10 +411,23 @@
                                             data-testid="recording-error"
                                         >
                                             {rec.error}
-                                            {#if rec.encode_error}
-                                                <span class="text-base-content/60">(押すと理由が出ます)</span>
-                                            {/if}
                                         </div>
+                                    {/if}
+                                    <!--
+                                        録り直しはここに置く。右端のボタンの列に並べていた頃は、
+                                        失敗した行から**いちばん遠い**場所に押すものがあった。
+                                        行が厚くならないよう小さくする。
+                                        元になるのは生TS。エンコード済みを元に録り直しても画質は
+                                        戻らないので、生TSがあるときだけ出す。
+                                        録画中は元がまだ書かれている最中なので触らせない
+                                    -->
+                                    {#if rec.deleted_at === null && rec.job_id === null && encodeSource(rec) !== null && rec.state !== 'recording'}
+                                        <form method="POST" action="?/reencode" use:submitting class="mt-0.5">
+                                            <input type="hidden" name="id" value={rec.id} />
+                                            <button class="btn btn-xs" data-testid="reencode-button">
+                                                再エンコード
+                                            </button>
+                                        </form>
                                     {/if}
                                     <!-- CM をどこで検出したかは行に出さない。長くて場所を食う割に
                                          普段は見ないので、行を押したときの詳細に回す -->
@@ -518,20 +531,7 @@
                                                     </button>
                                                 </form>
                                             {:else}
-                                                <!--
-                                                元になるのは生TS。エンコード済みを元に録り直しても
-                                                画質は戻らないので、生TSがあるときだけ出す。
-                                                録画中は元がまだ書かれている最中なので触らせない
-                                            -->
-                                                {#if encodeSource(rec) !== null && rec.state !== 'recording'}
-                                                    <form method="POST" action="?/reencode" use:submitting>
-                                                        <input type="hidden" name="id" value={rec.id} />
-                                                        <button
-                                                            class="btn btn-sm"
-                                                            data-testid="reencode-button">再エンコード</button
-                                                        >
-                                                    </form>
-                                                {/if}
+                                                <!-- 録り直しは番組名の下に置いてある (失敗の理由のすぐ下) -->
                                                 <form method="POST" action="?/delete" use:submitting>
                                                     <input type="hidden" name="id" value={rec.id} />
                                                     {#if armed === rec.id}
@@ -602,5 +602,26 @@
 </div>
 
 {#if detail}
-    <ProgramDetail program={detail} error={detailError} cm={detailCm} onclose={() => (detail = null)} />
+    <ProgramDetail
+        program={detail}
+        error={detailError}
+        cm={detailCm}
+        cmNote={detailCmNote}
+        onclose={() => (detail = null)}
+    >
+        {#snippet extra()}
+            <!--
+                ロゴを当てられなかった録画だけ。囲ってもらった位置は局ごとに覚えて、
+                次にその局を録ったときから効く
+            -->
+            {#if detailLogo}
+                <LogoArea
+                    recordingId={detailLogo.recordingId}
+                    serviceId={detailLogo.serviceId}
+                    serviceName={detailLogo.serviceName}
+                    area={detailLogo.area}
+                />
+            {/if}
+        {/snippet}
+    </ProgramDetail>
 {/if}

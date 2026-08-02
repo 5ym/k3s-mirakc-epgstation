@@ -1,6 +1,4 @@
-import { expect, test } from '@playwright/test';
-import { MIRAKC_URL } from '../../playwright.config';
-import { goto, reserveSoon, syncEpg } from './helpers';
+import { expect, goto, reserveSoon, syncEpg, test } from './helpers';
 
 /**
  * 放送の延長への追従。
@@ -10,50 +8,52 @@ import { goto, reserveSoon, syncEpg } from './helpers';
  * denpa はそれを読んで、止める時刻を後ろへずらす。
  */
 test.describe('放送の延長', () => {
-    test.afterEach(async ({ request }) => {
-        await request.post(`${MIRAKC_URL}/__control/extend?ms=0`);
-        await request.post(`${MIRAKC_URL}/__control/onair?silent=0`);
+    test.afterEach(async ({ request, stack }) => {
+        await request.post(`${stack.mirakcUrl}/__control/extend?ms=0`);
+        await request.post(`${stack.mirakcUrl}/__control/onair?silent=0`);
     });
 
-    test('mirakc の知らせを聞いている', async ({ request }) => {
+    test('mirakc の知らせを聞いている', async ({ request, stack }) => {
         /*
          * 番組表の取り直しも延長への追従も、これを聞いて動く。
          * 繋がっていないと定期実行の保険だけになり、気付くのが分単位まで遅れる
          */
-        const status = await (await request.get(`${MIRAKC_URL}/__control/listeners`)).json();
+        const status = await (await request.get(`${stack.mirakcUrl}/__control/listeners`)).json();
         expect(status.listeners, 'denpa が /events に繋いでいない').toBeGreaterThan(0);
     });
 
-    test('番組単位で開き、mirakc に追従役を立てさせる', async ({ page, request }) => {
+    test('番組単位で開き、mirakc に追従役を立てさせる', async ({ page, request, stack }) => {
         test.setTimeout(90_000);
         await syncEpg(request);
         // BS は1番組10秒にしてある。すぐ録画が始まる (地上波は30分枠)
-        const programId = await reserveSoon(page, request, 'BS');
+        // 1つ先を狙う。すぐ次のものだと、予約を投げ終える前に始まってしまうことがある
+        const programId = await reserveSoon(page, request, 'BS', 1);
 
-        // 録画が始まるまで待つ
-        const row = page.getByTestId('reservation-row').filter({ hasText: '録画中' });
-        for (let i = 0; i < 60; i++) {
+        // **その予約が**録画中になるまで待つ。番組の切れ目に居合わせると、
+        // 別の予約が録画中になっているだけのことがある
+        const row = page.locator(`[data-testid="reservation-row"][data-program-id="${programId}"]`);
+        await expect(async () => {
             await goto(page, '/');
-            if ((await row.count()) > 0) break;
-            await page.waitForTimeout(500);
-        }
-        await expect(row.first()).toBeVisible();
+            await expect(row.getByTestId('reservation-state')).toHaveText('録画中');
+        }).toPass({ timeout: 60_000 });
 
         /*
          * 追従役はチューナーを増やさない。番組単位のストリームに相乗りするだけで、
          * その合図が User-Agent。立っていないと延長を読めない
          */
-        const tracked = await (await request.get(`${MIRAKC_URL}/__control/onair`)).json();
-        expect(tracked.tracked).toContain(Number(programId));
+        await expect(async () => {
+            const tracked = await (await request.get(`${stack.mirakcUrl}/__control/onair`)).json();
+            expect(tracked.tracked).toContain(Number(programId));
+        }).toPass({ timeout: 30_000 });
     });
 
-    test('番組が始まらなければサービス単位に切り替えて録る', async ({ page, request }) => {
+    test('番組が始まらなければサービス単位に切り替えて録る', async ({ page, request, stack }) => {
         test.setTimeout(120_000);
         /*
          * 番組単位で開いても1バイトも来ない状況。EIT[p/f] が来ない局に当たると
          * こうなる。切り替えずに待ち続けると、その番組は丸ごと録れない
          */
-        await request.post(`${MIRAKC_URL}/__control/onair?silent=1`);
+        await request.post(`${stack.mirakcUrl}/__control/onair?silent=1`);
         await syncEpg(request);
         const programId = await reserveSoon(page, request, 'BS');
 
@@ -71,7 +71,7 @@ test.describe('放送の延長', () => {
         throw new Error('切り替えても録画が残らなかった');
     });
 
-    test('延びたら録画の終わりも後ろへ動く', async ({ page, request }) => {
+    test('延びたら録画の終わりも後ろへ動く', async ({ page, request, stack }) => {
         test.setTimeout(120_000);
         await syncEpg(request);
         await reserveSoon(page, request, 'BS');
@@ -86,7 +86,7 @@ test.describe('放送の延長', () => {
         const before = ((await recording.textContent()) ?? '').trim();
 
         // 放送が10分押した状態にする
-        await request.post(`${MIRAKC_URL}/__control/extend?ms=${10 * 60 * 1000}`);
+        await request.post(`${stack.mirakcUrl}/__control/extend?ms=${10 * 60 * 1000}`);
 
         // 予約の終了時刻が動くまで待つ。動かないと元の時刻で切られてしまう
         let after = before;

@@ -1,5 +1,4 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { basename, extname, join } from 'node:path';
+import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import type { Range } from './cm';
 import { config } from './config';
 import { text } from './stream';
@@ -16,10 +15,11 @@ import { text } from './stream';
  * 秒の区間に直して silence 検出と同じ形で返す。エンコード自体は AviSynth を通さず
  * ffmpeg のままにしておきたいので、依存を検出フェーズだけに閉じ込める。
  *
- * 使うには以下がイメージ側に必要:
- *   - chapter_exe / logoframe / join_logo_scp (tobitti0 の Linux 移植)
- *   - AviSynth+
- *   - 局ごとのロゴデータ (.lgd)。これは自分の録画から作る必要がある
+ * 3つのコマンドは**ここから直接起動する**。以前はシェルスクリプトに逃がして
+ * `sh -c` で呼んでいたが、番組名にも局名にも空白と引用符が入るので、
+ * コマンド文字列を組み立てる限りどこかで引数が割れる。どの段階で落ちたのかも
+ * 混ざった標準エラーから読み取るしかなかった。ffmpeg と同じように
+ * 引数の配列で渡し、段階ごとに結果を見る。
  */
 
 const TRIM = /Trim\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)/g;
@@ -77,23 +77,6 @@ async function probeFps(input: string): Promise<number> {
     return config.cmJlsFallbackFps;
 }
 
-/** コマンドの出力から avs のパスを拾う。出力ディレクトリ指定があればそちらを優先して探す */
-function findAvs(input: string, stdout: string): string | null {
-    const fromStdout = stdout.match(/\S+\.avs/);
-    if (config.cmJlsOutputDir === '') {
-        return fromStdout === null ? null : fromStdout[0];
-    }
-    const stem = basename(input, extname(input));
-    let newest: { path: string; mtime: number } | null = null;
-    for (const name of readdirSync(config.cmJlsOutputDir)) {
-        if (!name.endsWith('.avs') || !name.includes(stem)) continue;
-        const path = join(config.cmJlsOutputDir, name);
-        const mtime = statSync(path).mtimeMs;
-        if (newest === null || mtime > newest.mtime) newest = { path, mtime };
-    }
-    return newest?.path ?? (fromStdout === null ? null : fromStdout[0]);
-}
-
 /**
  * logoframe が「ロゴの位置を決められなかった」と言っているか。
  *
@@ -105,6 +88,51 @@ export function isLogoMissing(output: string): boolean {
     return /no persistent edge|uniform background|too few active pixels|logo file|-logo-area/i.test(output);
 }
 
+interface Step {
+    code: number;
+    stderr: string;
+}
+
+/**
+ * 1段階ぶん回す。
+ *
+ * どれも録画の実時間の数分の一かかる。中止を押されたら止め、
+ * 全体の上限 (`CM_DETECT_TIMEOUT`) を超えたときも止める。
+ */
+async function run(argv: string[], signal: AbortSignal | undefined, deadline: number): Promise<Step> {
+    const left = deadline - Date.now();
+    if (left <= 0) return { code: 124, stderr: '時間切れ' };
+
+    const proc = Bun.spawn(argv, { stdout: 'ignore', stderr: 'pipe' });
+    const timer = setTimeout(() => proc.kill(), left);
+    const kill = () => proc.kill();
+    signal?.addEventListener('abort', kill, { once: true });
+    try {
+        const stderr = await text(proc.stderr as ReadableStream<Uint8Array>);
+        return { code: await proc.exited, stderr };
+    } finally {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', kill);
+    }
+}
+
+/** 途中で作るファイル。入力の隣に置く (TSと同じ場所なら容量の心配が要らない) */
+function workFiles(input: string) {
+    const base = `${input}.jls`;
+    return {
+        /** chapter_exe が出す無音・シーンチェンジの一覧 */
+        scenes: `${base}.chapterexe.txt`,
+        /** logoframe が出す「ロゴが写っているコマ」の一覧 */
+        frames: `${base}.logoframe.txt`,
+        /** logoframe がついでに出すロゴ消しの avs。使わないが指定は要る */
+        erase: `${base}.logoerase.avs`,
+        /** join_logo_scp が出す「残す区間」の avs。これだけ読む */
+        cut: `${base}.cut.avs`,
+        /** join_logo_scp が出すシーン一覧。使わない */
+        scpout: `${base}.jlscp.txt`,
+    };
+}
+
 export async function detectWithJls(
     input: string,
     duration: number,
@@ -112,54 +140,94 @@ export async function detectWithJls(
     channel = '',
     area = '',
 ): Promise<{ cm: Range[]; note: string; logoMissing: boolean }> {
-    /*
-     * 局名を渡すと、logoframe が**その局のロゴデータを自分で作って覚える**。
-     * 1本目は作るぶん遅く、2本目からは使い回す。渡さないとロゴ無しの判定になり、
-     * 無音検出より少しましな程度まで精度が落ちる。
-     *
-     * 埋める値は単引用符でくくられる前提 (既定のコマンド)。番組名由来のパスにも
-     * 局名にも空白は入るので、くくらないと引数が割れる。中の ' だけ落とす
-     */
-    const quote = (value: string) => value.replaceAll("'", '');
-    const command = config.cmJlsCommand
-        .replaceAll('{input}', quote(input))
-        .replaceAll('{channel}', quote(channel))
-        // 自動で見つからなかった局だけ、画面から教わった範囲を渡す
-        .replaceAll('{area}', /^\d+,\d+,\d+,\d+$/.test(area) ? area : '');
-    const proc = Bun.spawn(['sh', '-c', command], { stdout: 'pipe', stderr: 'pipe' });
+    const deadline = Date.now() + config.cmDetectTimeout;
+    const work = workFiles(input);
+    const bin = (name: string) => `${config.jlsBin}/${name}`;
+    mkdirSync(config.jlsLogoDir, { recursive: true });
 
-    const timer = setTimeout(() => proc.kill(), config.cmDetectTimeout);
-    // 実時間の数分の一かかる。中止を押されたら止める
-    const kill = () => proc.kill();
-    signal?.addEventListener('abort', kill, { once: true });
-    const [stdout, stderr] = await Promise.all([
-        text(proc.stdout as ReadableStream<Uint8Array>),
-        text(proc.stderr as ReadableStream<Uint8Array>),
-    ]);
-    const code = await proc.exited;
-    clearTimeout(timer);
-    signal?.removeEventListener('abort', kill);
+    try {
+        // 1. 無音とシーンチェンジを拾う
+        const scenes = await run(
+            [bin('chapter_exe'), '-v', input, '-s', '8', '-e', '4', '-o', work.scenes],
+            signal,
+            deadline,
+        );
+        if (scenes.code !== 0) {
+            return { cm: [], note: failure('chapter_exe', scenes), logoMissing: false };
+        }
 
-    // ロゴを当てられたかどうかは、CM が取れたかどうかとは別に伝える
-    const logoMissing = isLogoMissing(stderr);
+        /*
+         * 2. 局ロゴが写っているコマを拾う。
+         *
+         * 局名を渡すと logoframe が**その局のロゴデータ (.lgd) を自分で作って覚える**。
+         * 1本目は作るぶん遅く、2本目からは使い回す。局が分からないときは
+         * 持っているロゴを片端から当てる (無ければロゴ無しで進む)。
+         */
+        const logoArgs =
+            channel === ''
+                ? ['-logo', config.jlsLogoDir]
+                : [
+                      '-channel',
+                      channel,
+                      '-logo-dir',
+                      config.jlsLogoDir,
+                      '-logo-samples',
+                      String(config.jlsLogoSamples),
+                      // 自動で見つからなかった局だけ、画面から教わった範囲を渡す
+                      ...(/^\d+,\d+,\d+,\d+$/.test(area) ? ['-logo-area', area] : []),
+                  ];
+        const frames = await run(
+            [bin('logoframe'), input, '-oa', work.frames, '-o', work.erase, ...logoArgs],
+            signal,
+            deadline,
+        );
+        // ロゴを当てられたかどうかは、CM が取れたかどうかとは別に伝える
+        const logoMissing = isLogoMissing(frames.stderr);
+        if (frames.code !== 0) {
+            return { cm: [], note: failure('logoframe', frames), logoMissing };
+        }
 
-    if (code !== 0) {
-        return {
-            cm: [],
-            note: `join_logo_scp が失敗 (code ${code}): ${stderr.slice(-500)}`,
-            logoMissing,
-        };
+        // 3. その2つを突き合わせて本編とCMに分ける
+        const joined = await run(
+            [
+                bin('join_logo_scp'),
+                '-inlogo',
+                work.frames,
+                '-inscp',
+                work.scenes,
+                '-incmd',
+                config.jlsRule,
+                '-o',
+                work.cut,
+                '-oscp',
+                work.scpout,
+            ],
+            signal,
+            deadline,
+        );
+        if (joined.code !== 0) {
+            return { cm: [], note: failure('join_logo_scp', joined), logoMissing };
+        }
+
+        let avs: string;
+        try {
+            avs = readFileSync(work.cut, 'utf8');
+        } catch {
+            return { cm: [], note: `${work.cut} が作られませんでした`, logoMissing };
+        }
+
+        const keep = parseTrimRanges(avs, await probeFps(input));
+        if (keep.length === 0) {
+            return { cm: [], note: `${work.cut} に Trim が含まれていませんでした`, logoMissing };
+        }
+        return { cm: invertRanges(keep, duration), note: 'join_logo_scp', logoMissing };
+    } finally {
+        // 中身は使い終わっている。録画の隣に置いているので残すと生TSの置き場を圧迫する
+        for (const path of Object.values(work)) rmSync(path, { force: true });
     }
+}
 
-    const avsPath = findAvs(input, stdout);
-    if (avsPath === null) {
-        return { cm: [], note: 'join_logo_scp の出力 avs が見つかりませんでした', logoMissing };
-    }
-
-    const keep = parseTrimRanges(readFileSync(avsPath, 'utf8'), await probeFps(input));
-    if (keep.length === 0) {
-        return { cm: [], note: `${avsPath} に Trim が含まれていませんでした`, logoMissing };
-    }
-
-    return { cm: invertRanges(keep, duration), note: 'join_logo_scp', logoMissing };
+/** 落ちた段階が分かるようにする。詳細に出して原因を追えるように */
+function failure(step: string, result: Step): string {
+    return `${step} が失敗 (code ${result.code}): ${result.stderr.slice(-500)}`;
 }

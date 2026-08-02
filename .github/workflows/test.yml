@@ -61,8 +61,8 @@ jobs:
       - name: Install Playwright browser
         run: bunx playwright install --with-deps chromium
 
-      # 偽mirakc・偽通知先・偽ffmpeg は playwright.config.ts の webServer が
-      # まとめて起動する
+      # アプリを1度だけ組んでから、ワーカーの数だけ立てる。
+      # 偽mirakc・偽通知先もワーカーごとに1式ずつ (tests/stack.ts)
       - name: E2E tests
         run: bun run test:e2e
 

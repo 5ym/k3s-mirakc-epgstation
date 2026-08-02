@@ -63,14 +63,14 @@ export const config = {
      *          イメージに chapter_exe / logoframe / join_logo_scp と局ごとのロゴデータが要る。
      */
     cmDetector: str('CM_DETECTOR', 'silence') as 'silence' | 'jls',
-    /** jls 検出器の起動コマンド。`{input}` が録画ファイルのパスに置換される */
-    /**
-     * jls のときに回すコマンド。`{input}` に生TS、`{channel}` に局名が入る。
-     * 最後に「残す区間を Trim() で並べた avs」のパスを出せば何でもよい
-     */
-    cmJlsCommand: str('CM_JLS_COMMAND', "/opt/jls/detect.sh '{input}' '{channel}' '{area}'"),
-    /** jls の出力(Trim入りのavs)の探索先。空ならコマンドの標準出力から拾う */
-    cmJlsOutputDir: str('CM_JLS_OUTPUT_DIR', ''),
+    /** chapter_exe / logoframe / join_logo_scp の置き場。イメージに入っている */
+    jlsBin: str('JLS_BIN', '/opt/jls/bin').replace(/\/+$/, ''),
+    /** join_logo_scp の判定規則。join_logo_scp_trial に付いてくるもの */
+    jlsRule: str('JLS_RULE', '/opt/jls/JL/JL_標準.txt'),
+    /** logoframe が作るロゴデータ (.lgd) の置き場。空ならデータ置き場の下 */
+    jlsLogoDir: str('JLS_LOGO_DIR', ''),
+    /** ロゴを覚えるときに見るコマ数。増やすほど綺麗に出るが、その分だけ読む */
+    jlsLogoSamples: num('JLS_LOGO_SAMPLES', 600),
     /** jls が返す Trim はフレーム番号なので、秒に直すためのfps。ffprobeで取れなければこれを使う */
     cmJlsFallbackFps: num('CM_JLS_FALLBACK_FPS', 30000 / 1001),
     /** 検出に掛ける上限時間(ms)。超えたら諦めてCM無しとして扱う */
@@ -176,5 +176,7 @@ export const config = {
 
 /** 指定が無ければDBの隣。運用でいちいち2つ指す意味が無い */
 if (config.dataDir === '') config.dataDir = config.dbPath.replace(/\/[^/]*$/, '') || '.';
+/** 局ロゴと同じ扱い。放送波から拾った PNG の隣に、jls 用の .lgd を置く */
+if (config.jlsLogoDir === '') config.jlsLogoDir = `${config.dataDir}/logos/jls`;
 
 export type Config = typeof config;

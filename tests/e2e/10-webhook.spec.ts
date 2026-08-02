@@ -1,15 +1,13 @@
-import { expect, test } from '@playwright/test';
-import { WEBHOOK_URL } from '../../playwright.config';
-import { goto, syncEpg } from './helpers';
+import { expect, goto, syncEpg, test } from './helpers';
 
 /**
  * 録画の節目を外部に飛ばす。
  * 録画の失敗は画面を開くまで気づけないので、届くことをここで確かめておく。
  */
 test.describe('通知', () => {
-    test.beforeEach(async ({ page, request }) => {
+    test.beforeEach(async ({ page, request, stack }) => {
         await syncEpg(request);
-        await request.post(`${WEBHOOK_URL}/__control/reset`);
+        await request.post(`${stack.webhookUrl}/__control/reset`);
         // 前のテストが残した通知先を消す
         await goto(page, '/settings');
         for (let i = 0; i < 10; i++) {
@@ -20,9 +18,9 @@ test.describe('通知', () => {
         }
     });
 
-    test('通知先を追加してテスト送信すると、相手に届く', async ({ page, request }) => {
+    test('通知先を追加してテスト送信すると、相手に届く', async ({ page, request, stack }) => {
         await goto(page, '/settings');
-        await page.getByTestId('webhook-url').fill(`${WEBHOOK_URL}/__control/webhook`);
+        await page.getByTestId('webhook-url').fill(`${stack.webhookUrl}/__control/webhook`);
         await page.getByTestId('webhook-add').click();
 
         const row = page.getByTestId('webhook-row').first();
@@ -34,7 +32,7 @@ test.describe('通知', () => {
         await row.getByTestId('webhook-test').click();
         await expect(page.getByTestId('webhook-tested')).toContainText('ok');
 
-        const state = await (await request.get(`${WEBHOOK_URL}/__control/state`)).json();
+        const state = await (await request.get(`${stack.webhookUrl}/__control/state`)).json();
         expect(state.webhookCalls).toHaveLength(1);
         expect(state.webhookCalls[0].event).toBe('recording.finished');
         expect(state.webhookCalls[0].text).toContain('テスト送信');
@@ -43,9 +41,9 @@ test.describe('通知', () => {
         await expect(page.getByTestId('webhook-row').first()).toContainText('ok');
     });
 
-    test('送る通知を選べる', async ({ page }) => {
+    test('送る通知を選べる', async ({ page, stack }) => {
         await goto(page, '/settings');
-        await page.getByTestId('webhook-url').fill(`${WEBHOOK_URL}/__control/webhook`);
+        await page.getByTestId('webhook-url').fill(`${stack.webhookUrl}/__control/webhook`);
         await page.getByTestId('webhook-events').locator('input[value="recording.failed"]').check();
         await page.getByTestId('webhook-add').click();
 
@@ -62,15 +60,15 @@ test.describe('通知', () => {
         await expect(page.getByTestId('webhook-row')).toHaveCount(0);
     });
 
-    test('無効にした通知先には送らない', async ({ page, request }) => {
+    test('無効にした通知先には送らない', async ({ page, request, stack }) => {
         await goto(page, '/settings');
-        await page.getByTestId('webhook-url').fill(`${WEBHOOK_URL}/__control/webhook`);
+        await page.getByTestId('webhook-url').fill(`${stack.webhookUrl}/__control/webhook`);
         await page.getByTestId('webhook-add').click();
         await page.getByTestId('webhook-toggle').first().click();
         await expect(page.getByTestId('webhook-row').first()).toContainText('無効');
 
         // 無効でもテスト送信は通る(疎通確認のため)。届かないのは自動の通知のほう
-        const state = await (await request.get(`${WEBHOOK_URL}/__control/state`)).json();
+        const state = await (await request.get(`${stack.webhookUrl}/__control/state`)).json();
         expect(state.webhookCalls).toHaveLength(0);
     });
 });

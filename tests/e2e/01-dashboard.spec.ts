@@ -1,5 +1,4 @@
-import { expect, test } from '@playwright/test';
-import { goto, syncEpg } from './helpers';
+import { expect, goto, syncEpg, test } from './helpers';
 
 test.describe('ダッシュボードと画面遷移', () => {
     test('データ放送のチャンネルは取り込まない', async ({ page, request }) => {

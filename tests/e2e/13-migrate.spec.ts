@@ -1,7 +1,5 @@
 import { mkdirSync, rmSync } from 'node:fs';
-import { expect, test } from '@playwright/test';
-import { EPGSTATION_DIR } from '../../playwright.config';
-import { goto } from './helpers';
+import { expect, goto, test } from './helpers';
 
 /**
  * EPGStation からの引き継ぎ。
@@ -14,8 +12,8 @@ import { goto } from './helpers';
  * 作る/消すで再現できる。
  */
 test.describe('EPGStation からの引き継ぎ', () => {
-    test.beforeEach(() => {
-        rmSync(EPGSTATION_DIR, { recursive: true, force: true });
+    test.beforeEach(({ stack }) => {
+        rmSync(stack.epgstationDir, { recursive: true, force: true });
     });
 
     test('引き継ぎ元が見えなければ実行させない', async ({ page }) => {
@@ -26,8 +24,8 @@ test.describe('EPGStation からの引き継ぎ', () => {
         await expect(page.getByTestId('migrate-run')).toHaveCount(0);
     });
 
-    test('引き継ぎ元が見えれば実行でき、失敗すれば理由が出る', async ({ page }) => {
-        mkdirSync(EPGSTATION_DIR, { recursive: true });
+    test('引き継ぎ元が見えれば実行でき、失敗すれば理由が出る', async ({ page, stack }) => {
+        mkdirSync(stack.epgstationDir, { recursive: true });
         await goto(page, '/settings');
         await expect(page.getByTestId('migrate-unavailable')).toHaveCount(0);
 
@@ -40,7 +38,9 @@ test.describe('EPGStation からの引き継ぎ', () => {
         const progress = page.getByTestId('migrate-progress');
         await expect(progress).toHaveAttribute('data-state', 'failed');
         await expect(page.getByTestId('migrate-state')).toHaveText('失敗');
-        await expect(page.getByTestId('migrate-error')).toContainText('127.0.0.1');
+        // 何が起きたのかが画面に出ること。文面は繋がらなかった理由 (拒否/時間切れ)
+        // 次第で変わるので、宛先や語句までは決め打たない
+        await expect(page.getByTestId('migrate-error')).toContainText(/Error/);
         // 何をしようとしたのかが残る
         await expect(page.getByTestId('migrate-log')).toContainText('失敗');
     });

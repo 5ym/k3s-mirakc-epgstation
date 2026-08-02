@@ -1,5 +1,4 @@
-import { expect, test } from '@playwright/test';
-import { cellOf, goto, reserveSoon, syncEpg, upcoming } from './helpers';
+import { cellOf, expect, goto, reserveSoon, syncEpg, test, upcoming } from './helpers';
 
 /**
  * 画面の反応の確かめ。

@@ -1,7 +1,5 @@
 import { rmSync } from 'node:fs';
-import { expect, test } from '@playwright/test';
-import { TEST_ROOT } from '../../playwright.config';
-import { goto, reserveSoon, syncEpg } from './helpers';
+import { expect, goto, reserveSoon, syncEpg, test } from './helpers';
 
 /** 偽 mirakc の BS の局。番組が短いので、録画がすぐ始まる */
 const BS_SERVICE = 400211;
@@ -13,12 +11,12 @@ const BS_SERVICE = 400211;
  * 放送波から拾う (CDT の実体と、SDT の「どの局のものか」を突き合わせる)。
  */
 test.describe('局ロゴ', () => {
-    test('録画のついでに放送波から拾い、番組表に出る', async ({ page, request }) => {
+    test('録画のついでに放送波から拾い、番組表に出る', async ({ page, request, stack }) => {
         test.setTimeout(180_000);
         await syncEpg(request);
 
         // 先に走ったテストの録画で拾えていることがあるので、一度捨てる
-        rmSync(`${TEST_ROOT}/logos/${BS_SERVICE}.png`, { force: true });
+        rmSync(`${stack.root}/logos/${BS_SERVICE}.png`, { force: true });
         // 持っていなければ配れない
         expect((await request.get(`/api/services/${BS_SERVICE}/logo`)).status()).toBe(404);
 

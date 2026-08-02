@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { expect, type Page, test } from '@playwright/test';
-import { WEBHOOK_URL } from '../../playwright.config';
-import { goto, reserveSoon, syncEpg, upcoming } from './helpers';
+import type { Page } from '@playwright/test';
+import { expect, goto, reserveSoon, syncEpg, test, upcoming } from './helpers';
 
 /**
  * 録画→エンコード→保存先に入るまでを通しで確認する。
@@ -29,14 +28,14 @@ async function waitForRowState(
 }
 
 test.describe('録画とエンコード', () => {
-    test('予約した番組が録画され、エンコードされて保存先に入る', async ({ page, request }) => {
+    test('予約した番組が録画され、エンコードされて保存先に入る', async ({ page, request, stack }) => {
         test.setTimeout(180_000);
         await syncEpg(request);
 
         // 節目の通知が実際にどう飛ぶかも、この一連の流れで見ておく
-        await request.post(`${WEBHOOK_URL}/__control/reset`);
+        await request.post(`${stack.webhookUrl}/__control/reset`);
         await goto(page, '/settings');
-        await page.getByTestId('webhook-url').fill(`${WEBHOOK_URL}/__control/webhook`);
+        await page.getByTestId('webhook-url').fill(`${stack.webhookUrl}/__control/webhook`);
         await page.getByTestId('webhook-add').click();
 
         // BSは他のテストが触らないので、チューナー競合の心配なく録れる
@@ -53,7 +52,7 @@ test.describe('録画とエンコード', () => {
         await goto(page, '/');
         const recording = page.locator(recordingRow);
         const videoPath = (await recording.getAttribute('data-library-path')) ?? '';
-        expect(videoPath).toContain('/tmp/denpa-e2e/library/');
+        expect(videoPath).toContain(stack.libraryDir);
         expect(videoPath).toContain('.mkv');
 
         // CM検出が走り、既定のチャプター付与として記録されていること。
@@ -120,7 +119,7 @@ test.describe('録画とエンコード', () => {
 
         // 節目ごとに通知が飛び、どれも番組名と一緒にチャンネル名が入っていること。
         // 番組名だけだと、どの局のものか通知を見ただけでは分からない
-        const state = await (await request.get(`${WEBHOOK_URL}/__control/state`)).json();
+        const state = await (await request.get(`${stack.webhookUrl}/__control/state`)).json();
         const events = state.webhookCalls.map((call: { event: string }) => call.event);
         expect(events).toContain('recording.started');
         expect(events).toContain('recording.finished');

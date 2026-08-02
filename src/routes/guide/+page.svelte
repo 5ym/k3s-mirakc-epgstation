@@ -1,8 +1,9 @@
 <script lang="ts">
+    import { preloadData } from '$app/navigation';
     import { dragScroll, submitting } from '$lib/actions';
-    import { liveUpdates } from '$lib/live-updates.svelte';
     import ProgramDetail from '$lib/components/ProgramDetail.svelte';
-    import { CM_LABEL, stateLabel, time } from '$lib/format';
+    import { genreTint, stateLabel, time } from '$lib/format';
+    import { detectPlatform, type Platform, playLinks, withCredentials } from '$lib/play';
 
     let { data, form } = $props();
 
@@ -98,6 +99,35 @@
         const query = new URLSearchParams({ type: data.type, ...params });
         return `/guide?${query}`;
     }
+
+    const prevHref = $derived(href({ start: String(data.start - data.hours * HOUR) }));
+    const nextHref = $derived(href({ start: String(data.start + data.hours * HOUR) }));
+
+    /*
+     * 前日・翌日を先に取り寄せておく。
+     *
+     * 押してから読み込むと、24時間ぶんの番組を引き直して組み直す間だけ止まって見えた。
+     * body の `data-sveltekit-preload-data="hover"` は指を乗せてからなので、
+     * 狙って押すと間に合わない。表を出した時点で両隣を取っておけば、押した瞬間に出る
+     */
+    $effect(() => {
+        void preloadData(prevHref);
+        void preloadData(nextHref);
+    });
+
+    /** 番組表からそのまま再生できるようにする。宛先の決め方は録画一覧と同じ */
+    let refined = $state<{ platform: Platform; origin: string } | null>(null);
+    $effect(() => {
+        refined = {
+            platform: detectPlatform(navigator.userAgent, navigator.maxTouchPoints),
+            origin: location.origin,
+        };
+    });
+    const platform = $derived(refined?.platform ?? data.platform);
+    const origin = $derived(refined?.origin ?? data.origin);
+
+    /** 予約を取り消せるのはこれから録るものだけ。録り終わったものに出しても何も起きない */
+    const CANCELABLE = ['scheduled', 'conflict', 'recording'];
 </script>
 
 <div class="mb-4 flex flex-wrap items-center justify-between gap-2">
@@ -146,24 +176,12 @@
         {/each}
     </div>
     <div class="flex items-center gap-2">
-        <a
-            class="btn btn-sm"
-            href={href({ start: String(data.start - data.hours * HOUR) })}
-            data-testid="prev-day"
-        >
-            ← 前日
-        </a>
+        <a class="btn btn-sm" href={prevHref} data-testid="prev-day">← 前日</a>
         <span class="text-sm" data-testid="window-label">
             <!-- 日本の番組表の慣習で、1日は4時から翌4時まで -->
             {dayLabel(data.start)} <span class="text-base-content/60">(4:00〜翌4:00)</span>
         </span>
-        <a
-            class="btn btn-sm"
-            href={href({ start: String(data.start + data.hours * HOUR) })}
-            data-testid="next-day"
-        >
-            翌日 →
-        </a>
+        <a class="btn btn-sm" href={nextHref} data-testid="next-day">翌日 →</a>
         <a class="btn btn-sm" href={href({})}>今日</a>
     </div>
 </div>
@@ -197,12 +215,17 @@
                     title={service.name}
                 >
                     {#if service.has_logo}
-                        <!-- ロゴを持たない局もあるので、有るものだけ出す -->
+                        <!--
+                            ロゴを持たない局もあるので、有るものだけ出す。
+                            列が印になっているだけで実体が無いこともある (置き場ごと
+                            消えたとき)。取れなかったら黙って引っ込める
+                        -->
                         <img
                             src="/api/services/{service.id}/logo"
                             alt=""
                             class="h-5 w-8 shrink-0 object-contain"
                             loading="lazy"
+                            onerror={(event) => (event.currentTarget as HTMLImageElement).remove()}
                         />
                     {/if}
                     <span class="truncate">{service.name}</span>
@@ -245,10 +268,19 @@
                     data-service-id={program.service_id}
                     data-start-at={program.start_at}
                 >
+                    <!--
+                        マスは上ぞろえ。button は中身を縦中央に置くので、短い番組と
+                        長い番組で開始時刻の高さが揃わず、横に目で追えなかった。
+                        flex-col にして上から積む。
+
+                        色はジャンル(大分類)ごとに変える。白黒のマスが敷き詰まっていると
+                        どこに何があるのか目で追えない。予約したものだけは色より
+                        「予約済み」であることのほうが大事なので、そちらを優先する
+                    -->
                     <button
-                        class="h-full w-full overflow-hidden rounded px-1 py-0.5 text-left {program.reservation_state
-                            ? 'bg-primary/20 border-primary border-l-2'
-                            : 'bg-base-200 hover:bg-base-300'}"
+                        class="flex h-full w-full flex-col overflow-hidden rounded border-l-2 px-1 py-0.5 text-left {program.reservation_state
+                            ? 'bg-primary/20 border-primary'
+                            : genreTint(program.genres)}"
                         onclick={() => (selected = program)}
                         data-testid="program-button"
                     >
@@ -290,14 +322,53 @@
             {#if form?.message}
                 <div class="alert alert-error mt-4" data-testid="guide-error">{form.message}</div>
             {/if}
-            {#if program.reservation_state}
-                <div class="modal-action items-center">
+            <div class="modal-action flex-wrap items-center">
+                {#if program.reservation_state}
                     <span class="badge badge-info" data-testid="detail-state">
                         {stateLabel(program.reservation_state)}
                     </span>
-                    <button class="btn" onclick={() => (selected = null)} data-testid="detail-close">
-                        閉じる
-                    </button>
+                {:else if program.end_at <= clock}
+                    <!--
+                        もう終わった番組。予約する口を出しても、押した先で
+                        「放送が終わっています」と断られるだけ (reservations.reserve)
+                    -->
+                    <span class="badge badge-ghost" data-testid="detail-ended">放送終了</span>
+                {/if}
+
+                <button class="btn" onclick={() => (selected = null)} data-testid="detail-close">
+                    閉じる
+                </button>
+
+                {#if program.recording_id !== null && (program.library_path ?? program.ts_path) !== null}
+                    <!--
+                        録れているなら、ここからそのまま観られるようにする。
+                        番組表で見つけた番組を観るのに、録画一覧へ戻って同じ番組を
+                        探し直させるのは遠回り
+                    -->
+                    {#each playLinks(`${origin}/api/recordings/${program.recording_id}/file`, program.recording_name ?? program.name, platform, data.credentials) as link (link.href)}
+                        <a
+                            class="btn btn-primary"
+                            href={link.href}
+                            data-testid="detail-play"
+                            title={link.note ?? ''}
+                        >
+                            {link.label}
+                        </a>
+                    {/each}
+                    <a
+                        class="btn btn-ghost"
+                        href={withCredentials(
+                            `${origin}/api/recordings/${program.recording_id}/file?download=1`,
+                            data.credentials,
+                        )}
+                        download
+                        data-testid="detail-download"
+                    >
+                        ダウンロード
+                    </a>
+                {/if}
+
+                {#if CANCELABLE.includes(program.reservation_state ?? '')}
                     <!-- 予約したあと番組表から止められないと、わざわざ予約一覧まで行くことになる -->
                     <form
                         method="POST"
@@ -313,66 +384,27 @@
                             予約を取り消す
                         </button>
                     </form>
-                </div>
-            {:else}
-                <form
-                    method="POST"
-                    action="?/reserve"
-                    class="mt-4 flex flex-col gap-3"
-                    use:submitting={() =>
-                        async ({ result, update }) => {
-                            await update();
-                            // 失敗したときは開いたままにして、中に理由を出す
-                            if (result.type === 'success') selected = null;
-                        }}
-                >
-                    <input type="hidden" name="programId" value={program.id} />
-                    <input type="hidden" name="options" value="1" />
-                    <!-- 既定のままでいいことがほとんどなので畳んでおく -->
-                    <details class="border-base-300 rounded-box border">
-                        <summary
-                            class="cursor-pointer px-3 py-2 text-sm font-medium"
-                            data-testid="reserve-options-summary"
-                        >
-                            この番組の録画のしかた
-                            <span class="text-base-content/60">(開かなければ既定のまま)</span>
-                        </summary>
-                        <div class="grid gap-3 px-3 pb-3 sm:grid-cols-2" data-testid="reserve-options">
-                            <label class="flex cursor-pointer items-center gap-2">
-                                <input
-                                    type="checkbox"
-                                    name="encode"
-                                    value="on"
-                                    checked
-                                    class="checkbox checkbox-sm"
-                                    data-testid="reserve-encode"
-                                />
-                                <span class="text-sm">エンコードする</span>
-                            </label>
-                            <label class="flex cursor-pointer items-center gap-2">
-                                <input
-                                    type="checkbox"
-                                    name="keepOriginal"
-                                    class="checkbox checkbox-sm"
-                                    data-testid="reserve-keep"
-                                />
-                                <span class="text-sm">生TSも残す</span>
-                            </label>
-                            <!-- コーデックとCMの扱いは全体で1つ -->
-                            <span class="text-base-content/60 text-xs sm:col-span-2">
-                                コーデックとCMの扱いは<a class="link" href="/settings">設定</a>で決めます ({data.defaults.codec.toUpperCase()}
-                                / CM: {CM_LABEL[data.defaults.cmCut]})
-                            </span>
-                        </div>
-                    </details>
-                    <div class="modal-action mt-0">
-                        <button class="btn" onclick={() => (selected = null)} data-testid="detail-close">
-                            閉じる
-                        </button>
+                {:else if program.reservation_state === null && program.end_at > clock}
+                    <!--
+                        録画のしかたはここでは選ばせない。設定画面の1箇所で決める
+                        (同じ選択肢を予約・ルール・設定に並べると、どれで決まったのか
+                        分からなくなる)
+                    -->
+                    <form
+                        method="POST"
+                        action="?/reserve"
+                        use:submitting={() =>
+                            async ({ result, update }) => {
+                                await update();
+                                // 失敗したときは開いたままにして、中に理由を出す
+                                if (result.type === 'success') selected = null;
+                            }}
+                    >
+                        <input type="hidden" name="programId" value={program.id} />
                         <button class="btn btn-primary" data-testid="detail-reserve">予約する</button>
-                    </div>
-                </form>
-            {/if}
+                    </form>
+                {/if}
+            </div>
         {/snippet}
     </ProgramDetail>
 {/if}

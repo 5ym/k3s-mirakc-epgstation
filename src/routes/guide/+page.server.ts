@@ -1,4 +1,6 @@
 import { fail } from '@sveltejs/kit';
+import { detectPlatform } from '$lib/play';
+import { enabled as authEnabled } from '$lib/server/auth';
 import { queryAll, queryOne } from '$lib/server/db';
 import { CURRENT_SERVICES } from '$lib/server/epg';
 import { cancel, reserve } from '$lib/server/reservations';
@@ -24,6 +26,15 @@ function broadcastDayStart(at: number): number {
 
 interface GridProgram extends Program {
     reservation_state: string | null;
+    /**
+     * その番組で録れたもの。番組表から詳細を開いたときに、そのまま再生できるようにする。
+     * 録画一覧まで戻って同じ番組を探し直させないため
+     */
+    recording_id: number | null;
+    recording_name: string | null;
+    /** 配信は library_path ?? ts_path を返すので、どちらかがあれば開ける */
+    library_path: string | null;
+    ts_path: string | null;
 }
 
 /**
@@ -31,7 +42,7 @@ interface GridProgram extends Program {
  * キーワードなし: 時間×チャンネルのグリッド。並びを眺めて選ぶとき用
  * キーワードあり: 全チャンネル横断のリスト。探しているものが決まっているとき用
  */
-export async function load({ url }) {
+export async function load({ url, request }) {
     const type = (TYPES.find((t) => t === url.searchParams.get('type')) ?? 'GR') as ChannelType;
 
     // 既定は今日の放送日。めくるときだけ start が付く
@@ -48,10 +59,18 @@ export async function load({ url }) {
         type,
     );
     const programs = queryAll<GridProgram>(
-        `SELECT p.*, r.state AS reservation_state
+        `SELECT p.*, r.state AS reservation_state,
+                rec.id AS recording_id, rec.name AS recording_name,
+                rec.library_path, rec.ts_path
          FROM programs p
          JOIN services s ON s.id = p.service_id
          LEFT JOIN reservations r ON r.program_id = p.id AND r.state != 'canceled'
+         -- 録り直すと同じ番組に複数ぶら下がる。いちばん新しい現存分だけ見る
+         LEFT JOIN recordings rec ON rec.id = (
+             SELECT id FROM recordings
+             WHERE program_id = p.id AND deleted_at IS NULL
+             ORDER BY id DESC LIMIT 1
+         )
          WHERE s.type = ? AND p.start_at < ? AND p.end_at > ?
          ORDER BY p.start_at`,
         type,
@@ -65,11 +84,18 @@ export async function load({ url }) {
         hours: WINDOW_HOURS,
         programs,
         services,
-        // 予約の詳細で初期値として出す
-        defaults: settings(),
         counts: queryOne<{ programs: number; services: number }>(
             'SELECT (SELECT COUNT(*) FROM programs) AS programs, (SELECT COUNT(*) FROM services) AS services',
         )!,
+        /*
+         * 録れた番組は詳細からそのまま再生できる。宛先の決め方は録画一覧と同じで、
+         * UA だけで分かる分はサーバで決めておく (ブラウザで判定すると一瞬ボタンが消える)
+         */
+        platform: detectPlatform(request.headers.get('user-agent') ?? ''),
+        origin: url.origin,
+        credentials: authEnabled()
+            ? { user: settings().basicAuthUser, password: settings().basicAuthPassword }
+            : undefined,
     };
 }
 
@@ -88,20 +114,20 @@ export const actions = {
         return { success: true };
     },
 
+    /**
+     * 番組表から予約する。
+     *
+     * 録画のしかた(エンコードするか・生TSを残すか)はここでは選ばせない。
+     * 設定画面の1箇所で決める (docs/app.md)。番組ごとに変えたくなることが
+     * 実際にはほとんど無いのに、同じ選択肢が予約・ルール・設定の3箇所にあると
+     * 「どれで決まったのか」が分からなくなる
+     */
     reserve: async ({ request }) => {
         const form = await request.formData();
         const programId = Number(form.get('programId'));
         if (!Number.isFinite(programId)) return fail(400, { message: '番組IDが不正です' });
-
-        // 詳細の画面からはこの番組だけの録画のしかたを決められる。
-        // チェックを外した状態はキーごと消えるので、画面から来たことを印で見分ける。
-        // 印が無い(APIから番組IDだけ投げた)ときは既定のまま
-        const fromForm = form.get('options') === '1';
         try {
-            await reserve(programId, {
-                encode: fromForm ? form.get('encode') === 'on' : undefined,
-                keepOriginal: fromForm && form.get('keepOriginal') === 'on',
-            });
+            await reserve(programId);
         } catch (error) {
             return fail(400, { message: String(error) });
         }

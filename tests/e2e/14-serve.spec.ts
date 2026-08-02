@@ -1,5 +1,4 @@
-import { expect, test } from '@playwright/test';
-import { goto } from './helpers';
+import { expect, goto, recordOne, test } from './helpers';
 
 const CREDENTIALS = { username: 'denpa', password: 'ひみつ' };
 
@@ -33,8 +32,21 @@ test.describe('設定画面からの認証', () => {
     test('設定画面から認証を変えられる', async ({ page }) => {
         await goto(page, '/settings');
         await expect(page.getByTestId('auth-user')).toHaveValue('denpa');
-        // env から来ている間は「設定済み」とだけ出す
-        await expect(page.getByTestId('auth-password')).toHaveAttribute('placeholder', /設定済み/);
+        /*
+         * いま効いているパスワードをそのまま出す。Kodi や VLC に入れるときに要るものを
+         * 隠していると、思い出せないたびに作り直すことになり、そのたびに
+         * 登録済みの端末が全部つながらなくなる
+         */
+        await expect(page.getByTestId('auth-password')).toHaveValue('ひみつ');
+        await expect(page.getByTestId('auth-password')).toHaveAttribute('type', 'password');
+        await page.getByTestId('auth-reveal').click();
+        await expect(page.getByTestId('auth-password')).toHaveAttribute('type', 'text');
+
+        // 自動生成はURLに埋められる文字だけを使う (再生リンクに入るため)
+        await page.getByTestId('auth-generate').click();
+        await expect(page.getByTestId('auth-password')).toHaveValue(/^[A-Za-z2-9]{24}$/);
+        // 変えずに続けたいので元に戻す
+        await page.getByTestId('auth-password').fill('ひみつ');
 
         await page.getByTestId('auth-scope').selectOption('all');
         await page.getByTestId('save-auth').click();
@@ -87,16 +99,13 @@ test.describe('WebDAV', () => {
         expect([404, 405]).toContain(res.status());
     });
 
-    test('DELETE を受けて、denpa 側の一覧からも消える', async ({ page, request }) => {
-        await goto(page, '/');
-        const recording = page.getByTestId('recording-row').first();
-        await expect(recording).toBeVisible();
-        const id = await recording.getAttribute('data-recording-id');
-        const path = (await recording.getAttribute('data-library-path')) ?? '';
-        expect(path).toContain('/tmp/denpa-e2e/library/');
+    test('DELETE を受けて、denpa 側の一覧からも消える', async ({ page, request, stack }) => {
+        test.setTimeout(180_000);
+        const { id, libraryPath: path } = await recordOne(page, request);
+        expect(path).toContain(stack.libraryDir);
 
         // /dav からの相対パスに直す
-        const relative = path.replace('/tmp/denpa-e2e/library/', '');
+        const relative = path.replace(`${stack.libraryDir}/`, '');
         const href = `/dav/${relative.split('/').map(encodeURIComponent).join('/')}`;
 
         const res = await request.fetch(href, { method: 'DELETE' });

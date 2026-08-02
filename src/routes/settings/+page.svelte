@@ -12,6 +12,46 @@
     const done = $derived(migrate.imported + migrate.skipped + migrate.missing);
 
     // 引き継ぎは数百GBのコピーになる。進み具合はサーバから push される
+
+    /** ベーシック認証のパスワード。いま入っているものを出しておく */
+    let password = $state('');
+    let revealed = $state(false);
+    let copied = $state(false);
+
+    // 保存したあとはサーバの値で引き直す。自動生成した直後は手元の値のまま
+    $effect(() => {
+        password = data.auth.password;
+    });
+
+    /*
+     * パスワードに使う文字。
+     *
+     * 記号は入れない。このパスワードは**再生リンクのURLに埋め込まれる**ので、
+     * `:` `@` `/` `#` `?` が入ると URL として割れてしまう。
+     * 紛らわしい文字 (0/O、1/l/I) も外す。Kodi の画面で手入力することがある
+     */
+    const ALPHABET = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const LENGTH = 24;
+
+    function generate(): void {
+        const bytes = crypto.getRandomValues(new Uint8Array(LENGTH));
+        // 256 は文字数で割り切れないので、そのまま剰余を取ると先頭の文字がわずかに
+        // 出やすくなる。総当たりを気にする長さでもないが、偏らせる理由も無い
+        password = Array.from(bytes, (b) => ALPHABET[b % ALPHABET.length]).join('');
+        revealed = true;
+        copied = false;
+    }
+
+    async function copy(): Promise<void> {
+        try {
+            await navigator.clipboard.writeText(password);
+            copied = true;
+            setTimeout(() => (copied = false), 2000);
+        } catch {
+            // 平文の http では clipboard API が使えない。そのときは表示して手で選んでもらう
+            revealed = true;
+        }
+    }
 </script>
 
 <h1 class="mb-4 text-2xl font-bold">設定</h1>
@@ -44,7 +84,13 @@
                     全部の録画に効きます。番組ごとに変えたくなることは実際にはほとんど無いので、
                     ルールにも予約にも同じ選択肢を並べず、ここ1箇所で決めます。
                 </p>
-                <form method="POST" action="?/saveRecording" use:submitting class="grid gap-4 sm:grid-cols-2">
+                <form
+                    method="POST"
+                    action="?/saveRecording"
+                    use:submitting
+                    class="grid gap-4 sm:grid-cols-2"
+                    data-testid="recording-form"
+                >
                     <label class="flex flex-col gap-1">
                         <span class="text-sm font-medium">映像コーデック</span>
                         <select name="codec" class="select select-bordered w-full" data-testid="global-codec">
@@ -71,6 +117,54 @@
                         {#if data.fromEnv.cmCut}
                             <span class="text-base-content/60 text-xs">いまは環境変数の値です</span>
                         {/if}
+                    </label>
+                    <!--
+                        エンコードするか・生TSを残すか・無料放送だけにするかも、ここで決める。
+                        画面に出していなかった頃は、保存を押すたびに未送信のチェックボックスとして
+                        全部 false で上書きされていた
+                    -->
+                    <label class="flex cursor-pointer items-start gap-2">
+                        <input
+                            type="checkbox"
+                            name="encode"
+                            checked={data.recording.encode}
+                            class="checkbox checkbox-sm mt-0.5"
+                            data-testid="global-encode"
+                        />
+                        <span class="text-sm">
+                            エンコードする
+                            <span class="text-base-content/60 block text-xs"> 外すと生TSのまま置きます </span>
+                        </span>
+                    </label>
+                    <label class="flex cursor-pointer items-start gap-2">
+                        <input
+                            type="checkbox"
+                            name="keepOriginal"
+                            checked={data.recording.keepOriginal}
+                            class="checkbox checkbox-sm mt-0.5"
+                            data-testid="global-keep"
+                        />
+                        <span class="text-sm">
+                            生TSも残す
+                            <span class="text-base-content/60 block text-xs">
+                                エンコードしたあとも元のTSを消しません。容量を食います
+                            </span>
+                        </span>
+                    </label>
+                    <label class="flex cursor-pointer items-start gap-2 sm:col-span-2">
+                        <input
+                            type="checkbox"
+                            name="freeOnly"
+                            checked={data.recording.freeOnly}
+                            class="checkbox checkbox-sm mt-0.5"
+                            data-testid="global-free-only"
+                        />
+                        <span class="text-sm">
+                            自動予約は無料放送だけにする
+                            <span class="text-base-content/60 block text-xs">
+                                有料放送は契約していないと中身が入りません
+                            </span>
+                        </span>
                     </label>
                     <div class="sm:col-span-2">
                         <button class="btn btn-primary" data-testid="save-recording">保存</button>
@@ -99,16 +193,54 @@
                             value={data.auth.user}
                             data-testid="auth-user"
                         />
+                        <span class="text-base-content/60 text-xs">
+                            空にすると認証そのものが無効になります
+                        </span>
                     </label>
                     <label class="flex flex-col gap-1">
                         <span class="text-sm font-medium">パスワード</span>
-                        <input
-                            type="password"
-                            name="basicAuthPassword"
-                            class="input input-bordered w-full"
-                            placeholder={data.auth.hasPassword ? '設定済み (変えるときだけ入力)' : ''}
-                            data-testid="auth-password"
-                        />
+                        <!--
+                            いま入っているものを出す。Kodi や VLC に登録するときに要るのに
+                            隠していると、思い出せないたびに作り直すことになり、
+                            そのたびに登録済みの端末が全部つながらなくなる
+                        -->
+                        <div class="join w-full">
+                            <input
+                                type={revealed ? 'text' : 'password'}
+                                name="basicAuthPassword"
+                                class="input input-bordered join-item w-full font-mono"
+                                bind:value={password}
+                                data-testid="auth-password"
+                            />
+                            <button
+                                type="button"
+                                class="btn join-item"
+                                onclick={() => (revealed = !revealed)}
+                                data-testid="auth-reveal"
+                                title={revealed ? '隠す' : '表示する'}
+                            >
+                                {revealed ? '🙈' : '👁'}
+                            </button>
+                        </div>
+                        <div class="flex flex-wrap gap-2">
+                            <button
+                                type="button"
+                                class="btn btn-xs"
+                                onclick={generate}
+                                data-testid="auth-generate"
+                            >
+                                自動生成
+                            </button>
+                            <button
+                                type="button"
+                                class="btn btn-xs"
+                                onclick={copy}
+                                disabled={password === ''}
+                                data-testid="auth-copy"
+                            >
+                                {copied ? 'コピーしました' : 'コピー'}
+                            </button>
+                        </div>
                     </label>
                     <label class="flex flex-col gap-1">
                         <span class="text-sm font-medium">適用範囲</span>
@@ -124,7 +256,7 @@
                         </select>
                     </label>
                     <div class="sm:col-span-3">
-                        {#if data.auth.scope === 'files' && data.auth.hasPassword}
+                        {#if data.auth.scope === 'files' && data.auth.password !== ''}
                             <div class="alert alert-warning mb-3" data-testid="auth-warning">
                                 この範囲だと録画一覧の画面には認証がかかりません。再生リンクのURLに
                                 パスワードを埋めているので、画面を開ければパスワードも見えます。
