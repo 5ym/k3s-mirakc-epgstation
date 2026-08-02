@@ -86,4 +86,33 @@ test.describe('WebDAV', () => {
         const res = await request.fetch('/dav/x.mkv', { method: 'PUT', data: 'x' });
         expect([404, 405]).toContain(res.status());
     });
+
+    test('DELETE を受けて、denpa 側の一覧からも消える', async ({ page, request }) => {
+        await goto(page, '/');
+        const recording = page.getByTestId('recording-row').first();
+        await expect(recording).toBeVisible();
+        const id = await recording.getAttribute('data-recording-id');
+        const path = (await recording.getAttribute('data-library-path')) ?? '';
+        expect(path).toContain('/tmp/denpa-e2e/library/');
+
+        // /dav からの相対パスに直す
+        const relative = path.replace('/tmp/denpa-e2e/library/', '');
+        const href = `/dav/${relative.split('/').map(encodeURIComponent).join('/')}`;
+
+        const res = await request.fetch(href, { method: 'DELETE' });
+        expect(res.status()).toBe(204);
+
+        // 実体だけでなく DB も更新される。定期照合を待たずに一覧から消える
+        await goto(page, '/');
+        await expect(page.locator(`[data-recording-id="${id}"]`)).toHaveCount(0);
+
+        await goto(page, '/?deleted=1');
+        await expect(page.locator(`[data-recording-id="${id}"]`)).toContainText('WebDAV から削除されました');
+    });
+
+    test('denpa が知らないファイルは消させない', async ({ request }) => {
+        // 手で置いたものを WebDAV 越しに消せると、denpa の外の都合で消える
+        const res = await request.fetch('/dav/', { method: 'DELETE' });
+        expect([403, 405]).toContain(res.status());
+    });
 });

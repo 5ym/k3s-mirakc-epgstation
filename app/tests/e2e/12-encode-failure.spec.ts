@@ -29,7 +29,7 @@ test.describe('エンコードの失敗', () => {
         if (existsSync(FAIL_MARKER)) rmSync(FAIL_MARKER);
     });
 
-    test('失敗したエンコードは理由が出て、消せる', async ({ page, request }) => {
+    test('失敗したエンコードは録画の行に出て、理由は詳細で見られる', async ({ page, request }) => {
         test.setTimeout(180_000);
         await syncEpg(request);
 
@@ -38,26 +38,27 @@ test.describe('エンコードの失敗', () => {
 
         await reserveSoon(page, request, 'BS');
 
-        await waitForRow(page, '[data-testid="encode-row"] [data-testid="encode-state"]', '失敗');
-
-        // 警告ではなく、止まった理由が出ていること
-        const row = page.getByTestId('encode-row').first();
-        await expect(row).toContainText('Error initializing the encoder');
-        await expect(row).not.toContainText('has not been used for any stream');
-
-        // 消せること。消えないと直したあとも残り続ける
-        await row.getByTestId('encode-dismiss').click();
-        await expect(page.getByTestId('encode-row')).toHaveCount(0);
-
-        // ジョブを消しても、失敗したことは録画一覧の行にそのまま残る。
-        // 上にまとめて出していた頃は、どの録画のことか見に行く必要があった
+        // 失敗したものはエンコード欄には残さない。録画の行に出る
+        await waitForRow(page, '[data-testid="recording-row"] [data-testid="recording-state"]', '失敗');
         await goto(page, '/');
+        await expect(page.getByTestId('encode-row')).toHaveCount(0);
         const failed = page
             .getByTestId('recording-row')
             .filter({ has: page.getByTestId('recording-error') })
             .first();
         await expect(failed.getByTestId('recording-state')).toHaveText('失敗');
         await expect(failed.getByTestId('recording-error')).toContainText('エンコードに失敗しました');
+
+        // 理由は行を押して詳細で見る。ffmpeg の出力は長いので一覧には貼らない
+        await failed.locator('td').first().click();
+        const detail = page.getByTestId('program-detail');
+        await expect(detail.getByTestId('detail-error')).toContainText('Error initializing the encoder');
+        // 警告に埋もれず、止まった理由だけが出ていること
+        await expect(detail.getByTestId('detail-error')).not.toContainText(
+            'has not been used for any stream',
+        );
+        await page.getByTestId('detail-close').click();
+        await expect(detail).toHaveCount(0);
 
         // 削除は2回押させる。1回目は聞き返すだけで、まだ消えない
         await failed.getByTestId('delete-button').click();

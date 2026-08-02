@@ -1,6 +1,10 @@
 import { readdirSync, statSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
+import type { Recording } from '../types';
 import { config } from './config';
+import { queryOne } from './db';
+import { emit } from './events';
+import { deleteRecordingFiles } from './files';
 import { serveFile } from './serve';
 
 /**
@@ -131,6 +135,35 @@ ${responses}
 }
 
 /**
+ * WebDAV からの削除。
+ *
+ * 実体だけ消すと denpa は次の照合まで気づけないので、画面から消したときと
+ * 同じ道を通す(DBを削除済みにし、`.nfo` とサムネイル、空フォルダも片付ける)。
+ * denpa が知らないファイルは触らない。手で置いたものを消さないため。
+ */
+function remove(entry: Entry): Response {
+    if (entry.isDirectory) {
+        // フォルダごとは受けない。中身の対応が取れず、消し過ぎたときに戻せない
+        return new Response('collections cannot be deleted', { status: 405 });
+    }
+
+    const full = join(config.libraryDir, entry.path);
+    const recording = queryOne<Recording>(
+        'SELECT * FROM recordings WHERE library_path = ? AND deleted_at IS NULL',
+        full,
+    );
+    if (recording === undefined) {
+        // サイドカーだけ消されても困るので、録画そのもの以外は断る
+        return new Response('not a recording', { status: 403 });
+    }
+
+    deleteRecordingFiles(recording, 'WebDAV から削除されました');
+    emit('recordings');
+    console.log(`[dav] 削除しました: ${recording.name}`);
+    return new Response(null, { status: 204 });
+}
+
+/**
  * `/dav` 以下のリクエストを捌く。
  *
  * SvelteKit のルートは GET/POST など決まったメソッドしか受けられず、
@@ -147,7 +180,7 @@ export function handleDav(request: Request, url: URL): Response | null {
             headers: {
                 // Kodi はここを見てサーバの種類を決める
                 DAV: '1',
-                Allow: 'OPTIONS, GET, HEAD, PROPFIND',
+                Allow: 'OPTIONS, GET, HEAD, PROPFIND, DELETE',
                 'MS-Author-Via': 'DAV',
             },
         });
@@ -166,11 +199,14 @@ export function handleDav(request: Request, url: URL): Response | null {
         });
     }
 
+    if (request.method === 'DELETE') return remove(entry);
+
     if (request.method !== 'GET' && request.method !== 'HEAD') {
-        // 書き込み系は実装しない。外から書かれると実体とDBがずれる
+        // 書き込み(PUT / MKCOL / COPY / MOVE)は実装しない。
+        // 外から置かれたものは denpa が知らないので、実体とDBがずれる
         return new Response('method not allowed', {
             status: 405,
-            headers: { Allow: 'OPTIONS, GET, HEAD, PROPFIND' },
+            headers: { Allow: 'OPTIONS, GET, HEAD, PROPFIND, DELETE' },
         });
     }
     if (entry.isDirectory) return new Response('is a directory', { status: 405 });

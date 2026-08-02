@@ -12,6 +12,11 @@ interface JobRow extends EncodeJob {
     recording_name: string;
 }
 
+interface RecordingRow extends Recording {
+    /** 直近のエンコード失敗の理由。詳細で見せる */
+    encode_error: string | null;
+}
+
 interface ReservationRow extends Reservation {
     service_name: string;
     rule_name: string | null;
@@ -43,29 +48,31 @@ export function load({ url }) {
 
     const recordings = database()
         .prepare(
-            `SELECT * FROM recordings
-             WHERE deleted_at IS ${showDeleted ? 'NOT NULL' : 'NULL'}
+            `SELECT r.*, (
+                 -- 失敗の理由は詳細で見せる。一覧には「失敗」とだけ出す
+                 SELECT j.error FROM encode_jobs j
+                 WHERE j.recording_id = r.id AND j.state = 'failed'
+                 ORDER BY j.id DESC LIMIT 1
+             ) AS encode_error
+             FROM recordings r
+             WHERE r.deleted_at IS ${showDeleted ? 'NOT NULL' : 'NULL'}
              -- 進行中のものは上のエンコード欄と予約一覧に出ている。
              -- ここにも出すと同じ番組が2箇所に並ぶので、落ち着いたものだけ出す
-             AND state NOT IN ('recording', 'encoding')
+             AND r.state NOT IN ('recording', 'encoding')
              -- エンコード待ちは状態が動くので先頭に固定する
-             ORDER BY (state = 'recorded') DESC, start_at DESC
+             ORDER BY (r.state = 'recorded') DESC, r.start_at DESC
              LIMIT 300`,
         )
-        .all() as Recording[];
+        .all() as RecordingRow[];
 
     // エンコードは「保存先に入る途中の状態」なので録画側の上に出す。
-    // 終わったものは録画の行に出るので、ここは進行中と直近の失敗だけ
+    // 進行中だけ。終わったものも失敗したものも録画の行に出る
     const jobs = queryAll<JobRow>(
         `SELECT j.*, r.name AS recording_name
          FROM encode_jobs j JOIN recordings r ON r.id = j.recording_id
          WHERE j.state IN ('queued','running')
-            OR (j.state IN ('failed','canceled') AND j.finished_at > ?)
-         ORDER BY
-            CASE j.state WHEN 'running' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END,
-            j.id DESC
+         ORDER BY CASE j.state WHEN 'running' THEN 0 ELSE 1 END, j.id DESC
          LIMIT 50`,
-        Date.now() - 24 * 60 * 60 * 1000,
     );
 
     return {
@@ -120,40 +127,6 @@ export const actions = {
         const id = Number(form.get('id'));
         if (!Number.isFinite(id)) return fail(400, { message: 'ジョブIDが不正です' });
         cancelEncode(id);
-        return { success: true };
-    },
-
-    retryEncode: async ({ request }) => {
-        const form = await request.formData();
-        const id = Number(form.get('id'));
-        if (!Number.isFinite(id)) return fail(400, { message: 'ジョブIDが不正です' });
-        const job = queryOne<EncodeJob>('SELECT * FROM encode_jobs WHERE id = ?', id);
-        if (job === undefined) return fail(400, { message: 'ジョブが見つかりません' });
-
-        const source = queryOne<Recording>('SELECT * FROM recordings WHERE id = ?', job.recording_id);
-        if (source === undefined || encodeSource(source) === null) {
-            return fail(400, { message: '元のファイルが残っていないためやり直せません' });
-        }
-
-        database()
-            .prepare(
-                `UPDATE encode_jobs SET state = 'queued', percent = 0, error = NULL,
-                 started_at = NULL, finished_at = NULL WHERE id = ?`,
-            )
-            .run(id);
-        database()
-            .prepare(`UPDATE recordings SET state = 'recorded', error = NULL, updated_at = ? WHERE id = ?`)
-            .run(now(), job.recording_id);
-        pump();
-        return { success: true };
-    },
-
-    dismissEncode: async ({ request }) => {
-        const form = await request.formData();
-        const id = Number(form.get('id'));
-        if (!Number.isFinite(id)) return fail(400, { message: 'ジョブIDが不正です' });
-        // 失敗の記録は録画側の error に残るので、ジョブ行は消してしまってよい
-        database().prepare(`DELETE FROM encode_jobs WHERE id = ? AND state IN ('failed','canceled')`).run(id);
         return { success: true };
     },
 

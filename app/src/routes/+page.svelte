@@ -48,6 +48,8 @@
 
     /** 行から開いた番組詳細。番組表と同じ見せ方をする */
     let detail = $state<Detail | null>(null);
+    /** その行のエンコード失敗の理由。詳細の中で見せる */
+    let detailError = $state<string | null>(null);
 
     /** 続けて別の行を押したとき、遅れて届いた前の結果で上書きされないようにする */
     let opened = 0;
@@ -67,8 +69,13 @@
      * まず行が持っている分をすぐ出し、EPG から引けたら中身を差し替える。
      * 古い録画は番組が EPG から消えているので、引けないことのほうが普通。
      */
-    async function openDetail(programId: number | null, row: Row): Promise<void> {
+    async function openDetail(
+        programId: number | null,
+        row: Row,
+        error: string | null = null,
+    ): Promise<void> {
         const token = ++opened;
+        detailError = error;
         detail = {
             ...row,
             extended: null,
@@ -98,10 +105,15 @@
     }
 
     /** 行のどこを押しても開く。ただしボタンやリンクを押したときは邪魔しない */
-    function rowClick(event: MouseEvent | KeyboardEvent, programId: number | null, row: Row): void {
+    function rowClick(
+        event: MouseEvent | KeyboardEvent,
+        programId: number | null,
+        row: Row,
+        error: string | null = null,
+    ): void {
         if (event instanceof KeyboardEvent && event.key !== 'Enter') return;
         if ((event.target as HTMLElement).closest('a, button, input, label')) return;
-        void openDetail(programId, row);
+        void openDetail(programId, row, error);
     }
 </script>
 
@@ -253,47 +265,23 @@
                                         >
                                             {stateLabel(job.state)}
                                         </span>
-                                        {#if job.state === 'queued' || job.state === 'running'}
-                                            <form method="POST" action="?/cancelEncode" use:submitting>
-                                                <input type="hidden" name="id" value={job.id} />
-                                                <button
-                                                    class="btn btn-xs btn-error btn-outline"
-                                                    data-testid="encode-cancel"
-                                                >
-                                                    中止
-                                                </button>
-                                            </form>
-                                        {:else}
-                                            <form method="POST" action="?/retryEncode" use:submitting>
-                                                <input type="hidden" name="id" value={job.id} />
-                                                <button class="btn btn-xs" data-testid="encode-retry"
-                                                    >やり直す</button
-                                                >
-                                            </form>
-                                            <form method="POST" action="?/dismissEncode" use:submitting>
-                                                <input type="hidden" name="id" value={job.id} />
-                                                <button
-                                                    class="btn btn-xs btn-ghost"
-                                                    data-testid="encode-dismiss"
-                                                >
-                                                    消す
-                                                </button>
-                                            </form>
-                                        {/if}
+                                        <form method="POST" action="?/cancelEncode" use:submitting>
+                                            <input type="hidden" name="id" value={job.id} />
+                                            <button
+                                                class="btn btn-xs btn-error btn-outline"
+                                                data-testid="encode-cancel"
+                                            >
+                                                中止
+                                            </button>
+                                        </form>
                                     </div>
                                 </div>
-                                {#if job.state === 'running' || job.state === 'queued'}
-                                    <progress
-                                        class="progress progress-primary w-full"
-                                        value={job.percent}
-                                        max="1"
-                                    ></progress>
-                                    <div class="text-base-content/60 text-xs">
-                                        {percent(job.percent)}{#if job.log}・{job.log}{/if}
-                                    </div>
-                                {:else if job.error}
-                                    <div class="text-error line-clamp-2 font-mono text-xs">{job.error}</div>
-                                {/if}
+                                <!-- 失敗したものはここには出ない。録画の行に出て、理由は詳細で見せる -->
+                                <progress class="progress progress-primary w-full" value={job.percent} max="1"
+                                ></progress>
+                                <div class="text-base-content/60 text-xs">
+                                    {percent(job.percent)}{#if job.log}・{job.log}{/if}
+                                </div>
                             </li>
                         {/each}
                     </ul>
@@ -310,7 +298,7 @@
                         <th class="w-full sm:min-w-48">番組</th>
                         <th class="hidden whitespace-nowrap sm:table-cell">サイズ</th>
                         <th class="whitespace-nowrap">状態</th>
-                        <th></th>
+                        <th class="text-right"></th>
                     </tr>
                 </thead>
                 <tbody data-testid="recording-list">
@@ -324,8 +312,8 @@
                             data-duration-ms={rec.duration_ms}
                             class="hover cursor-pointer"
                             tabindex="0"
-                            onclick={(event) => rowClick(event, rec.program_id, rec)}
-                            onkeydown={(event) => rowClick(event, rec.program_id, rec)}
+                            onclick={(event) => rowClick(event, rec.program_id, rec, rec.encode_error)}
+                            onkeydown={(event) => rowClick(event, rec.program_id, rec, rec.encode_error)}
                         >
                             <td class="whitespace-nowrap">
                                 {dateTime(rec.start_at)}
@@ -342,18 +330,20 @@
                                 <div class="text-base-content/60 text-sm">{rec.service_name}</div>
                                 {#if rec.error}
                                     <!--
-                                        失敗の理由はこの行にそのまま出す。上にまとめて出していた頃は
-                                        どの録画のことか見に行く必要があった。
+                                        失敗したことはこの行に出し、理由は行を押して詳細で見せる。
+                                        ffmpeg の出力は長いので一覧に貼ると読みづらい。
                                         削除済みの行では error 列に削除理由が入る。失敗ではないので赤くしない
                                     -->
                                     <div
                                         class="line-clamp-2 text-sm {rec.deleted_at === null
                                             ? 'text-error'
                                             : 'text-base-content/60'}"
-                                        title={rec.error}
                                         data-testid="recording-error"
                                     >
                                         {rec.error}
+                                        {#if rec.encode_error}
+                                            <span class="text-base-content/60">(押すと理由が出ます)</span>
+                                        {/if}
                                     </div>
                                 {/if}
                                 {#if rec.cm_cut !== 'off' && cmRanges(rec.cm_ranges)}
@@ -373,9 +363,12 @@
                                     {stateLabel(rec.state)}
                                 </span>
                             </td>
-                            <!-- 広い画面では畳ませない(縦積みになる)。狭い画面では畳ませる -->
+                            <!--
+                                広い画面では畳ませない(縦積みになる)。狭い画面では畳ませる。
+                                右端に寄せる。再生ボタンが出ない行でも削除の位置が揃う
+                            -->
                             <td class="sm:whitespace-nowrap">
-                                <div class="flex flex-wrap items-center gap-2 sm:flex-nowrap">
+                                <div class="flex flex-wrap items-center justify-end gap-2 sm:flex-nowrap">
                                     {#if rec.deleted_at === null}
                                         {#if rec.library_path !== null && platform !== null}
                                             <!--
@@ -447,5 +440,5 @@
 </div>
 
 {#if detail}
-    <ProgramDetail program={detail} onclose={() => (detail = null)} />
+    <ProgramDetail program={detail} error={detailError} onclose={() => (detail = null)} />
 {/if}

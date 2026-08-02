@@ -11,8 +11,12 @@
      * 下に並べるボタンだけは開いた場所で違う(番組表なら予約、一覧なら閉じるだけ)ので
      * snippet で受ける。
      */
-    let { program, onclose, actions }: { program: ProgramDetail; onclose: () => void; actions?: Snippet } =
-        $props();
+    let {
+        program,
+        onclose,
+        error = null,
+        actions,
+    }: { program: ProgramDetail; onclose: () => void; error?: string | null; actions?: Snippet } = $props();
 
     /** 詳細情報。Mirakurun が拾った「出演者」などの見出し付きテキスト */
     function extended(json: string | null): [string, string][] {
@@ -78,6 +82,15 @@
                 <div class="text-base-content/70 text-sm whitespace-pre-wrap">{body}</div>
             </div>
         {/each}
+
+        {#if error}
+            <!-- エンコードが失敗した理由。一覧には「失敗」とだけ出して、中身はここで見せる -->
+            <div class="mt-3" data-testid="detail-error">
+                <div class="text-error text-sm font-medium">エンコードに失敗しました</div>
+                <pre
+                    class="bg-base-200 mt-1 max-h-48 overflow-auto rounded p-2 font-mono text-xs whitespace-pre-wrap">{error}</pre>
+            </div>
+        {/if}
 
         {#if actions}
             {@render actions()}

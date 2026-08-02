@@ -70,8 +70,12 @@ $CommandKey = "$Root\shell\open\command"
     ブラウザに「この origin からの denpa:// は確認なしで開いてよい」と教える。
 
     独自スキームを開くとき、Edge も Chrome も既定で毎回確認を出す。黙らせる方法は
-    ポリシー (AutoLaunchProtocolsFromOrigins) しかない。HKCU に書けるので管理者権限は
-    要らないが、反映にはブラウザの再起動が要る。
+    ポリシー (AutoLaunchProtocolsFromOrigins) しかない。
+
+    HKCU\Software\Policies は普通のユーザーには書けない(ポリシーを自分で足せると
+    意味が無いので ACL で守られている)。**管理者として実行したときだけ**書ける。
+    書けなくても再生自体はできるので、その旨だけ出して先へ進む。
+    反映にはブラウザの再起動が要る。
 #>
 $Policies = @{
     Edge   = 'HKCU:\Software\Policies\Microsoft\Edge'
@@ -80,12 +84,26 @@ $Policies = @{
 $PolicyName = 'AutoLaunchProtocolsFromOrigins'
 
 function Set-AutoLaunchPolicy([string[]] $origins) {
+    if (-not (Test-Elevated)) {
+        Write-Host '確認ダイアログの抑止は飛ばします (管理者権限が要ります)。'
+        Write-Host '  毎回の確認を消したいときは、PowerShell を「管理者として実行」してもう一度どうぞ。'
+        return
+    }
+
     # 値は JSON の配列。他のスキームの設定が入っていれば残す
     $entry = [ordered]@{ protocol = 'denpa'; allowed_origins = @($origins) }
 
     foreach ($browser in $Policies.GetEnumerator()) {
         $path = $browser.Value
-        New-Item -Path $path -Force | Out-Null
+        try { New-Item -Path $path -Force | Out-Null }
+        catch {
+            Write-Warning @"
+確認ダイアログを黙らせる設定は書けませんでした (管理者権限が要ります)。
+再生はこのままでもできます。毎回の確認を消したい場合は、
+PowerShell を「管理者として実行」して、もう一度これを実行してください。
+"@
+            return
+        }
 
         $existing = @()
         $current = (Get-ItemProperty -Path $path -Name $PolicyName -ErrorAction SilentlyContinue).$PolicyName
@@ -102,11 +120,19 @@ function Set-AutoLaunchPolicy([string[]] $origins) {
     }
 }
 
+function Test-Elevated {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    return ([Security.Principal.WindowsPrincipal]$identity).IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
 function Remove-AutoLaunchPolicy {
     foreach ($browser in $Policies.GetEnumerator()) {
         $path = $browser.Value
         $current = (Get-ItemProperty -Path $path -Name $PolicyName -ErrorAction SilentlyContinue).$PolicyName
         if (-not $current) { continue }
+        # 書くのと同じく管理者権限が要る。消せなくても他の後始末は続ける
+        try { $null = Get-Item -Path $path } catch { continue }
         $rest = @()
         try { $rest = @($current | ConvertFrom-Json) | Where-Object { $_.protocol -ne 'denpa' } } catch { }
         if ($rest.Count -eq 0) { Remove-ItemProperty -Path $path -Name $PolicyName -ErrorAction SilentlyContinue }
@@ -424,8 +450,10 @@ if (-not (Get-RegisteredCommand)) { throw '登録に失敗しました。' }
 
 Write-Host ''
 Write-Host '登録しました。'
-Write-Host '確認を出さずに開くには、ブラウザを一度終了してから開き直してください。'
-Write-Host "許可した origin: $($Origins -join ', ')"
+if (Test-Elevated) {
+    Write-Host '確認を出さずに開くには、ブラウザを一度終了してから開き直してください。'
+    Write-Host "許可した origin: $($Origins -join ', ')"
+}
 Write-Host '(違う場所から開くなら -Origins で渡してください)'
 if ($Player -eq 'mpv') {
     Write-Host '再生速度と再生位置は録画ごとに覚えます (触らせないなら -NoPlayerConfig)'
