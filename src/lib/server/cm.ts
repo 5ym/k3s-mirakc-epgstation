@@ -1,5 +1,6 @@
 import type { CmMode } from '../types';
 import { config } from './config';
+import { settings } from './settings';
 import { lines as readLines, text } from './stream';
 
 /**
@@ -281,7 +282,8 @@ export async function detectCm(
 ): Promise<CmDetection> {
     /** ロゴを当てられなかったことは、無音検出に落ちたあとも伝える */
     let logoMissing = false;
-    if (config.cmDetector === 'jls') {
+    // 検出のしかたは設定画面で決める (jls は確かだが録画1本あたり数分かかる)
+    if (settings().cmDetector === 'jls') {
         const duration = await probeDuration(input);
         if (Number.isFinite(duration)) {
             const { detectWithJls } = await import('./cm-jls');

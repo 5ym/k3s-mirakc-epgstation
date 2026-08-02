@@ -97,13 +97,19 @@ interface Step {
  * 1段階ぶん回す。
  *
  * どれも録画の実時間の数分の一かかる。中止を押されたら止め、
- * 全体の上限 (`CM_DETECT_TIMEOUT`) を超えたときも止める。
+ * 全体の上限 (config.cmDetectTimeout) を超えたときも止める。
  */
 async function run(argv: string[], signal: AbortSignal | undefined, deadline: number): Promise<Step> {
     const left = deadline - Date.now();
     if (left <= 0) return { code: 124, stderr: '時間切れ' };
 
-    const proc = Bun.spawn(argv, { stdout: 'ignore', stderr: 'pipe' });
+    let proc: Bun.Subprocess;
+    try {
+        proc = Bun.spawn(argv, { stdout: 'ignore', stderr: 'pipe' });
+    } catch (error) {
+        // 一式が入っていないイメージもある。無音検出に落ちれば録画は続く
+        return { code: 127, stderr: String(error) };
+    }
     const timer = setTimeout(() => proc.kill(), left);
     const kill = () => proc.kill();
     signal?.addEventListener('abort', kill, { once: true });

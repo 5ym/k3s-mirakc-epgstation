@@ -23,6 +23,20 @@ export interface Settings {
     keepOriginal: boolean;
     /** 自動予約で無料放送だけを対象にするか */
     freeOnly: boolean;
+    /**
+     * 60コマ/秒で出すか。
+     *
+     * 放送は1080i (毎秒60フィールド) なので、フィールドごとに1コマ作れば
+     * 動きは滑らかになる。ただし**コマ数が倍**で、エンコードの時間もサイズも約2倍。
+     * 実測 (地上波1分・AV1): 31.8秒 26MB ↔ 切ったときは 16.9秒 15MB
+     */
+    smoothMotion: boolean;
+    /**
+     * CM検出のしかた。
+     * jls     : ロゴが消えるかどうかまで見る。確かだが録画1本あたり数分かかる
+     * silence : 無音とCM尺だけ。速いが本編の「間」を拾うことがある
+     */
+    cmDetector: 'jls' | 'silence';
     /** ベーシック認証。両方入っているときだけ有効 */
     basicAuthUser: string;
     basicAuthPassword: string;
@@ -48,6 +62,8 @@ export function settings(): Settings {
         encode: flag('encode', true),
         keepOriginal: flag('keepOriginal', false),
         freeOnly: flag('freeOnly', true),
+        smoothMotion: flag('smoothMotion', false),
+        cmDetector: stored('cmDetector') === 'silence' ? 'silence' : 'jls',
         basicAuthUser: stored('basicAuthUser') ?? config.basicAuthUser,
         basicAuthPassword: stored('basicAuthPassword') ?? config.basicAuthPassword,
         basicAuthScope: scope === 'all' ? 'all' : 'files',

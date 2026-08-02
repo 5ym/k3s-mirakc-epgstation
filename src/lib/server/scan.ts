@@ -14,7 +14,7 @@ import { emit } from './events';
  */
 
 export interface ScanState {
-    state: 'idle' | 'running' | 'done' | 'failed';
+    state: 'idle' | 'running' | 'done' | 'failed' | 'canceled';
     /** いま何をしているか。そのまま画面に出す */
     phase: string;
     log: string[];
@@ -49,8 +49,6 @@ let watching = false;
 
 export interface ScanOptions {
     types: ChannelType[];
-    min?: number;
-    max?: number;
 }
 
 async function fetchStatus(): Promise<ScanState> {
@@ -113,6 +111,22 @@ export async function start(options: ScanOptions): Promise<{ started: boolean; m
     emit('scan');
     void watch();
     return result;
+}
+
+/**
+ * 走っているスキャンを中断する。
+ *
+ * 地上波の総当たりは十数分かかる。始めてから「いま録りたい」に気づいたときに、
+ * 待つしかないのは困る。中断しても設定は書き換えない (途中までの結果で
+ * 上書きすると、まだ回っていない局の定義が消える)。
+ */
+export async function stop(): Promise<{ stopped: boolean; message: string }> {
+    try {
+        const res = await fetch(`${config.tunerAgentUrl}/denpa/scan/stop`, { method: 'POST' });
+        return (await res.json()) as { stopped: boolean; message: string };
+    } catch (error) {
+        return { stopped: false, message: `チューナー側に繋がりません: ${error}` };
+    }
 }
 
 /**

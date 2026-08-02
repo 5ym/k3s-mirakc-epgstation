@@ -1,7 +1,13 @@
 /**
- * 設定は全て環境変数から読む。テスト(E2E)では偽の mirakc / ffmpeg を
- * 指すよう差し替えて同じコードパスを通せるようにするため、パスや間隔も含めて
- * ハードコードせず全部ここに集約する。
+ * 動かすときに決めるもの。
+ *
+ * **環境変数にするのは、外から差し替える理由があるものだけ。**
+ * 相手の居場所 (mirakc・ffmpeg・置き場) と、間隔やマージンのように
+ * テストで詰めたいもの。それ以外はここに直に書く。
+ *
+ * 昔は検出のしきい値もサムネイルの大きさも環境変数にしていたが、
+ * 誰も触らないのに「触れる」ぶん、既定値がどこで決まっているのか
+ * 追いにくくなるだけだった。**画面から変えたいものは設定画面** (settings.ts)。
  */
 
 import type { CmMode, VideoCodec } from '../types';
@@ -37,8 +43,8 @@ export const config = {
     tunerAgentUrl: str('TUNER_AGENT_URL', 'http://mirakc:40773').replace(/\/+$/, ''),
 
     dbPath: str('DENPA_DB', '/app/data/denpa.db'),
-    /** DBと並べて置くもの。いまは局ロゴだけ */
-    dataDir: str('DENPA_DATA_DIR', ''),
+    /** DBと並べて置くもの。局ロゴと、jls が作るロゴデータ */
+    dataDir: '',
     /** 生TSの置き場。エンコード後は(keep_original でなければ)消える作業領域 */
     recordedDir: str('RECORDED_DIR', '/app/recorded'),
     /** エンコード済みの置き場。プレイヤーにはここのファイルを配る */
@@ -47,60 +53,40 @@ export const config = {
     ffmpeg: str('FFMPEG', '/usr/local/bin/ffmpeg'),
     encodeConcurrency: num('ENCODE_CONCURRENCY', 1),
     /** 先頭が壊れていて初期化に失敗したときに頭を捨てて再試行する秒数 (enc.js 由来) */
-    encodeRetrySeek: num('ENCODE_RETRY_SEEK', 0.2),
-    /** 録画エンコードの既定コーデック。非力なマシンでは h264 にする */
-    encodeCodec: str('ENCODE_CODEC', 'av1') as VideoCodec,
-    /** h264 のときの x264 設定。ライブと違い実時間の縛りが無いので品質寄り */
-    encodeH264Preset: str('ENCODE_H264_PRESET', 'medium'),
-    encodeH264Crf: num('ENCODE_H264_CRF', 22),
-    /**
-     * ARIB字幕の持ち方。
-     * text   : ASS (文字のまま)。既定。VLC も Kodi も素直に出す
-     * bitmap : 絵に焼いて dvbsub で入れる。再生側のフォントに依存しない代わりに、
-     *          **VLC が落ちる**ことがある
-     */
-    subtitleMode: str('SUBTITLE_MODE', 'text') as 'text' | 'bitmap',
-
-    /** CMの扱いの既定値。実カットは事故ると本編が消えるので既定はチャプターのみ */
-    cmCutDefault: str('CM_CUT_DEFAULT', 'chapter') as CmMode,
-    /**
-     * CM検出の実装。
-     * jls    : join_logo_scp (Amatsukaze と同じ検出核)。既定。ロゴが消えるかどうかまで
-     *          見るので無音だけより格段に確か。一式はイメージに入っている。
-     *          ロゴを当てられなかったときは黙って silence に落ちる
-     * silence: 無音 + CM尺(15秒の倍数)。外部のコマンドを一切使わない
-     */
-    cmDetector: str('CM_DETECTOR', 'jls') as 'silence' | 'jls',
-    /** chapter_exe / logoframe / join_logo_scp の置き場。イメージに入っている */
-    jlsBin: str('JLS_BIN', '/opt/jls/bin').replace(/\/+$/, ''),
-    /** join_logo_scp の判定規則。join_logo_scp_trial に付いてくるもの */
-    jlsRule: str('JLS_RULE', '/opt/jls/JL/JL_標準.txt'),
-    /** logoframe が作るロゴデータ (.lgd) の置き場。空ならデータ置き場の下 */
-    jlsLogoDir: str('JLS_LOGO_DIR', ''),
-    /** ロゴを覚えるときに見るコマ数。増やすほど綺麗に出るが、その分だけ読む */
-    jlsLogoSamples: num('JLS_LOGO_SAMPLES', 600),
-    /** jls が返す Trim はフレーム番号なので、秒に直すためのfps。ffprobeで取れなければこれを使う */
-    cmJlsFallbackFps: num('CM_JLS_FALLBACK_FPS', 30000 / 1001),
-    /** 検出に掛ける上限時間(ms)。超えたら諦めてCM無しとして扱う */
-    cmDetectTimeout: num('CM_DETECT_TIMEOUT', 30 * MIN),
+    encodeRetrySeek: 0.2,
     ffprobe: str('FFPROBE', '/usr/local/bin/ffprobe'),
-    /** 無音とみなす音量。地上波のCM境界は -50dB 程度まで落ちる */
-    cmSilenceNoise: str('CM_SILENCE_NOISE', '-50dB'),
-    /** 無音とみなす最短の長さ(秒)。短くしすぎると曲間や間(ま)を拾う */
-    cmSilenceDuration: num('CM_SILENCE_DURATION', 0.4),
-    /** 「15秒の倍数」判定の許容誤差(秒) */
-    cmTolerance: num('CM_TOLERANCE', 0.6),
-    /** CMブロックとして採用する最短の長さ(秒)。単発15秒は本編のコーナーと紛らわしい */
-    cmMinBlock: num('CM_MIN_BLOCK', 30),
 
-    /**
-     * 番組情報の .nfo を書くか。
-     * denpa の画面には要らないが、Kodi など .nfo を読むプレイヤー向けに残してある
-     */
-    writeNfo: bool('WRITE_NFO', true),
+    /** 録画エンコードの初期コーデック。設定画面で変えられる */
+    encodeCodec: 'av1' as VideoCodec,
+    /** CMの扱いの初期値。実カットは事故ると本編が消えるのでチャプターのみ */
+    cmCutDefault: 'chapter' as CmMode,
+
+    /** chapter_exe / logoframe / join_logo_scp の置き場。イメージに入っている */
+    jlsBin: '/opt/jls/bin',
+    /** join_logo_scp の判定規則。join_logo_scp_trial に付いてくるもの */
+    jlsRule: '/opt/jls/JL/JL_標準.txt',
+    /** logoframe が作るロゴデータ (.lgd) の置き場。データ置き場の下 */
+    jlsLogoDir: '',
+    /** ロゴを覚えるときに見るコマ数。増やすほど綺麗に出るが、その分だけ読む */
+    jlsLogoSamples: 600,
+    /** jls が返す Trim はフレーム番号なので、秒に直すためのfps。ffprobeで取れなければこれを使う */
+    cmJlsFallbackFps: 30000 / 1001,
+    /** 検出に掛ける上限時間(ms)。超えたら諦めてCM無しとして扱う */
+    cmDetectTimeout: 30 * MIN,
+    /** 無音とみなす音量。地上波のCM境界は -50dB 程度まで落ちる */
+    cmSilenceNoise: '-50dB',
+    /** 無音とみなす最短の長さ(秒)。短くしすぎると曲間や間(ま)を拾う */
+    cmSilenceDuration: 0.4,
+    /** 「15秒の倍数」判定の許容誤差(秒) */
+    cmTolerance: 0.6,
+    /** CMブロックとして採用する最短の長さ(秒)。単発15秒は本編のコーナーと紛らわしい */
+    cmMinBlock: 30,
+
+    /** 番組情報の .nfo。Kodi など .nfo を読むプレイヤー向け */
+    writeNfo: true,
     /** サムネイルを切り出す位置(秒)。頭は提供表示やCMのことが多いので少し進める */
-    thumbnailPosition: num('THUMBNAIL_POSITION', 120),
-    thumbnailWidth: num('THUMBNAIL_WIDTH', 480),
+    thumbnailPosition: 120,
+    thumbnailWidth: 480,
 
     /** 録画の前後マージン(ms)。放送時刻のズレを吸収する */
     startMargin: num('START_MARGIN', 10 * SEC),
@@ -115,7 +101,7 @@ export const config = {
      *
      * 0 にすると番組表の時刻で開いて閉じる、前のやり方に戻る。
      */
-    followOnair: bool('FOLLOW_ONAIR', true),
+    followOnair: true,
     /**
      * 延長を見に行く間隔。
      * 普段は mirakc からの知らせ (`/events` の `onair.program-changed`) で拾うので、
@@ -151,16 +137,16 @@ export const config = {
     /** 保存先の実体とDBを突き合わせる間隔。外から消されたものをここで拾う */
     reconcileInterval: num('RECONCILE_INTERVAL', 5 * MIN),
     /** 局ロゴを取りに行く間隔。放送波に流れてくるのを待つので、急いでも取れない */
-    logoSweepInterval: num('LOGO_SWEEP_INTERVAL', 30 * MIN),
+    logoSweepInterval: 30 * MIN,
     /** 終了した番組情報をDBに残しておく期間。番組表の遡り表示にしか使わないので短くてよい */
-    programRetention: num('PROGRAM_RETENTION', 24 * 60 * MIN),
+    programRetention: 24 * 60 * MIN,
     /**
      * 履歴を残しておく期間。終わった予約と、消した録画の行が対象。
      *
      * 「録れたか」を後から確かめるためのものなので、2週間もあれば足りる。
      * 残し続けると一覧が伸びるだけで、探すのがかえって遅くなる。
      */
-    historyRetention: num('HISTORY_RETENTION', 14 * 24 * 60 * MIN),
+    historyRetention: 14 * 24 * 60 * MIN,
 
     /**
      * ベーシック認証。ユーザー名とパスワードの両方が入っているときだけ有効になる。
@@ -172,11 +158,11 @@ export const config = {
     basicAuthUser: str('BASIC_AUTH_USER', 'denpa'),
     basicAuthPassword: str('BASIC_AUTH_PASSWORD', ''),
     /**
-     * 認証をかける範囲。
-     * `files` … 録画の配信と WebDAV だけ (既定)。画面は素通し
+     * 認証をかける範囲の初期値。設定画面で変えられる。
+     * `files` … 録画の配信と WebDAV だけ。画面は素通し
      * `all`   … 画面も含めて全部
      */
-    basicAuthScope: str('BASIC_AUTH_SCOPE', 'files') as 'files' | 'all',
+    basicAuthScope: 'files' as 'files' | 'all',
 
     /** 0 にすると EPG 取得・スケジューラ・エンコーダを起動しない (単体テスト用) */
     autostart: bool('DENPA_AUTOSTART', true),

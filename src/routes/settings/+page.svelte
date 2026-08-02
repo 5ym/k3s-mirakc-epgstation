@@ -93,9 +93,6 @@
                                 H.264 (速い・非力なマシン向け)
                             </option>
                         </select>
-                        {#if data.fromEnv.codec}
-                            <span class="text-base-content/60 text-xs">いまは環境変数の値です</span>
-                        {/if}
                     </label>
                     <label class="flex flex-col gap-1">
                         <span class="text-sm font-medium">CM</span>
@@ -106,9 +103,42 @@
                             <option value="cut" selected={recording.cmCut === 'cut'}>実際に切る</option>
                             <option value="off" selected={recording.cmCut === 'off'}>何もしない</option>
                         </select>
-                        {#if data.fromEnv.cmCut}
-                            <span class="text-base-content/60 text-xs">いまは環境変数の値です</span>
-                        {/if}
+                    </label>
+                    <label class="flex flex-col gap-1">
+                        <span class="text-sm font-medium">CMの探し方</span>
+                        <select
+                            name="cmDetector"
+                            class="select select-bordered w-full"
+                            data-testid="global-detector"
+                        >
+                            <option value="jls" selected={recording.cmDetector === 'jls'}>
+                                ロゴまで見る (確か・遅い)
+                            </option>
+                            <option value="silence" selected={recording.cmDetector === 'silence'}>
+                                無音だけ (速い)
+                            </option>
+                        </select>
+                        <span class="text-base-content/60 text-xs">
+                            ロゴまで見ると録画1本あたり数分かかります
+                        </span>
+                    </label>
+                    <label class="flex flex-col gap-1">
+                        <span class="text-sm font-medium">動きのなめらかさ</span>
+                        <select
+                            name="smoothMotion"
+                            class="select select-bordered w-full"
+                            data-testid="global-motion"
+                        >
+                            <option value="off" selected={!recording.smoothMotion}> 30コマ/秒 (標準) </option>
+                            <option value="on" selected={recording.smoothMotion}>
+                                60コマ/秒 (なめらか)
+                            </option>
+                        </select>
+                        <span class="text-base-content/60 text-xs">
+                            放送は毎秒60フィールドなので、60コマにすると動きが滑らかになります。 そのぶん<strong
+                                >エンコードの時間もファイルも約2倍</strong
+                            >です
+                        </span>
                     </label>
                     <!--
                         エンコードするか・生TSを残すか・無料放送だけにするかも、ここで決める。

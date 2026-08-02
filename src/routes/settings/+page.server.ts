@@ -3,7 +3,7 @@ import { isCmMode } from '$lib/server/cm';
 import { database, now, queryAll, queryOne } from '$lib/server/db';
 import { isVideoCodec } from '$lib/server/encoder';
 import { available as migrateAvailable, source, start, status } from '$lib/server/migrate';
-import { isStored, saveSettings, settings } from '$lib/server/settings';
+import { saveSettings, settings } from '$lib/server/settings';
 import { send, type Webhook } from '$lib/server/webhook';
 import { EVENTS } from '$lib/webhook-events';
 
@@ -49,7 +49,6 @@ export function load() {
             password: current.basicAuthPassword,
             scope: current.basicAuthScope,
         },
-        fromEnv: { codec: !isStored('codec'), cmCut: !isStored('cmCut') },
         webhooks: queryAll<Webhook>('SELECT * FROM webhooks ORDER BY id'),
         events: EVENTS,
         migrate: {
@@ -103,6 +102,8 @@ export const actions = {
         saveSettings({
             codec,
             cmCut,
+            cmDetector: form.get('cmDetector') === 'silence' ? 'silence' : 'jls',
+            smoothMotion: form.get('smoothMotion') === 'on',
             encode: form.get('encode') === 'on',
             keepOriginal: form.get('keepOriginal') === 'on',
             freeOnly: form.get('freeOnly') === 'on',

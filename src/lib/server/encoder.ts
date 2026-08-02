@@ -23,14 +23,30 @@ export function isVideoCodec(value: unknown): value is VideoCodec {
  * AV1 は同じ画質でファイルが小さいがエンコードが遅い。非力なマシンでは h264 を選ぶ。
  * H.264 は 8bit にしておく(10bit を再生できないクライアントが残っているため)。
  */
-function videoArgs(codec: VideoCodec): { filter: string; encoder: string[] } {
+/**
+ * インタレ解除の出し方。
+ *
+ * `bwdif` の既定は `send_field` で、**1フィールドから1コマ作って 59.94p にする**。
+ * 動きは滑らかになるが、コマ数が倍なのでエンコードの時間もサイズも倍になる。
+ * 実測 (地上波1分、AV1 10bit): 31.8秒 26MB ↔ send_frame なら 16.9秒 15MB。
+ *
+ * EPGStation の enc.js は `yadif` (= 29.97p) だったので、そちらに合わせたのが既定。
+ * 滑らかさが要るときだけ設定画面で 60p にする。
+ */
+function deinterlace(smooth: boolean): string {
+    return smooth ? 'bwdif' : 'bwdif=mode=send_frame';
+}
+
+function videoArgs(codec: VideoCodec, smooth: boolean): { filter: string; encoder: string[] } {
     if (codec === 'h264') {
         return {
-            filter: 'bwdif,format=yuv420p',
-            encoder: ['libx264', '-preset', config.encodeH264Preset, '-crf', String(config.encodeH264Crf)],
+            filter: `${deinterlace(smooth)},format=yuv420p`,
+            // 実測で AV1 とほぼ同じ速さ。SVT-AV1 の既定より遅い preset を
+            // 指定すると逆に倍かかるので、どちらも既定のままにしてある
+            encoder: ['libx264', '-preset', 'medium', '-crf', '22'],
         };
     }
-    return { filter: 'bwdif,format=yuv420p10le', encoder: ['libsvtav1'] };
+    return { filter: `${deinterlace(smooth)},format=yuv420p10le`, encoder: ['libsvtav1'] };
 }
 
 const DUAL_MONO = 2;
@@ -67,6 +83,8 @@ export interface EncodeOptions {
     keep?: Range[] | null;
     /** チャプター(CM位置)を書き込む ffmetadata ファイル */
     chaptersFile?: string | null;
+    /** 60コマ/秒で出す。滑らかになる代わりに時間もサイズも約2倍 */
+    smoothMotion?: boolean;
 }
 
 /**
@@ -84,51 +102,63 @@ export function buildArgs(
     codec: VideoCodec = 'av1',
     options: EncodeOptions = {},
 ): string[] {
-    const video = videoArgs(codec);
+    const video = videoArgs(codec, options.smoothMotion === true);
 
     const args = ['-y'];
 
-    // 字幕用
-    args.push('-fix_sub_duration');
     /*
-     * ARIB字幕の持ち方。
+     * ARIB字幕は**2本入れる**。同じ入力を2回開いて、片方は文字のまま (ASS)、
+     * もう片方は絵に焼いて (dvbsub) 持つ。
      *
-     * 既定は **ASS (文字のまま)**。以前はビットマップに焼いて dvbsub で入れていたが、
-     * **VLC が dvbsub の入った mkv で落ちる**。ASS は Matroska が元から想定している形で、
-     * VLC も Kodi も Infuse も素直に出す。位置も色もルビも ASS のタグで残る。
+     * どちらか一方では足りない。
+     * - ASS … Matroska が元から想定している形で、VLC も Kodi も Infuse も素直に出す。
+     *   ただし外字 (DRCS) を絵に置き換えられるのはビットマップのときだけで、
+     *   点滅や背景の箱も ASS のタグでは表せない
+     * - dvbsub … 放送されたとおりに出る (256色。4色までなのは DVD の字幕のほう)。
+     *   ただし **VLC がこれの入った mkv で落ちる**
      *
-     * 引き換えに、出す側のフォントに依存する。libaribcaption が ASS に書き込む
-     * フォント名を並べておき、無ければ端末側の丸ゴシックに落ちるようにする。
-     * `Rounded M+ 1m for ARIB` は libaribcaption 公式推奨で、丸ゴシック+JIS第三水準漢字+
-     * ARIB外字を1本でカバーする (イメージに入れてある)。
+     * そこで ASS を既定のトラックにして VLC を通し、原寸で見たいときのために
+     * 焼いたほうも残す。字幕は数十KBしかないので、入れておいて損が無い。
      *
-     * `ass_single_rect` は「複数の矩形を扱えない再生側」向けの回避策。
-     * VLC がまさにそれで、切っておくと字幕が重なって出る。
+     * `-font` は libaribcaption が ASS に書き込むフォント名。
+     * `Rounded M+ 1m for ARIB` は公式推奨で、丸ゴシック+JIS第三水準漢字+ARIB外字を
+     * 1本でカバーする (イメージに入れてある)。無ければ端末側の丸ゴシックに落ちる。
+     * `ass_single_rect` は「複数の矩形を扱えない再生側」向けの回避策 (VLC がそれ)
      */
-    if (config.subtitleMode === 'bitmap') {
-        args.push('-sub_type', 'bitmap', '-font', SUBTITLE_FONTS);
-    } else {
-        args.push('-sub_type', 'ass', '-ass_single_rect', '1', '-font', SUBTITLE_FONTS);
-    }
-    if (seek !== null) {
-        // 録画開始直後の1秒未満だけ、多重化されたもう一方の映像ストリームのPAT/PMTが確定しておらず
-        // エンコーダの初期化(fps/解像度確定)自体が失敗することがある。
-        // 最初の失敗を検知した後だけ頭を少し捨てて再試行する(常時捨てると本編側が削れるため)
-        args.push('-ss', String(seek));
-    }
-    // チャンネル切り替え直後は前番組のPAT/PMTの残骸が先頭に混ざるため、長めにprobeしてから構成を確定させる
-    args.push('-analyzeduration', '15000000', '-probesize', '30000000');
-    args.push('-i', input);
+    args.push('-fix_sub_duration');
+
+    /** 入力ごとに同じ前置きが要る。デコーダの設定は入力ファイル単位で効く */
+    const openInput = (subtitles: string[]) => {
+        args.push(...subtitles);
+        if (seek !== null) {
+            // 録画開始直後の1秒未満だけ、多重化されたもう一方の映像ストリームのPAT/PMTが確定しておらず
+            // エンコーダの初期化(fps/解像度確定)自体が失敗することがある。
+            // 最初の失敗を検知した後だけ頭を少し捨てて再試行する(常時捨てると本編側が削れるため)
+            args.push('-ss', String(seek));
+        }
+        // チャンネル切り替え直後は前番組のPAT/PMTの残骸が先頭に混ざるため、長めにprobeしてから構成を確定させる
+        args.push('-analyzeduration', '15000000', '-probesize', '30000000');
+        args.push('-i', input);
+    };
+
+    openInput(['-sub_type', 'ass', '-ass_single_rect', '1', '-font', SUBTITLE_FONTS]);
+    openInput(['-sub_type', 'bitmap', '-font', SUBTITLE_FONTS]);
     if (options.chaptersFile != null) {
         // CM位置をチャプターとして持たせる。ファイルは切らないので誤検出しても本編は失われない
-        args.push('-i', options.chaptersFile, '-map_chapters', '1');
+        args.push('-i', options.chaptersFile, '-map_chapters', '2');
     }
     // mapで解決できない(型が不明な)ストリームは黙ってスキップする。エンコード自体を止めないため
     args.push('-ignore_unknown');
-    // 字幕ストリーム設定(?は字幕ストリームが無い録画でもエンコードが失敗しないようにするため)
-    args.push('-map', '0:s?', '-c:s', config.subtitleMode === 'bitmap' ? 'dvbsub' : 'ass');
-    // インタレ解除(bwdifはyadifよりコーミング残りが少ない。modeは既定のsend_fieldのままにし、
-    // フィールドごとに1フレーム生成して59.94p出力にする)
+    /*
+     * 字幕。?は字幕ストリームが無い録画でもエンコードが失敗しないようにするため。
+     * 開いている口は同じ番組なので、字幕は先頭の1本だけ拾う (文字スーパーは追わない)。
+     * 既定は ASS のほう。焼いたほうを既定にすると VLC がそれを開いて落ちる
+     */
+    args.push('-map', '0:s:0?', '-c:s:0', 'ass', '-metadata:s:s:0', 'title=字幕');
+    args.push('-map', '1:s:0?', '-c:s:1', 'dvbsub', '-metadata:s:s:1', 'title=字幕 (放送そのまま)');
+    args.push('-disposition:s:0', 'default', '-disposition:s:1', '0');
+    // インタレ解除 (bwdif は yadif よりコーミング残りが少ない)。
+    // なめらかさの指定でコマ数が変わる (videoArgs)
     args.push('-vf', video.filter);
     // ビデオストリーム設定(?はラジオ相当の映像なし録画でも失敗しないようにするため)
     args.push('-map', '0:v?', '-c:v', ...video.encoder);
@@ -179,7 +209,7 @@ export function buildArgs(
  * 残す区間を1つずつ `-c copy` で切り出し、concat デマクサで繋ぐ。
  * 再エンコードしないので速く、字幕もデータ放送も落ちない。
  * キーフレーム単位の切り出しになるが、日本の地上波の MPEG-2 は GOP が
- * 0.5 秒程度なので CM検出の許容誤差 (CM_TOLERANCE) に収まる。
+ * 0.5 秒程度なので CM検出の許容誤差 (config.cmTolerance) に収まる。
  */
 export function buildSegmentArgs(input: string, output: string, range: Range): string[] {
     return [
@@ -387,10 +417,10 @@ async function runFfmpeg(
     // ffmpeg の stderr から拾えるとは限らないので、測った値を先に入れておく
     let durationSec = measured.duration;
     /*
-     * 出力フレーム数の見積もり。インタレ解除 (bwdif) はフィールドごとに1枚出すので、
-     * 出てくるフレームは入力の倍になる
+     * 出力フレーム数の見積もり。60コマ/秒で出すときは、インタレ解除が
+     * フィールドごとに1枚作るので入力の倍になる
      */
-    const totalFrames = measured.duration * measured.fps * 2;
+    const totalFrames = measured.duration * measured.fps * (options.smoothMotion === true ? 2 : 1);
     // 出力し終えた時点の位置。CMを切ると入力より短くなるので、出来上がりの長さはこちら
     let outTimeUs = NaN;
     let percent = 0;
@@ -683,7 +713,11 @@ async function runJob(jobId: number): Promise<void> {
         }
     }
 
-    const encodeOptions = await prepareCm(jobId, recording, sourceTs, signal);
+    const encodeOptions = {
+        ...(await prepareCm(jobId, recording, sourceTs, signal)),
+        // 60コマ/秒で出すかどうか。設定画面で決める (時間もサイズも約2倍)
+        smoothMotion: settings().smoothMotion,
+    };
     if (canceled.has(jobId)) return finishCanceled(jobId, recording, decoded);
 
     // CMを実際に切る場合は、エンコードの前にTSの段階で切っておく。

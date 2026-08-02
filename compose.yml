@@ -27,8 +27,6 @@ services:
             EPG_SYNC_INTERVAL: '60000'
             SCHEDULER_TICK: '2000'
             ENCODE_CONCURRENCY: '2'
-            CM_CUT_DEFAULT: chapter
-            CM_DETECTOR: silence
         volumes:
             - .:/app
             - app-node-modules:/app/node_modules

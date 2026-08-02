@@ -53,9 +53,7 @@ services:
             DENPA_DB: /app/data/denpa.db
             RECORDED_DIR: /app/recorded
             LIBRARY_DIR: /library
-            ENCODE_CODEC: av1
             ENCODE_CONCURRENCY: '2'
-            CM_CUT_DEFAULT: chapter
         volumes:
             - denpa-data:/app/data
             - denpa-recorded:/app/recorded

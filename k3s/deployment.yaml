@@ -96,10 +96,10 @@ spec:
             - name: TZ
               value: Asia/Tokyo
             # SvelteKit の CSRF 判定は Origin ヘッダと自分の origin を突き合わせる。
-            # adapter-node は ORIGIN も PROTOCOL_HEADER も無いと https と決め打つので、
-            # 平文で開いている dp.home.arpa からの POST が全部 403 になっていた
+            # adapter-node は ORIGIN も PROTOCOL_HEADER も無いと決め打ちになり、
+            # 食い違った側からの POST が全部 403 になる
             # (画面上は「押しても何も起きない」に見える)。
-            # ORIGIN は1つしか書けず dp.doany.io と両立しないので、
+            # 名前は2つある (dp.doany.io と dp.l.doany.io) ので ORIGIN では書けず、
             # Traefik が付ける x-forwarded-proto をリクエストごとに見る。
             # HOST_HEADER は既定の host のままにする。Traefik は元の Host を渡すし、
             # kubelet のヘルスチェックは x-forwarded-host を付けないため
@@ -118,16 +118,9 @@ spec:
               value: /app/recorded
             - name: LIBRARY_DIR
               value: /library
-            # CMは既定ではチャプターを打つだけ。実カットは番組ごとにUIで選ぶ
-            - name: CM_CUT_DEFAULT
-              value: chapter
-            # ロゴまで見て判定する。無音だけより確かだが、1本目は
-            # その局のロゴを覚えるぶん時間がかかる
-            - name: CM_DETECTOR
-              value: jls
-            # 録画のコーデック。非力なノードでは h264 にする
-            - name: ENCODE_CODEC
-              value: av1
+            # コーデック・CMの扱い・CMの探し方・動きのなめらかさは設定画面で決める。
+            # ここに置いていた頃は、画面で変えたのに env が勝つのか負けるのかが
+            # 分かりにくかった
             - name: ENCODE_CONCURRENCY
               value: '2'
           ports:

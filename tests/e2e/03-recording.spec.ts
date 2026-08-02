@@ -57,7 +57,7 @@ test.describe('録画とエンコード', () => {
 
         // CM検出が走り、既定のチャプター付与として記録されていること。
         // どこを検出したかは一覧に出さず、行を押した詳細で見せる (長くて場所を食うため)
-        await recording.getByTestId('row-body').click();
+        await recording.getByTestId('detail-button').click();
         await expect(page.getByTestId('detail-cm')).toContainText('5:00-6:00');
         await page.getByTestId('detail-close').click();
 
@@ -78,11 +78,12 @@ test.describe('録画とエンコード', () => {
         expect(nfo).toContain('<studio>BS11イレブン</studio>');
         expect(nfo).toContain('<aired>');
 
-        // 外部プレイヤーに渡す再生リンクが出ていること
+        // 外部プレイヤーに渡す再生リンクが出ていること。
+        // 行そのものを押しても同じところへ行く (観るために開く一覧なので)
         await expect(recording.getByTestId('play-link').first()).toBeVisible();
 
         // 行を押すと番組表と同じ詳細が出る
-        await recording.getByTestId('row-body').click();
+        await recording.getByTestId('detail-button').click();
         const detail = page.getByTestId('program-detail');
         await expect(detail).toBeVisible();
         await expect(detail.getByTestId('detail-video')).toBeVisible();
@@ -159,7 +160,7 @@ test.describe('CMの実カット', () => {
 
         await goto(page, '/');
         const recording = page.locator(recordingRow);
-        await recording.getByTestId('row-body').click();
+        await recording.getByTestId('detail-button').click();
         await expect(page.getByTestId('detail-cm')).toContainText('5:00-6:00');
         await page.getByTestId('detail-close').click();
 

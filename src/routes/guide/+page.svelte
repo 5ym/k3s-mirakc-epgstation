@@ -108,11 +108,26 @@
      *
      * 押してから読み込むと、24時間ぶんの番組を引き直して組み直す間だけ止まって見えた。
      * body の `data-sveltekit-preload-data="hover"` は指を乗せてからなので、
-     * 狙って押すと間に合わない。表を出した時点で両隣を取っておけば、押した瞬間に出る
+     * 狙って押すと間に合わない。表を出した時点で両隣を取っておけば、押した瞬間に出る。
+     *
+     * **開くのが終わってから**取りに行く。すぐ投げていた頃は、いま見たい番組表と
+     * 前後2日ぶんを同時に取ることになり、初めの表示そのものが遅くなっていた。
+     * requestIdleCallback は Safari に無いので、無ければ少し置いてから
      */
     $effect(() => {
-        void preloadData(prevHref);
-        void preloadData(nextHref);
+        const soon = prevHref;
+        const later = nextHref;
+        const fetchBoth = () => {
+            void preloadData(soon);
+            void preloadData(later);
+        };
+        // requestIdleCallback は Safari に無い
+        if (typeof requestIdleCallback !== 'function') {
+            const timer = setTimeout(fetchBoth, 500);
+            return () => clearTimeout(timer);
+        }
+        const handle = requestIdleCallback(fetchBoth, { timeout: 3000 });
+        return () => cancelIdleCallback(handle);
     });
 
     /** 番組表からそのまま再生できるようにする。宛先の決め方は録画一覧と同じ */

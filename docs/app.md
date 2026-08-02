@@ -68,59 +68,47 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 
 ## 環境変数
 
+**外から差し替える理由があるものだけ。** 相手の居場所と、テストで詰めたい間隔だけです。
+検出のしきい値やサムネイルの大きさまで環境変数にしていた頃は、誰も触らないのに
+「触れる」ぶん既定値の出どころが追いにくくなるだけでした
+(`src/lib/server/config.ts` に直に書いてあります)。
+
+**画面から変えたいものは設定画面** (`src/lib/server/settings.ts`)。コーデック・CMの扱い・
+CMの探し方・動きのなめらかさ・エンコードするか・生TSを残すか・無料放送だけか・
+ベーシック認証がここです。
+
 | 変数 | 既定値 | 説明 |
 | --- | --- | --- |
 | `MIRAKC_URL` | `http://mirakc:40772` | mirakc |
 | `TUNER_AGENT_URL` | `http://mirakc:40773` | チューナー側のエージェント (スキャン・カード・解除) |
-| `DENPA_DATA_DIR` | DBの隣 | 局ロゴの置き場 |
-| `LOGO_SWEEP_INTERVAL` | `1800000` | ロゴを持っていない局を取りに行く間隔(ms) |
-| `RECONCILE_INTERVAL` | `300000` | 保存先の実体とDBを突き合わせる間隔(ms) |
-| `WRITE_NFO` | `1` | `.nfo` を書くか (Kodi など向け) |
-| `THUMBNAIL_POSITION` / `THUMBNAIL_WIDTH` | `120` / `480` | サムネイルの切り出し位置(秒)と幅 |
-| `DENPA_DB` | `/app/data/denpa.db` | SQLite の置き場 |
+| `DENPA_DB` | `/app/data/denpa.db` | SQLite の置き場。局ロゴと `.lgd` もこの隣 |
 | `RECORDED_DIR` | `/app/recorded` | 生TSの作業領域 |
 | `LIBRARY_DIR` | `/library` | エンコード済みの置き場。ここから配る |
-| `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` | `denpa` / (空) | パスワードが入っているときだけ有効。ユーザー名は画面からは変えられない |
-| `BASIC_AUTH_SCOPE` | `files` | `files` … 配信と WebDAV だけ / `all` … 画面も含めて全部 |
 | `FFMPEG` / `FFPROBE` | `/usr/local/bin/...` | 開発時は偽物に差し替える |
 | `ENCODE_CONCURRENCY` | `1` | 録画エンコードの同時実行数。ライブ配信の本数とは無関係 |
-| `ENCODE_CODEC` | `av1` | 録画の既定コーデック (`av1` / `h264`) |
-| `ENCODE_H264_PRESET` / `ENCODE_H264_CRF` | `medium` / `22` | H.264 のときの品質 |
-| `ENCODE_RETRY_SEEK` | `0.2` | 頭が壊れていて失敗したとき、捨てて再試行する秒数 |
-| `SUBTITLE_MODE` | `text` | `text` … ASS (文字のまま) / `bitmap` … 絵に焼いて dvbsub。**bitmap は VLC が落ちる** |
+| `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` | `denpa` / (空) | 初期値。パスワードが入っているときだけ有効 |
+| `BASIC_AUTH_SCOPE` | `files` | 初期値。`files` … 配信と WebDAV だけ / `all` … 画面も含めて全部 |
 | `START_MARGIN` / `END_MARGIN` | `10000` / `15000` | 録画の前後マージン(ms)。放送に追従しているときは mirakc 側が切れ目を決める |
-| `FOLLOW_ONAIR` | `1` | 放送の延長に追従する。`0` で番組表の時刻どおりに開いて閉じる |
-| `ONAIR_POLL_INTERVAL` | `300000` | 終了時刻を見に行く間隔(ms)。普段は mirakc の知らせで拾うので**保険** |
-| `ONAIR_FALLBACK_WAIT` | `90000` | 番組単位で開いても何も来ないとき、サービス単位に落とすまで(ms) |
-| `EPG_SYNC_INTERVAL` | `600000` | EPG取得の間隔(ms)。こちらも保険 (合図は mirakc の `/events`) |
-| `EPG_EVENT_DEBOUNCE` | `10000` | 知らせが来てから取り直すまで(ms)。局の数だけ連続で飛んでくるため |
-| `SHUTDOWN_WAIT` | `21600000` | 止められたとき、録画が終わるまで待つ上限(ms)。`0` で待たない |
 | `SCHEDULER_TICK` | `5000` | 予約チェックの間隔(ms) |
-| `CM_CUT_DEFAULT` | `chapter` | `off` / `chapter` / `cut` の**初期値**。設定画面で変えられる |
-| `CM_DETECTOR` | `jls` | `jls` / `silence`。jls 一式はイメージに入っている (`/opt/jls`) |
-| `CM_SILENCE_NOISE` | `-50dB` | 無音とみなす音量 |
-| `CM_SILENCE_DURATION` | `0.4` | 無音とみなす最短の長さ(秒) |
-| `CM_TOLERANCE` | `0.6` | 「15秒の倍数」判定の許容誤差(秒) |
-| `CM_MIN_BLOCK` | `30` | CMブロックとして採用する最短の長さ(秒) |
-| `JLS_BIN` | `/opt/jls/bin` | `chapter_exe` / `logoframe` / `join_logo_scp` の置き場 |
-| `JLS_RULE` | `/opt/jls/JL/JL_標準.txt` | join_logo_scp の判定規則 |
-| `JLS_LOGO_DIR` | `/app/data/logos/jls` | logoframe が作るロゴデータ (`.lgd`) の置き場 |
-| `JLS_LOGO_SAMPLES` | `600` | ロゴを作るときに見るコマ数 |
-| `CM_JLS_FALLBACK_FPS` | `29.97` | fps を取れなかったときに使う値 |
-| `CM_DETECT_TIMEOUT` | `1800000` | CM検出を打ち切るまで(ms) |
-| `PROGRAM_RETENTION` | `86400000` | 終わった番組をDBに残す期間(ms) |
-| `HISTORY_RETENTION` | `1209600000` | 終わった予約・削除済み録画・エンコードの記録を残す期間(ms。既定は2週間) |
+| `RECONCILE_INTERVAL` | `300000` | 保存先の実体とDBを突き合わせる間隔(ms) |
+| `EPG_SYNC_INTERVAL` | `600000` | EPG取得の間隔(ms)。保険 (合図は mirakc の `/events`) |
+| `EPG_EVENT_DEBOUNCE` | `10000` | 知らせが来てから取り直すまで(ms)。局の数だけ連続で飛んでくるため |
+| `ONAIR_POLL_INTERVAL` | `300000` | 放送の延長を見に行く間隔(ms)。これも保険 |
+| `ONAIR_FALLBACK_WAIT` | `90000` | 番組単位で開いて何も来ないとき、サービス単位に切り替えるまで(ms) |
+| `SHUTDOWN_WAIT` | `21600000` | 止められたとき、録画が終わるまで待つ上限(ms)。`0` で待たない |
+| `LIVE_IDLE_TIMEOUT` | — | 見ていない中継を畳むまで(ms) |
+| `EPGSTATION_*` | — | 引き継ぎ元の DB と録画置き場 |
 | `DENPA_AUTOSTART` | `1` | `0` で常駐処理を止める |
 
 ## 画面
 
 | 画面 | 役割 |
 | --- | --- |
-| `/` | **予約と録画**を2ペインで並べる。予約の取消、再生リンク・再エンコード・削除。行の形はどの画面幅でも同じで、狭いところでは押すものが下へ回り込む |
+| `/` | **予約と録画**を2ペインで並べる。**録画の行を押すと再生**、中身は「詳細」から。行の形はどの画面幅でも同じで、狭いところでは押すものが下へ回り込む |
 | `/guide` | 番組表(グリッド)と番組検索。マスはジャンルごとに色を変える。詳細から予約・取消と、録れているものはそのまま再生できる |
 | `/rules` | 自動予約ルールの一覧と作成 |
-| `/tuners` | チャンネルスキャン、チューナーの空き、取れているチャンネル (mirakc 側の局と番組表の集まり具合つき)、mirakc とカードリーダーの状態 |
-| `/settings` | 録画のしかた(コーデック/CM/エンコードするか/生TSを残すか/無料放送だけか)、通知先(Webhook)、ベーシック認証(パスワードの表示と作り直し)、EPGStation からの引き継ぎ |
+| `/tuners` | チャンネルスキャン (途中で中断できる)、チューナーの空き、取れているチャンネル (mirakc 側の局と番組表の集まり具合つき)、mirakc とカードリーダーの状態 |
+| `/settings` | 録画のしかた(コーデック/CMの扱い/CMの探し方/動きのなめらかさ/エンコードするか/生TSを残すか/無料放送だけか)、通知先(Webhook)、ベーシック認証(パスワードの表示と作り直し)、EPGStation からの引き継ぎ |
 | `/api/recordings/<id>/file` | 録画ファイル。Range 対応 |
 | `/api/recordings/<id>/frame?at=<秒>` | 録画から1コマ (JPEG)。ロゴの位置を指定するときに使う |
 | `/dav` | WebDAV (PROPFIND / GET / HEAD)。Kodi 用。書き込みは受けない |

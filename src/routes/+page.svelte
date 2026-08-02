@@ -139,19 +139,39 @@
         disarm = setTimeout(() => (armed = null), 5000);
     }
 
-    /** 行のどこを押しても開く。ただしボタンやリンクを押したときは邪魔しない */
-    function rowClick(
-        event: MouseEvent | KeyboardEvent,
-        programId: number | null,
-        row: Row,
-        error: string | null = null,
-        cm: string | null = null,
-        logo: typeof detailLogo = null,
-        cmNote: string | null = null,
-    ): void {
+    /**
+     * 行のどこを押しても、その行でいちばんやりたいことをする。
+     * ボタンやリンクを押したときは邪魔しない。
+     *
+     * 録画なら**再生**。一覧を開くのは観るためなので、そこを1回で通す。
+     * 中身を読みたいときは行の中の「詳細」から。
+     * 予約は再生するものが無いので、そのまま詳細を出す。
+     */
+    function rowClick(event: MouseEvent | KeyboardEvent, play: string | null, open: () => void): void {
         if (event instanceof KeyboardEvent && event.key !== 'Enter') return;
         if ((event.target as HTMLElement).closest('a, button, input, label')) return;
-        void openDetail(programId, row, error, cm, logo, cmNote);
+        if (play !== null) location.href = play;
+        else open();
+    }
+
+    /** その録画をいま再生できるなら、プレイヤーに渡すURL */
+    function playHref(rec: (typeof data.recordings)[number]): string | null {
+        if (!playable(rec)) return null;
+        return playLinks(fileUrl(rec.id), rec.name, platform, data.credentials)[0]?.href ?? null;
+    }
+
+    /**
+     * 観られる録画かどうか。
+     *
+     * **失敗したものは観られない。** 途中まで書けたファイルが残っていることは
+     * あるが、頭からスクランブルが掛かっていたり中身が空だったりで、押しても
+     * プレイヤーが黙って閉じるだけだった。録り直しの口も同じ理由で出さない
+     * (元になる生TSが使えないので、やり直しても同じところで失敗する)
+     */
+    function playable(rec: (typeof data.recordings)[number]): boolean {
+        return (
+            rec.deleted_at === null && rec.state !== 'failed' && (rec.library_path ?? rec.ts_path) !== null
+        );
     }
 
     /** ロゴを当てられなかった録画だけ、詳細に位置の指定を出す */
@@ -163,6 +183,19 @@
             serviceName: rec.service_name,
             area: rec.logo_area,
         };
+    }
+
+    /** 録画の詳細。失敗の理由は録画そのものとエンコードの両方が出るようにする */
+    function openRecording(rec: (typeof data.recordings)[number]): void {
+        /*
+         * 録画が失敗した理由 (recordings.error) と、エンコードが失敗した理由
+         * (encode_jobs.error) は別物。以前は後者しか渡していなかったので、
+         * 録画そのものが失敗した行は詳細を開いても何も出なかった
+         */
+        const reason = [rec.state === 'failed' ? rec.error : null, rec.encode_error]
+            .filter(Boolean)
+            .join('\n\n');
+        void openDetail(rec.program_id, rec, reason || null, rec.cm_ranges, logoOf(rec), rec.cm_note);
     }
 </script>
 
@@ -252,8 +285,9 @@
                             class="hover:bg-base-200/60 relative cursor-pointer p-3"
                             role="button"
                             tabindex="0"
-                            onclick={(event) => rowClick(event, res.program_id, res)}
-                            onkeydown={(event) => rowClick(event, res.program_id, res)}
+                            onclick={(event) => rowClick(event, null, () => openDetail(res.program_id, res))}
+                            onkeydown={(event) =>
+                                rowClick(event, null, () => openDetail(res.program_id, res))}
                         >
                             <div class="flex flex-wrap items-start gap-x-3 gap-y-2">
                                 <div class="min-w-0 flex-1 basis-56" data-testid="row-body">
@@ -362,10 +396,7 @@
                         -->
                         {@const failing = rec.error && (rec.state === 'failed' || rec.deleted_at !== null)}
                         {@const canReencode =
-                            rec.deleted_at === null &&
-                            rec.job_id === null &&
-                            encodeSource(rec) !== null &&
-                            rec.state !== 'recording'}
+                            playable(rec) && rec.job_id === null && encodeSource(rec) !== null}
                         <!-- 行を押すと番組表と同じ詳細が出る -->
                         <div
                             data-testid="recording-row"
@@ -376,26 +407,8 @@
                             class="hover:bg-base-200/60 relative cursor-pointer p-3"
                             role="button"
                             tabindex="0"
-                            onclick={(event) =>
-                                rowClick(
-                                    event,
-                                    rec.program_id,
-                                    rec,
-                                    rec.encode_error,
-                                    rec.cm_ranges,
-                                    logoOf(rec),
-                                    rec.cm_note,
-                                )}
-                            onkeydown={(event) =>
-                                rowClick(
-                                    event,
-                                    rec.program_id,
-                                    rec,
-                                    rec.encode_error,
-                                    rec.cm_ranges,
-                                    logoOf(rec),
-                                    rec.cm_note,
-                                )}
+                            onclick={(event) => rowClick(event, playHref(rec), () => openRecording(rec))}
+                            onkeydown={(event) => rowClick(event, playHref(rec), () => openRecording(rec))}
                         >
                             <div class="flex flex-wrap items-start gap-x-3 gap-y-2">
                                 <div class="min-w-0 flex-1 basis-56" data-testid="row-body">
@@ -485,14 +498,27 @@
                                     {/if}
                                 </div>
 
-                                {#if rec.deleted_at === null}
-                                    <div class="flex shrink-0 flex-wrap items-center gap-2">
+                                <div class="flex shrink-0 flex-wrap items-center gap-2">
+                                    <!--
+                                        中身を読むのはこちら。行を押すと再生に行くので、
+                                        番組の説明やCMの位置を見たいときの入口を別に置く
+                                    -->
+                                    <button
+                                        type="button"
+                                        class="btn btn-ghost"
+                                        onclick={() => openRecording(rec)}
+                                        data-testid="detail-button"
+                                    >
+                                        詳細
+                                    </button>
+                                    {#if rec.deleted_at === null}
                                         <!--
                                             まだエンコードしていないものや、引き継いだ未エンコードの
                                             録画は生TSしか無い。配信は library_path ?? ts_path を返すので、
-                                            どちらかがあれば開ける
+                                            どちらかがあれば開ける。
+                                            失敗した録画には出さない (playable)
                                         -->
-                                        {#if (rec.library_path ?? rec.ts_path) !== null}
+                                        {#if playable(rec)}
                                             <!--
                                                 ブラウザは MPEG-2 も AV1+Opus の mkv も素直には再生できない。
                                                 端末に入っているプレイヤーに URL を渡して開かせる
@@ -553,8 +579,8 @@
                                                 {/if}
                                             </form>
                                         {/if}
-                                    </div>
-                                {/if}
+                                    {/if}
+                                </div>
                             </div>
 
                             <!--

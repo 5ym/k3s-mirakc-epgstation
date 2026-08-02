@@ -15,11 +15,17 @@ function argValue(args: string[], key: string): string | undefined {
 }
 
 describe('録画エンコードの引数', () => {
-    test('既定は AV1 10bit', () => {
+    test('既定は AV1 10bit で、コマ数は増やさない', () => {
         const args = buildArgs('/in.m2ts', '/out.mkv', 1, null);
         expect(args).toContain('libsvtav1');
-        expect(argValue(args, '-vf')).toBe('bwdif,format=yuv420p10le');
+        // send_field だとコマ数が倍になり、時間もサイズも約2倍になる
+        expect(argValue(args, '-vf')).toBe('bwdif=mode=send_frame,format=yuv420p10le');
         expect(args.at(-1)).toBe('/out.mkv');
+    });
+
+    test('なめらかにすると1フィールドごとに1コマ出す', () => {
+        const args = buildArgs('/in.m2ts', '/out.mkv', 1, null, 'av1', { smoothMotion: true });
+        expect(argValue(args, '-vf')).toBe('bwdif,format=yuv420p10le');
     });
 
     test('入れ物は拡張子ではなく引数で決める', () => {
@@ -33,16 +39,20 @@ describe('録画エンコードの引数', () => {
         const args = buildArgs('/in.m2ts', '/out.mkv', 1, null, 'h264');
         expect(args).toContain('libx264');
         expect(args).not.toContain('libsvtav1');
-        expect(argValue(args, '-vf')).toBe('bwdif,format=yuv420p');
+        expect(argValue(args, '-vf')).toBe('bwdif=mode=send_frame,format=yuv420p');
         expect(args).toContain('-preset');
     });
 
-    test('字幕と音声はコーデックによらず同じ', () => {
+    test('字幕は文字のままと焼いたものを2本入れる', () => {
         for (const codec of ['av1', 'h264'] as const) {
             const args = buildArgs('/in.m2ts', '/out.mkv', 1, null, codec);
-            // 字幕は文字のまま ASS で持つ。dvbsub (絵に焼く) は VLC が落ちる
-            expect(argValue(args, '-sub_type')).toBe('ass');
-            expect(argValue(args, '-c:s')).toBe('ass');
+            // 同じ入力を2回開き、片方は ASS、もう片方はビットマップで読む
+            expect(args.filter((a) => a === '/in.m2ts')).toHaveLength(2);
+            expect(argValue(args, '-c:s:0')).toBe('ass');
+            expect(argValue(args, '-c:s:1')).toBe('dvbsub');
+            // 既定は ASS。焼いたほうを既定にすると VLC がそれを開いて落ちる
+            expect(argValue(args, '-disposition:s:0')).toBe('default');
+            expect(argValue(args, '-disposition:s:1')).toBe('0');
             expect(argValue(args, '-c:a')).toBe('libopus');
         }
     });
@@ -64,13 +74,13 @@ describe('録画エンコードの引数', () => {
             keep: [{ start: 0, end: 300 }],
         });
         expect(args).not.toContain('-sn');
-        expect(argValue(args, '-c:s')).toBe('ass');
+        expect(argValue(args, '-c:s:0')).toBe('ass');
     });
 
-    test('チャプターを渡すと2つ目の入力として読み込む', () => {
+    test('チャプターは字幕2本の後ろ、3つ目の入力として読み込む', () => {
         const args = buildArgs('/in.m2ts', '/out.mkv', 1, null, 'av1', { chaptersFile: '/tmp/c.txt' });
-        expect(args).toContain('-map_chapters');
         expect(args).toContain('/tmp/c.txt');
+        expect(argValue(args, '-map_chapters')).toBe('2');
     });
 });
 

@@ -140,7 +140,11 @@ export interface ScanResult {
  * 失敗の理由は分けて返す。総当たりなので「何も出なかった」と「電波は来ているが
  * 読めなかった」は原因がまるで違い、まとめてしまうと直しようがない。
  */
-export async function readServices(command: string, timeout = TUNE_TIMEOUT): Promise<ScanResult> {
+export async function readServices(
+    command: string,
+    timeout = TUNE_TIMEOUT,
+    abort?: AbortSignal,
+): Promise<ScanResult> {
     let child: ChildProcess;
     try {
         child = spawn('sh', ['-c', command], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -162,6 +166,7 @@ export async function readServices(command: string, timeout = TUNE_TIMEOUT): Pro
         const timer = setTimeout(resolve, timeout);
         const finish = () => {
             clearTimeout(timer);
+            abort?.removeEventListener('abort', finish);
             resolve();
         };
         child.stdout?.on('data', (chunk: Buffer) => {
@@ -171,6 +176,8 @@ export async function readServices(command: string, timeout = TUNE_TIMEOUT): Pro
         // 電波が無いと recisdb はすぐ落ちる。閉じたら待たずに次へ
         child.once('close', finish);
         child.once('error', finish);
+        // 中断されたら、選局の途中でも待つのをやめる (下で確実に殺す)
+        abort?.addEventListener('abort', finish, { once: true });
     });
 
     await stop(child);
@@ -198,6 +205,8 @@ export interface Progress {
 /** チューナーの台数ぶん並べて総当たりする */
 export class Scanner {
     private readonly tuners: Tuner[];
+    /** 中断の合図。押されたら選局を殺し、残りのチャンネルには行かない */
+    private readonly aborter = new AbortController();
     private readonly found = new Map<string, ChannelEntry>();
     /** 電波が来た(TSが1バイトでも出た)チャンネル数。種別ごとに数え直す */
     private tuned = 0;
@@ -211,9 +220,24 @@ export class Scanner {
         this.tuners = tuners.filter((tuner) => !tuner.disabled);
     }
 
+    /**
+     * 中断する。
+     *
+     * 地上波の総当たりは十数分かかる。始めてから「いま録りたい」に気づいたときに
+     * 待つしかないのは困るので、途中で降りられるようにしてある
+     */
+    stop(): void {
+        this.aborter.abort();
+    }
+
+    get aborted(): boolean {
+        return this.aborter.signal.aborted;
+    }
+
     /** targets は [種別, チャンネル一覧] の並び。見つかった channels 定義を返す */
     async run(targets: [ChannelType, string[]][]): Promise<ChannelEntry[]> {
         for (const [type, channels] of targets) {
+            if (this.aborted) break;
             const usable = this.tuners.filter((tuner) => tuner.types.includes(type));
             if (usable.length === 0) {
                 this.onProgress({
@@ -237,7 +261,7 @@ export class Scanner {
              */
             const retry = this.retry;
             this.retry = [];
-            if (retry.length > 0) {
+            if (retry.length > 0 && !this.aborted) {
                 this.onProgress({ line: `${type}: ${retry.length}ch をもう一度試します` });
                 await Promise.all(usable.map((tuner) => this.work(tuner, type, retry, false)));
             }
@@ -267,10 +291,16 @@ export class Scanner {
     /** first が false のときは数え直さない (同じチャンネルを2回数えないため) */
     private async work(tuner: Tuner, type: ChannelType, pending: string[], first = true): Promise<void> {
         for (;;) {
+            if (this.aborted) return;
             const channel = pending.shift();
             if (channel === undefined) return;
 
-            const { services, error, signal } = await readServices(render(tuner.command, channel, type));
+            const { services, error, signal } = await readServices(
+                render(tuner.command, channel, type),
+                undefined,
+                this.aborter.signal,
+            );
+            if (this.aborted) return;
             const counts = first ? { scanned: 1 } : {};
             if (first && signal) this.tuned++;
 

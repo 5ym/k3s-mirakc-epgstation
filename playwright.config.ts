@@ -5,11 +5,14 @@ import { defineConfig } from '@playwright/test';
  * ワーカーの数。
  *
  * 1つ増えるごとに denpa と偽 mirakc と偽通知先が1式ずつ増える (tests/stack.ts)。
- * 待っている時間 (偽の放送が終わるまで) が大半なので、CPU の数ぴったりにする
- * 必要はない。実測では12コアで **4 → 6 にすると 1分43秒が59秒**になり、
- * 8 まで増やすと取り合いで落ちるものが出た。半分を上限6で頭打ちにする
+ * 待っている時間 (偽の放送が終わるまで) が大半なので、CPU を使い切るわけではない。
+ * 実測では12コアで **4 → 6 にすると 1分43秒が59秒**になり、8 まで増やすと
+ * 取り合いで落ちるものが出た。上限6で頭打ちにする。
+ *
+ * **コア数の半分にしていた頃は CI (4コア) で2つしか立たず、ここだけ速くならなかった。**
+ * 待ちが大半なので、コア数ぶん立てて構わない
  */
-const WORKERS = Math.max(2, Math.min(6, Math.ceil(cpus().length / 2)));
+const WORKERS = Math.max(2, Math.min(6, cpus().length));
 
 export default defineConfig({
     testDir: 'tests/e2e',
@@ -24,8 +27,14 @@ export default defineConfig({
     workers: WORKERS,
     timeout: 120_000,
     expect: { timeout: 30_000 },
-    // ワーカーを増やすと、ごく稀にブラウザ側が落ちる。CI で1回だけやり直す
-    retries: process.env.CI ? 1 : 0,
+    /*
+     * 1回だけやり直す。
+     *
+     * ワーカーを増やしたぶん、ごく稀にブラウザ側が落ちたり最初の1回が
+     * 時間切れになったりする。中身ではなく混み具合の問題なので、
+     * ここで赤くしても直すものが無い
+     */
+    retries: 1,
     reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
     // 消してから、アプリを1度だけ組む。ワーカーはその出力を共有する
     globalSetup: './tests/global-setup.ts',

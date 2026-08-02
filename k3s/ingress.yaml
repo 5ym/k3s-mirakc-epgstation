@@ -1,13 +1,4 @@
-apiVersion: traefik.io/v1alpha1
-kind: Middleware
-metadata:
-  name: https-redirect
-  namespace: denpa
-spec:
-  redirectScheme:
-    scheme: https
-    permanent: true
----
+# 外から。OIDC (forward-auth) を通す。
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -32,55 +23,31 @@ spec:
       kind: Rule
       priority: 50
       middlewares:
+        # **2つ要る。** forward-auth だけだと、まだログインしていない端末に
+        # oauth2-proxy の素の 401 がそのまま返り、画面には Unauthorized としか
+        # 出ない (ログイン画面へ行く道が無い)。errors のほうが 401 を 302 に
+        # 書き換えてサインインへ送る。順番も大事で、包む側が先
+        - name: forward-auth-errors
+          namespace: auth
         - name: forward-auth
           namespace: auth
       services:
         - name: denpa
           port: 3000
 ---
-# LAN からプレイヤー(VLC / Infuse / Kodi)で開くための口。
+# LAN から。OIDC は通さない。
 #
-# dp.doany.io は forward-auth を通しているが、プレイヤーは OIDC のリダイレクトを
-# 扱えない。こちらは forward-auth を通さず、denpa 自身のベーシック認証に任せる。
-# LAN 内(10.10.0.0/16)からしか通さない。
+# ブラウザで開く口でもあり、プレイヤー (VLC / Infuse / Kodi) が録画を取りに
+# 来る口でもある。プレイヤーは OIDC のリダイレクトを扱えないので、
+# ここは denpa 自身のベーシック認証に任せる。
 #
-# 平文で出す。.arpa は公開ドメインではないので ACME で証明書を取れず、自己署名だと
-# プレイヤーが弾くことがある。中身は録画ファイルなので LAN 内ならこれで足りる。
+# **https で出す。** 平文だと Chrome が `denpa://` の確認に
+# 「常にこの種類のリンクを開く」のチェックボックスを出さず (このチェックは
+# https のページからしか出ない)、録画を1本開くたびに確認を押すことになる。
 #
-# https へのリダイレクトは Traefik 側で doany.io 系だけにしてある
-# (bootstrap の traefik/redirect-https.yaml)。web エントリポイント全体に
-# かけると、ここも 301 で飛ばされてしまう。
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
-  name: denpa-home-arpa
-  namespace: denpa
-spec:
-  entryPoints:
-    - web
-  routes:
-    - match: Host(`dp.home.arpa`) && ClientIP(`10.10.0.0/16`)
-      kind: Rule
-      services:
-        - name: denpa
-          port: 3000
----
-# LAN から**ブラウザで**開くための口。
-#
-# dp.home.arpa は平文なので、Chrome が `denpa://` の確認に
-# **「常にこの種類のリンクを開く」のチェックボックスを出しません**
-# (このチェックは https のページからしか出ない)。録画を1本開くたびに
-# 確認を押すことになります。
-#
-# .arpa は公開ドメインではないので ACME で証明書を取れませんが、
-# doany.io なら DNS-01 で取れます。**公開する必要はありません** — 名前を
-# LAN 内のアドレス (Traefik) に向けておけば、証明書だけ本物になります。
-#
-# forward-auth は通しません。LAN 内 (10.10.0.0/16) からだけ通し、
-# ファイルの口は denpa 自身のベーシック認証で守ります。
-#
-# `*.l.doany.io` は LAN 内の DNS が Traefik のアドレスに向けてあります
-# (bootstrap 側の AdGuard Home)。外からは引けません。
+# `*.l.doany.io` は LAN 内の DNS が Traefik のアドレスに向けてある
+# (bootstrap 側の AdGuard Home)。名前は公開ドメインなので DNS-01 で
+# 本物の証明書が取れるが、**外からは引けない**。
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:

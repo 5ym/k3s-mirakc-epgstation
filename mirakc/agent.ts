@@ -178,7 +178,7 @@ async function decode(body: { input?: unknown; output?: unknown }) {
 }
 
 interface ScanState {
-    state: 'idle' | 'running' | 'done' | 'failed';
+    state: 'idle' | 'running' | 'done' | 'failed' | 'canceled';
     phase: string;
     log: string[];
     scanned: number;
@@ -267,7 +267,12 @@ function clearEpgCache(): void {
     }
 }
 
+/** 走っているスキャン。中断のために持っておく */
+let scanner: Scanner | null = null;
+
 async function runScan(targets: [ChannelType, string[]][]): Promise<void> {
+    const running = new Scanner(loadTuners(), (progress) => push(progress.line, progress));
+    scanner = running;
     try {
         // 選局は mirakc を通さず recisdb を直接叩く。動かしたままだと EPG 更新と
         // チューナーの取り合いになるので、スキャンの間だけ止める
@@ -275,9 +280,17 @@ async function runScan(targets: [ChannelType, string[]][]): Promise<void> {
         await mirakc.stop();
 
         push('チャンネルを探しています...', {}, { phase: 'スキャン中' });
-        const found = await new Scanner(loadTuners(), (progress) => push(progress.line, progress)).run(
-            targets,
-        );
+        const found = await running.run(targets);
+
+        /*
+         * 中断されたら**何も書かない**。
+         * 途中までの結果で上書きすると、まだ回っていない種別やチャンネルの
+         * 定義が消える。押した人は「やめたい」だけで「消したい」ではない
+         */
+        if (running.aborted) {
+            push('中断しました', {}, { state: 'canceled', phase: '中断', finishedAt: Date.now() });
+            return;
+        }
 
         // 1件も見つからないまま上書きすると、今まで録れていた局まで消える
         if (found.length === 0) {
@@ -294,20 +307,28 @@ async function runScan(targets: [ChannelType, string[]][]): Promise<void> {
     } catch (error) {
         push(`失敗しました: ${error}`, {}, { state: 'failed', error: String(error), finishedAt: Date.now() });
     } finally {
+        scanner = null;
+        // 中断しても失敗しても、mirakc は必ず戻す。止まったままだと録画も番組表も死ぬ
         mirakc.start();
     }
 }
 
-function startScan(body: { types?: unknown; min?: unknown; max?: unknown }) {
+function stopScan() {
+    if (scan.state !== 'running' || scanner === null)
+        return { stopped: false, message: '実行中ではありません' };
+    scanner.stop();
+    push('中断しています...', {}, { phase: '中断中' });
+    return { stopped: true, message: 'チャンネルスキャンを中断しています' };
+}
+
+function startScan(body: { types?: unknown }) {
     const requested = Array.isArray(body.types) ? body.types : ['GR', 'BS', 'CS'];
     const types = requested.filter((type): type is ChannelType => type in CHANNEL_RANGES);
     if (types.length === 0) return { started: false, message: 'チャンネル種別の指定が不正です' };
 
-    const bound = (value: unknown) => (typeof value === 'number' && value > 0 ? value : undefined);
-    const targets: [ChannelType, string[]][] = types.map((type) => [
-        type,
-        channelsFor(type, bound(body.min), bound(body.max)),
-    ]);
+    // 範囲は決め打ち。放送で使う物理チャンネルは決まっていて、狭めても
+    // 総当たりの時間が少し減るだけ。狭めた結果 見つからない局が出るほうが困る
+    const targets: [ChannelType, string[]][] = types.map((type) => [type, channelsFor(type)]);
 
     if (scan.state === 'running') return { started: false, message: '既に実行中です' };
     scan = {
@@ -348,6 +369,10 @@ export function serve(port = PORT): Bun.Server {
             if (pathname === '/denpa/scan' && request.method === 'POST') {
                 const result = startScan(await request.json());
                 return json(result, result.started ? 200 : 409);
+            }
+            if (pathname === '/denpa/scan/stop' && request.method === 'POST') {
+                const result = stopScan();
+                return json(result, result.stopped ? 200 : 409);
             }
             return json({ ok: false, error: 'not found' }, 404);
         },

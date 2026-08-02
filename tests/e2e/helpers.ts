@@ -142,6 +142,7 @@ export async function setRecording(
     patch: {
         codec?: string;
         cmCut?: string;
+        cmDetector?: string;
         encode?: boolean;
         keepOriginal?: boolean;
         freeOnly?: boolean;
@@ -150,6 +151,8 @@ export async function setRecording(
     const form: Record<string, string> = {
         codec: patch.codec ?? 'av1',
         cmCut: patch.cmCut ?? 'chapter',
+        // 偽 ffmpeg しか居ないので、外部のコマンドを呼ばないほうで固定する
+        cmDetector: patch.cmDetector ?? 'silence',
     };
     if (patch.encode ?? true) form.encode = 'on';
     if (patch.keepOriginal === true) form.keepOriginal = 'on';

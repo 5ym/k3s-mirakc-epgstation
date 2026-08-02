@@ -1,7 +1,7 @@
 import { fail } from '@sveltejs/kit';
 import { queryAll } from '$lib/server/db';
 import { getChannels, getEpgProgress, getServices, getTuners, ping } from '$lib/server/mirakc';
-import { refresh, start } from '$lib/server/scan';
+import { refresh, start, stop } from '$lib/server/scan';
 import { cardStatus } from '$lib/server/scramble';
 import type { ChannelType, Service } from '$lib/types';
 
@@ -40,12 +40,15 @@ export const actions = {
             .filter((t): t is ChannelType => TYPES.includes(t as ChannelType));
         if (types.length === 0) return fail(400, { message: 'スキャンする種別を選んでください' });
 
-        const range = (name: string) => {
-            const value = Number(form.get(name));
-            return Number.isFinite(value) && value > 0 ? value : undefined;
-        };
-        const result = await start({ types, min: range('min'), max: range('max') });
+        const result = await start({ types });
         if (!result.started) return fail(409, { message: result.message });
+        return { success: true, scan: result.message };
+    },
+
+    /** 走っているスキャンを中断する。設定は書き換えないまま止まる */
+    scanStop: async () => {
+        const result = await stop();
+        if (!result.stopped) return fail(409, { message: result.message });
         return { success: true, scan: result.message };
     },
 };

@@ -92,25 +92,36 @@ export function watch(serviceId: number): (chunk: Uint8Array) => void {
         'SELECT network_id FROM services WHERE id = ?',
         serviceId,
     );
-    let done = service === undefined;
+    let broken = service === undefined;
+    /** 同じものを何度も書きに行かない。ロゴは滅多に変わらない */
+    const written = new Set<string>();
 
     return (chunk) => {
-        if (done) return;
+        if (broken) return;
         try {
             collector.feed(chunk);
             const found = collector.collected();
             if (found.length === 0) return;
 
+            /*
+             * **チューナーが開いている間は拾い続ける。**
+             *
+             * 1つ拾った時点で打ち切っていた頃は、1本の録画で1局ぶんしか入らなかった。
+             * 1つのTSには**その物理チャンネルに相乗りしている局が全部**流れていて、
+             * ロゴも局ごとに別々のタイミングで来る。開いているのはこちらの都合とは
+             * 関係なく只なので、来たものは全部取っておく
+             */
             let saved = 0;
             for (const { serviceIds, logo } of found) {
+                const key = `${logo.logoId}:${logo.logoType}:${logo.logoVersion}`;
+                if (written.has(key)) continue;
+                written.add(key);
                 saved += store(service!.network_id, serviceIds, logo.data);
             }
-            // 1本の録画で何度も書きに行かない。ロゴは滅多に変わらない
-            done = true;
             if (saved > 0) emit('services');
         } catch (error) {
             console.error(`[logo] 取り込みに失敗しました: ${error}`);
-            done = true;
+            broken = true;
         }
     };
 }
@@ -158,8 +169,23 @@ export function missing(): { id: number; network_id: number; name: string; chann
     );
 }
 
-/** 1局から拾えるまで開いておく。拾えたら即座に閉じる */
-async function collect(serviceId: number, timeout: number): Promise<boolean> {
+/** その物理チャンネルに相乗りしている局のうち、まだロゴを持っていないもの */
+function missingOn(channel: string): number[] {
+    return queryAll<{ id: number }>(
+        `SELECT id FROM services WHERE channel = ? AND has_logo = 0 AND ${CURRENT_SERVICES}`,
+        channel,
+    ).map((row) => row.id);
+}
+
+/**
+ * 1つの物理チャンネルを開いて、そこに乗っている局のロゴを拾う。
+ *
+ * **1局取れた時点では閉じない。** 1つのTSにはその物理チャンネルの局が全部
+ * 流れていて、ロゴは局ごとに別々のタイミングで来る。せっかく開いたのだから、
+ * 揃うか時間切れになるまで読む。
+ */
+async function collect(channel: string, serviceId: number, timeout: number): Promise<number> {
+    const before = missingOn(channel).length;
     const controller = new AbortController();
     const stop = setTimeout(() => controller.abort(), timeout);
     try {
@@ -167,7 +193,8 @@ async function collect(serviceId: number, timeout: number): Promise<boolean> {
         const feed = watch(serviceId);
         for await (const chunk of chunks(stream)) {
             feed(chunk);
-            if (readLogo(serviceId) !== null) return true;
+            // 全部揃ったら、これ以上開けておく理由がない
+            if (missingOn(channel).length === 0) break;
         }
     } catch {
         // 取れなければ次の機会に。チューナーが空いていないだけのことも多い
@@ -175,7 +202,7 @@ async function collect(serviceId: number, timeout: number): Promise<boolean> {
         clearTimeout(stop);
         controller.abort();
     }
-    return false;
+    return before - missingOn(channel).length;
 }
 
 /** いま mirakc が開けている物理チャンネル。選局コマンドから読む */
@@ -212,10 +239,16 @@ export async function ride(): Promise<number> {
         const open = openChannels(await getTuners());
         if (open.size === 0) return 0;
 
+        /*
+         * 開いているチャンネルごとに1回だけ乗る。同じチャンネルの局を
+         * 1つずつ開き直しても、読むものは同じ1本のTSでしかない
+         */
         let found = 0;
+        const done = new Set<string>();
         for (const service of need) {
-            if (!open.has(service.channel)) continue;
-            if (await collect(service.id, RIDE_TIMEOUT)) found++;
+            if (!open.has(service.channel) || done.has(service.channel)) continue;
+            done.add(service.channel);
+            found += await collect(service.channel, service.id, RIDE_TIMEOUT);
         }
         return found;
     } catch {
@@ -238,8 +271,11 @@ export async function sweep(limit = 1): Promise<number> {
     reconcile();
     // 開いているチューナーがあるなら、まずそちらに乗る。只で読める
     let found = await ride();
-    for (const service of missing().slice(0, limit)) {
-        if (await collect(service.id, SWEEP_TIMEOUT)) found++;
+    // 自分で開くのは1チャンネルずつ。長く掴むと録画に響く
+    const channels = [...new Set(missing().map((service) => service.channel))].slice(0, limit);
+    for (const channel of channels) {
+        const service = missing().find((row) => row.channel === channel);
+        if (service !== undefined) found += await collect(channel, service.id, SWEEP_TIMEOUT);
     }
     return found;
 }

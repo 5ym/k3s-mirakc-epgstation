@@ -13,6 +13,7 @@
         running: '実行中',
         done: '完了',
         failed: '失敗',
+        canceled: '中断',
         idle: '待機中',
     };
 
@@ -195,26 +196,12 @@
                             {/each}
                         </div>
                     </div>
-                    <!-- 地上波は 13〜62ch を総当たりする。範囲を狭めると早く終わる -->
-                    <div class="flex flex-wrap items-end gap-3">
-                        <label class="flex flex-col gap-1">
-                            <span class="text-sm font-medium">最小ch</span>
-                            <input
-                                type="number"
-                                name="min"
-                                class="input input-bordered w-24"
-                                data-testid="scan-min"
-                            />
-                        </label>
-                        <label class="flex flex-col gap-1">
-                            <span class="text-sm font-medium">最大ch</span>
-                            <input
-                                type="number"
-                                name="max"
-                                class="input input-bordered w-24"
-                                data-testid="scan-max"
-                            />
-                        </label>
+                    <!--
+                        探す範囲は決め打ち。放送で使う物理チャンネルは決まっていて、
+                        狭めても総当たりの時間が少し減るだけ。
+                        狭めた結果 見つからない局が出るほうが困る
+                    -->
+                    <div class="flex flex-wrap items-center gap-2">
                         <button
                             class="btn btn-primary"
                             disabled={scan.state === 'running'}
@@ -222,6 +209,20 @@
                         >
                             {scan.state === 'running' ? '実行中…' : '開始する'}
                         </button>
+                        {#if scan.state === 'running'}
+                            <!--
+                                十数分かかるので、途中で降りられるようにしてある。
+                                中断しても設定は書き換えない (途中までの結果で上書きすると、
+                                まだ回っていない局の定義が消える)
+                            -->
+                            <button
+                                class="btn btn-error btn-outline"
+                                formaction="?/scanStop"
+                                data-testid="scan-stop"
+                            >
+                                中断する
+                            </button>
+                        {/if}
                     </div>
                 </form>
 
