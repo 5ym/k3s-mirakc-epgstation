@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: mirakc
-          image: ghcr.io/danything/mirakc:sha-bd5a3ea116ce
+          image: ghcr.io/danything/mirakc:sha-74dc86540463
           imagePullPolicy: IfNotPresent
           securityContext:
             privileged: true
@@ -90,7 +90,7 @@ spec:
       terminationGracePeriodSeconds: 21900
       containers:
         - name: denpa
-          image: ghcr.io/danything/denpa:sha-d9ff9e129246
+          image: ghcr.io/danything/denpa:sha-74dc86540463
           imagePullPolicy: IfNotPresent
           env:
             - name: TZ
