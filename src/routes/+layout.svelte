@@ -53,19 +53,24 @@
 
     /** ページ名はナビと同じものを使う。タブに出す */
     const title = $derived(`${links.find((l) => l.href === page.url.pathname)?.label ?? 'denpa'} - denpa`);
+
+    /**
+     * 予約と録画だけは画面ぴったりの高さにして、中の一覧だけをスクロールさせる
+     * (2つ並べたときに片方だけ下に置いていかれないため)。
+     *
+     * 他の画面まで同じにすると、スクロールするのが window ではなくなり、
+     * 戻ったときに見ていた位置へ帰らなくなる。畳まれる幅ではどの画面も
+     * 普通にページごとスクロールさせる
+     */
+    const fill = $derived(page.url.pathname === '/');
 </script>
 
 <svelte:head>
     <title>{title}</title>
 </svelte:head>
 
-<!--
-    広い画面では画面ぴったりの高さにして、中の一覧だけをスクロールさせる
-    (2つ並べたときに片方だけ下に置いていかれないため)。
-    畳まれる幅では普通にページごとスクロールさせる
--->
 <div
-    class="flex min-h-screen flex-col bg-base-200 lg:h-screen lg:min-h-0 lg:overflow-hidden"
+    class="flex min-h-screen flex-col bg-base-200 {fill ? 'lg:h-screen lg:min-h-0 lg:overflow-hidden' : ''}"
     data-hydrated={hydrated ? 'true' : undefined}
 >
     <div class="navbar bg-base-100 sticky top-0 z-40 shadow-sm">
@@ -113,7 +118,7 @@
         </div>
     </div>
 
-    <main class="p-4 md:p-6 lg:min-h-0 lg:flex-1 lg:overflow-auto">
+    <main class="p-4 md:p-6 {fill ? 'lg:min-h-0 lg:flex-1' : ''}">
         {@render children()}
     </main>
 </div>
