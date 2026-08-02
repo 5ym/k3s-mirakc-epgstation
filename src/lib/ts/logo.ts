@@ -15,7 +15,7 @@
 
 import { descriptors, PACKET, SectionAssembler } from './psi';
 
-export const PID_CDT = 0x0029;
+const PID_CDT = 0x0029;
 const PID_SDT = 0x0011;
 
 const TABLE_CDT = 0xc8;

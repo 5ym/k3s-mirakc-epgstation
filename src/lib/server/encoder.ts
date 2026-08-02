@@ -488,13 +488,7 @@ async function runJob(jobId: number): Promise<void> {
      */
     const working = `${output}.encoding`;
 
-    /*
-     * スクランブルが掛かったまま録れていたら、ここで解く。
-     *
-     * カードが読めないとき録画を止めてしまうと電波は二度と戻ってこないので、
-     * 録画自体は暗号のままでも残す方針にしてある。解くのはこの時点でよい。
-     * 解くのは mirakc 側(カードを持っているのはあちら)。
-     */
+    // スクランブルが掛かったまま録れていたら、ここで解く (scramble.ts)
     /** 後始末で消す作業ファイル。生TSを置き換えたときは残す側になるので null のまま */
     let decoded: string | null = null;
     let sourceTs = input;

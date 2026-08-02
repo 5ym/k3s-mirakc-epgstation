@@ -175,8 +175,7 @@ async function pump(recording: Recording, controller: AbortController): Promise<
         // 途中で止めたときや掴むのに手間取ったときは実物と合わない。
         // 再開したときは足していく(ファイルも追記なので合計が実物になる)
         const from = Date.now();
-        // mirakc はロゴを TS から集めないので、録画のついでに拾っておく。
-        // 局ロゴのために別途チューナーを開かずに済む
+        // 局ロゴのために別途チューナーを開かずに済む (logo.ts)
         const collectLogo = watchLogo(recording.service_id);
         try {
             for await (const chunk of chunks(stream)) {

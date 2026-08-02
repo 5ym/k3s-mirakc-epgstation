@@ -47,10 +47,6 @@ const IDLE: ScanState = {
 let current: ScanState = IDLE;
 let watching = false;
 
-export function status(): ScanState {
-    return current;
-}
-
 export interface ScanOptions {
     types: ChannelType[];
     min?: number;

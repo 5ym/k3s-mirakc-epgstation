@@ -1,8 +1,8 @@
 # denpa (録画・エンコード管理アプリ)
 
 mirakc から EPG と TS を受け取り、予約・録画・エンコード・保存先への配置までを行う。
-出来上がった mkv は保存先に置かれ、denpa が配って外部プレイヤーで見る。見終わったものは
-自動的に消える。EPGStation の置き換えとして作ったもので、エンコード設定はそこから移した。
+出来上がった mkv は保存先に置かれ、denpa が配って外部プレイヤーで見る。削除は手動。
+EPGStation の置き換えとして作ったもので、エンコード設定はそこから移した。
 
 ## 構成
 
@@ -23,8 +23,12 @@ mirakc から EPG と TS を受け取り、予約・録画・エンコード・�
 | `src/lib/server/metadata.ts` | .nfo とサムネイル (Kodi など向け) |
 | `src/lib/server/files.ts` | 録画の削除と、実体とDBの突き合わせ |
 | `src/lib/server/serve.ts` | ファイルの配信 (Range 対応) |
-| `src/lib/server/scramble.ts` | スクランブルの検出と、mirakc 側への解除依頼 |
-| `src/lib/server/scan.ts` | チャンネルスキャン (mirakc に投げて進み具合を読む) |
+| `src/lib/server/scramble.ts` | スクランブルの検出と、チューナー側への解除依頼 |
+| `src/lib/server/scan.ts` | チャンネルスキャン (チューナー側に投げて進み具合を読む) |
+| `src/lib/server/logo.ts` | 局ロゴの収集と保存 |
+| `src/lib/ts/psi.ts` | TS の PSI (NIT / SDT) を読む。チューナー側と共通 |
+| `src/lib/ts/logo.ts` | TS から局ロゴ (CDT) を読む |
+| `src/lib/ts/synth.ts` | TS のセクションを組み立てる (テストと偽mirakc用) |
 | `src/lib/server/migrate.ts` | EPGStation からの引き継ぎ |
 | `src/lib/server/dav.ts` | WebDAV (Kodi 向け) |
 | `src/lib/server/auth.ts` | ベーシック認証 |
@@ -59,6 +63,9 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 | 変数 | 既定値 | 説明 |
 | --- | --- | --- |
 | `MIRAKC_URL` | `http://mirakc:40772` | mirakc |
+| `TUNER_AGENT_URL` | `http://mirakc:40773` | チューナー側のエージェント (スキャン・カード・解除) |
+| `DENPA_DATA_DIR` | DBの隣 | 局ロゴの置き場 |
+| `LOGO_SWEEP_INTERVAL` | `1800000` | ロゴを持っていない局を取りに行く間隔(ms) |
 | `RECONCILE_INTERVAL` | `300000` | 保存先の実体とDBを突き合わせる間隔(ms) |
 | `WRITE_NFO` | `1` | `.nfo` を書くか (Kodi など向け) |
 | `THUMBNAIL_POSITION` / `THUMBNAIL_WIDTH` | `120` / `480` | サムネイルの切り出し位置(秒)と幅 |
@@ -93,11 +100,24 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 | 画面 | 役割 |
 | --- | --- |
 | `/` | **予約と録画**を2ペインで並べる。予約の取消/競合再計算、再生リンク・再エンコード・削除 |
-| `/guide` | 番組表(グリッド)と番組検索、EPG取得、チャンネルスキャン。検索はルールと同じ条件で絞り込め、そのままルールにできる |
+| `/guide` | 番組表(グリッド)と番組検索、EPG取得。検索はルールと同じ条件で絞り込め、そのままルールにできる |
 | `/rules` | 自動予約ルールの一覧と作成 |
+| `/tuners` | チャンネルスキャン、チューナーの空き、取れているチャンネル、mirakc とカードリーダーの状態 |
 | `/settings` | 録画のしかた(コーデック/CM)、通知先(Webhook)、ベーシック認証、EPGStation からの引き継ぎ |
 | `/api/recordings/<id>/file` | 録画ファイル。Range 対応 |
 | `/dav` | WebDAV (PROPFIND / GET / HEAD)。Kodi 用。書き込みは受けない |
+
+## チューナー側 (`mirakc/`)
+
+mirakc の親として動くエージェント。詳しくは
+[architecture.md](architecture.md#チューナー側-mirakc--エージェント)。
+
+| ファイル | 役割 |
+| --- | --- |
+| `mirakc/agent.ts` | mirakc の起動と停止、denpa からの窓口 (HTTP) |
+| `mirakc/scan.ts` | 物理チャンネルの総当たり |
+| `mirakc/config.ts` | mirakc の `config.yml` の読み書き |
+| `mirakc/config.yml` | 初回に配る設定の雛形 |
 
 ## テスト
 

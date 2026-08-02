@@ -30,7 +30,3 @@ export function subscribe(listener: Listener): () => void {
     listeners.add(listener);
     return () => listeners.delete(listener);
 }
-
-export function listenerCount(): number {
-    return listeners.size;
-}

@@ -2,10 +2,8 @@ import { error } from '@sveltejs/kit';
 import { readLogo } from '$lib/server/logo';
 
 /**
- * 局ロゴ。
- *
- * mirakc はロゴを TS から集めないので、denpa が放送波から拾って持っている
- * (src/lib/server/logo.ts)。ロゴは滅多に変わらないので長めにキャッシュさせる。
+ * 局ロゴ。denpa が放送波から拾ったものを配る (src/lib/server/logo.ts)。
+ * 滅多に変わらないので長めにキャッシュさせる。
  */
 export function GET({ params, setHeaders }) {
     const serviceId = Number(params.serviceId);

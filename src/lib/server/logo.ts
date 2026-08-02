@@ -28,7 +28,7 @@ function logoDir(): string {
 }
 
 /** サービスIDごとのファイル。mirakc の内部IDをそのまま名前にする */
-export function logoPath(serviceId: number): string {
+function logoPath(serviceId: number): string {
     return join(logoDir(), `${serviceId}.png`);
 }
 
