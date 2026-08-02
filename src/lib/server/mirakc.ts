@@ -77,6 +77,41 @@ export function getChannels(): Promise<MirakcChannel[]> {
     return get<MirakcChannel[]>('/api/channels');
 }
 
+/** 局ごとの番組表の集まり具合 */
+export interface EpgProgress {
+    /** `networkId:serviceId`。mirakc の内部IDは局一覧とだけ揃っているので、こちらで突き合わせる */
+    key: string;
+    programs: number;
+    /** いちばん先の番組の終わり。ここまで番組表が埋まっている */
+    until: number;
+}
+
+export function serviceKey(networkId: number, serviceId: number): string {
+    return `${networkId}:${serviceId}`;
+}
+
+/**
+ * mirakc がどこまで番組表を集められているかを局ごとに数える。
+ *
+ * チャンネルスキャンをすると mirakc は局も番組表も一度捨てるので、
+ * 「まだ集めている途中なのか、その局が本当に取れていないのか」が
+ * 見分けられないと待つべきかどうか分からない。チューナー画面に出すためだけの集計。
+ *
+ * 全件 (数MB) を取るが、EPG取得が10分ごとに同じことをしているので新しい負荷ではない。
+ */
+export async function getEpgProgress(): Promise<EpgProgress[]> {
+    const programs = await getPrograms();
+    const map = new Map<string, EpgProgress>();
+    for (const program of programs) {
+        const key = serviceKey(program.networkId, program.serviceId);
+        const entry = map.get(key) ?? { key, programs: 0, until: 0 };
+        entry.programs += 1;
+        entry.until = Math.max(entry.until, program.startAt + program.duration);
+        map.set(key, entry);
+    }
+    return [...map.values()];
+}
+
 /** 番組1つぶんの情報。放送中は EIT[p/f] で書き換わる (下記) */
 export function getProgram(programId: number): Promise<MirakcProgram> {
     return get<MirakcProgram>(`/api/programs/${programId}`);

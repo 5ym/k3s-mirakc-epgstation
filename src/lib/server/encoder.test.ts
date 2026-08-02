@@ -22,6 +22,13 @@ describe('録画エンコードの引数', () => {
         expect(args.at(-1)).toBe('/out.mkv');
     });
 
+    test('入れ物は拡張子ではなく引数で決める', () => {
+        // 書いている間は .mkv.encoding という名前なので、拡張子からは決まらない
+        const args = buildArgs('/in.m2ts', '/out.mkv.encoding', 1, null);
+        expect(argValue(args, '-f')).toBe('matroska');
+        expect(args.at(-1)).toBe('/out.mkv.encoding');
+    });
+
     test('h264 を選ぶと x264 の 8bit になる', () => {
         const args = buildArgs('/in.m2ts', '/out.mkv', 1, null, 'h264');
         expect(args).toContain('libx264');

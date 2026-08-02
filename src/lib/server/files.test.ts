@@ -6,11 +6,15 @@ import { join } from 'node:path';
 /**
  * 古い履歴の片付け。
  *
- * 本物の pruneHistory を動かす。DBの置き場は環境変数で決まるので、
- * **読み込む前に**一時ファイルへ向けておく。
+ * 本物の pruneHistory を動かす。DBの置き場は一時ファイルへ向ける。
+ *
+ * 環境変数ではなく設定そのものを書き換えている。環境変数は config の
+ * 読み込み時に1度だけ見られるので、同じプロセスで走る別のテストが先に
+ * config を読んでいると効かない (bun test はファイルをまたいでモジュールを使い回す)。
  */
-process.env.DENPA_DB = join(mkdtempSync(join(tmpdir(), 'denpa-files-')), 'denpa.db');
-process.env.HISTORY_RETENTION = String(14 * 24 * 60 * 60 * 1000);
+const { config } = await import('./config');
+config.dbPath = join(mkdtempSync(join(tmpdir(), 'denpa-files-')), 'denpa.db');
+config.historyRetention = 14 * 24 * 60 * 60 * 1000;
 
 const { database } = await import('./db');
 const { pruneHistory } = await import('./files');

@@ -38,10 +38,10 @@ test.describe('エンコードの失敗', () => {
 
         await reserveSoon(page, request, 'BS');
 
-        // 失敗したものはエンコード欄には残さない。録画の行に出る
+        // 失敗したものは進み具合を出さない。状態と理由だけが行に残る
         await waitForRow(page, '[data-testid="recording-row"] [data-testid="recording-state"]', '失敗');
         await goto(page, '/');
-        await expect(page.getByTestId('encode-row')).toHaveCount(0);
+        await expect(page.getByTestId('encode-progress')).toHaveCount(0);
         const failed = page
             .getByTestId('recording-row')
             .filter({ has: page.getByTestId('recording-error') })

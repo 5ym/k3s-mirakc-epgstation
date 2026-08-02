@@ -28,6 +28,38 @@
         }
         return map;
     });
+
+    /*
+     * チャンネル・局・番組表は別々に届く。1つの表に混ぜて出すので、
+     * 揃うまで待ってから描く (バラバラに出ると列が入れ替わって見える)
+     */
+    const coverage = $derived(Promise.all([data.channels, data.mirakcServices, data.epg]));
+
+    /**
+     * 局名は取り込み済みのものがあればそちらを出す。
+     * 放送波の局名は全角英数まじりなので、denpa は取り込むときに直している。
+     * mirakc の生の名前をそのまま出すと、他の画面と字面が変わって別の局に見える
+     */
+    const importedById = $derived(new Map(data.services.map((s) => [s.id, s])));
+
+    /** mirakc が拾えている局を物理チャンネルごとにまとめる */
+    function groupByChannel<T extends { channel?: { type: string; channel: string } }>(
+        services: T[],
+    ): Map<string, T[]> {
+        const map = new Map<string, T[]>();
+        for (const service of services) {
+            if (service.channel === undefined) continue;
+            const key = `${service.channel.type}:${service.channel.channel}`;
+            map.set(key, [...(map.get(key) ?? []), service]);
+        }
+        return map;
+    }
+
+    /** 番組表がどこまで埋まっているか。「8/9 まで」の形で出す */
+    function until(at: number): string {
+        const d = new Date(at);
+        return `${d.getMonth() + 1}/${d.getDate()} まで`;
+    }
 </script>
 
 <h1 class="mb-4 text-2xl font-bold">チューナー</h1>
@@ -42,16 +74,20 @@
             <div class="card-body">
                 <h2 class="card-title">取れているチャンネル</h2>
                 <p class="text-base-content/70 text-sm">
-                    mirakc の設定に入っている物理チャンネルです。局名は denpa が取り込んだものを出します。
+                    mirakc の設定に入っている物理チャンネルと、mirakc がそこから
+                    今どこまで局と番組表を拾えているかです。<strong>スキャンの直後は空になり</strong
+                    >、数十分かけて埋まっていきます。
                 </p>
-                {#await data.channels}
+                {#await coverage}
                     <p class="text-base-content/60 text-sm">確認中…</p>
-                {:then channels}
+                {:then [channels, mirakcServices, epg]}
                     {#if channels.length === 0}
                         <p class="text-base-content/60 text-sm" data-testid="channel-empty">
                             まだ1つもありません。チャンネルスキャンを実行してください。
                         </p>
                     {:else}
+                        {@const epgByService = new Map(epg.map((e) => [e.key, e]))}
+                        {@const servicesByChannel = groupByChannel(mirakcServices)}
                         <div class="max-h-96 overflow-auto">
                             <table class="table-pin-rows table table-sm">
                                 <thead>
@@ -59,12 +95,23 @@
                                         <th>種別</th>
                                         <th>ch</th>
                                         <th class="w-full">局</th>
+                                        <th class="whitespace-nowrap">番組表</th>
                                     </tr>
                                 </thead>
                                 <tbody data-testid="channel-list">
                                     {#each channels as channel (`${channel.type}:${channel.channel}`)}
-                                        {@const services =
-                                            byChannel.get(`${channel.type}:${channel.channel}`) ?? []}
+                                        {@const key = `${channel.type}:${channel.channel}`}
+                                        {@const found = servicesByChannel.get(key) ?? []}
+                                        {@const imported = byChannel.get(key) ?? []}
+                                        {@const stats = found.map(
+                                            (s) =>
+                                                epgByService.get(`${s.networkId}:${s.serviceId}`) ?? {
+                                                    programs: 0,
+                                                    until: 0,
+                                                },
+                                        )}
+                                        {@const programs = stats.reduce((sum, s) => sum + s.programs, 0)}
+                                        {@const last = Math.max(0, ...stats.map((s) => s.until))}
                                         <tr data-testid="channel-row" data-channel={channel.channel}>
                                             <td class="whitespace-nowrap text-sm">
                                                 {TYPE_LABEL[channel.type] ?? channel.type}
@@ -73,12 +120,41 @@
                                                 {channel.channel}
                                             </td>
                                             <td class="text-sm">
-                                                {#if services.length > 0}
-                                                    {services.map((s) => s.name).join(', ')}
+                                                {#if found.length > 0}
+                                                    <div data-testid="channel-services">
+                                                        {found
+                                                            .map(
+                                                                (s) => importedById.get(s.id)?.name ?? s.name,
+                                                            )
+                                                            .join(', ')}
+                                                    </div>
+                                                    <!--
+                                                        denpa 側の取り込みは10分ごとなので、
+                                                        mirakc が見つけた直後は必ず差が出る。
+                                                        隠すと「取り込まれない」と区別が付かない
+                                                    -->
+                                                    {#if imported.length < found.length}
+                                                        <div
+                                                            class="text-base-content/60 text-xs"
+                                                            data-testid="channel-pending"
+                                                        >
+                                                            denpa への取り込み待ち ({imported.length}/{found.length})
+                                                        </div>
+                                                    {/if}
                                                 {:else}
                                                     <span class="text-base-content/60">
-                                                        まだ取り込んでいません
+                                                        mirakc がまだ局を拾えていません
                                                     </span>
+                                                {/if}
+                                            </td>
+                                            <td class="text-sm whitespace-nowrap" data-testid="channel-epg">
+                                                {#if programs > 0}
+                                                    <div>{programs} 件</div>
+                                                    <div class="text-base-content/60 text-xs">
+                                                        {until(last)}
+                                                    </div>
+                                                {:else}
+                                                    <span class="text-base-content/60">—</span>
                                                 {/if}
                                             </td>
                                         </tr>

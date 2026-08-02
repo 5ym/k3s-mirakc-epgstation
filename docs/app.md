@@ -110,10 +110,10 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 
 | 画面 | 役割 |
 | --- | --- |
-| `/` | **予約と録画**を2ペインで並べる。予約の取消/競合再計算、再生リンク・再エンコード・削除 |
+| `/` | **予約と録画**を2ペインで並べる。予約の取消/競合再計算、再生リンク・再エンコード・削除。エンコード中のものは録画一覧の行に進み具合が出る |
 | `/guide` | 番組表(グリッド)と番組検索、EPG取得。検索はルールと同じ条件で絞り込め、そのままルールにできる |
 | `/rules` | 自動予約ルールの一覧と作成 |
-| `/tuners` | チャンネルスキャン、チューナーの空き、取れているチャンネル、mirakc とカードリーダーの状態 |
+| `/tuners` | チャンネルスキャン、チューナーの空き、取れているチャンネル (mirakc 側の局と番組表の集まり具合つき)、mirakc とカードリーダーの状態 |
 | `/settings` | 録画のしかた(コーデック/CM)、通知先(Webhook)、ベーシック認証、EPGStation からの引き継ぎ |
 | `/api/recordings/<id>/file` | 録画ファイル。Range 対応 |
 | `/dav` | WebDAV (PROPFIND / GET / HEAD)。Kodi 用。書き込みは受けない |
@@ -156,15 +156,12 @@ docker compose -f compose.prod.yml exec denpa bun scripts/repair.ts --apply
 
 ## テスト
 
-E2E を主、単体テストは純粋関数の境界条件だけ、という方針。
+| 場所 | 何 |
+| --- | --- |
+| `tests/e2e/` | Playwright。番号順に、予約 → 録画 → ルール → 引き継ぎ → 放送の延長 |
+| `tests/fake/` | 偽mirakc・偽の通知先・偽ffmpeg |
+| `src/**/*.test.ts` | 純粋関数の境界条件 (bun test) |
+| `mirakc/*.test.ts` | チューナー側 (設定の読み書き、スキャン) |
+| `windows/verify.ps1` `mac/verify.sh` | `denpa://` の登録役 |
 
-```sh
-docker compose run --rm unit                # bun test
-docker compose run --rm e2e                 # Playwright
-docker compose run --rm unit bun run lint   # Biome + Prettier
-docker compose run --rm unit bun run format # 整形を適用
-```
-
-E2E は偽mirakc・偽の通知先・偽ffmpeg を立てて、予約から録画・CM検出・エンコード・
-保存先への配置・視聴済み削除までを実際に通す (`tests/fake/`)。偽mirakcは1番組10秒に
-してあるので、録画完了まで待っても30秒で終わる。
+回し方と方針は [development.md](development.md) に置いてある。

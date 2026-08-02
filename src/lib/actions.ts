@@ -36,46 +36,6 @@ export function submitting(node: HTMLFormElement, submit?: SubmitFunction) {
 }
 
 /**
- * 画面の残りいっぱいまで伸ばす。中身が溢れたらこの中だけスクロールする。
- *
- * 予約と録画を横に並べているので、片方が長いともう片方が下に置いていかれる。
- * かといって `100vh - 14rem` のように決め打つと、上に何が乗っているか
- * (エンコード中のカード、見出しの折り返し) で余白が大きくずれる。
- * 自分の上端を実際に測って、そこから下を全部使う。
- *
- * gap は下に残す余白。`main` の下パディング (md:p-6 = 24px) と同じにしてある。
- * これより小さいと1画面に収まらず、外側にスクロールバーが生える。
- */
-export function fillViewport(node: HTMLElement, gap = 24) {
-    /** 直前に入れた値。ResizeObserver が自分の書き込みで再び回るのを止める */
-    let applied = 0;
-
-    const fit = () => {
-        const height = Math.max(200, Math.round(window.innerHeight - node.getBoundingClientRect().top - gap));
-        if (height === applied) return;
-        applied = height;
-        node.style.maxHeight = `${height}px`;
-    };
-
-    fit();
-    // 上に乗るものが増減しても追従させる(エンコード中のカードは出たり消えたりする)
-    const observer = new ResizeObserver(fit);
-    observer.observe(document.documentElement);
-    window.addEventListener('resize', fit);
-
-    return {
-        update(next = 24) {
-            gap = next;
-            fit();
-        },
-        destroy() {
-            observer.disconnect();
-            window.removeEventListener('resize', fit);
-        },
-    };
-}
-
-/**
  * 掴んで動かせるスクロール。番組表は縦横どちらにも長いので、
  * スクロールバーを掴まずに動かせるほうが早い。
  *

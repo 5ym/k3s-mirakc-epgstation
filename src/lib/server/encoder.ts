@@ -122,6 +122,12 @@ export function buildArgs(
     args.push('-disposition:s:0', 'default', '-disposition:v:0', 'default', '-disposition:a:0', 'default');
     // 進捗を key=value 形式で標準出力に吐かせる。stderr の人間向けログを目視パースするより確実
     args.push('-progress', 'pipe:1');
+    /*
+     * 入れ物は名前ではなくここで決める。出力は書いている間だけ別名 (.mkv.encoding) にしており、
+     * ffmpeg は拡張子から入れ物を決めるので、付けないと
+     * 「Unable to choose an output format」で始まる前に落ちる
+     */
+    args.push('-f', 'matroska');
     args.push(output);
 
     return args;

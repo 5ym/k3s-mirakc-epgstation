@@ -1,6 +1,6 @@
 import { fail } from '@sveltejs/kit';
 import { queryAll } from '$lib/server/db';
-import { getChannels, getTuners, ping } from '$lib/server/mirakc';
+import { getChannels, getEpgProgress, getServices, getTuners, ping } from '$lib/server/mirakc';
 import { refresh, start } from '$lib/server/scan';
 import { cardStatus } from '$lib/server/scramble';
 import type { ChannelType, Service } from '$lib/types';
@@ -19,6 +19,13 @@ export async function load() {
         channels: getChannels().catch(() => []),
         mirakc: ping(),
         card: cardStatus(),
+        /*
+         * スキャンの後、mirakc は局も番組表も一度捨てて集め直す。
+         * 「まだ途中なのか、その局が取れていないのか」を見分けられるように、
+         * mirakc 側の集まり具合をそのまま出す
+         */
+        mirakcServices: getServices().catch(() => []),
+        epg: getEpgProgress().catch(() => []),
         // denpa が取り込み済みの局。mirakc が見つけたものとの差が分かる
         services: queryAll<Service>('SELECT * FROM services ORDER BY type, channel, service_id'),
     };

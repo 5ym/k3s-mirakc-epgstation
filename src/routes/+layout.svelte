@@ -59,7 +59,15 @@
     <title>{title}</title>
 </svelte:head>
 
-<div class="min-h-screen bg-base-200" data-hydrated={hydrated ? 'true' : undefined}>
+<!--
+    広い画面では画面ぴったりの高さにして、中の一覧だけをスクロールさせる
+    (2つ並べたときに片方だけ下に置いていかれないため)。
+    畳まれる幅では普通にページごとスクロールさせる
+-->
+<div
+    class="flex min-h-screen flex-col bg-base-200 lg:h-screen lg:min-h-0 lg:overflow-hidden"
+    data-hydrated={hydrated ? 'true' : undefined}
+>
     <div class="navbar bg-base-100 sticky top-0 z-40 shadow-sm">
         <div class="flex-1">
             <a class="btn btn-ghost text-xl" href="/">denpa</a>
@@ -105,7 +113,7 @@
         </div>
     </div>
 
-    <main class="p-4 md:p-6">
+    <main class="p-4 md:p-6 lg:min-h-0 lg:flex-1 lg:overflow-auto">
         {@render children()}
     </main>
 </div>

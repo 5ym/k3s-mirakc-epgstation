@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { fillViewport, submitting } from '$lib/actions';
+    import { submitting } from '$lib/actions';
     import ProgramDetail from '$lib/components/ProgramDetail.svelte';
     import { liveUpdates } from '$lib/live-updates.svelte';
     import { detectPlatform, type Platform, playLinks, withCredentials } from '$lib/play';
@@ -26,16 +26,21 @@
     const active = ['scheduled', 'conflict', 'recording'];
 
     /**
-     * どのプレイヤーに渡すかは端末で決まるので、サーバでは決められない。
-     * origin もブラウザでしか分からないので、判定できるまで再生リンクは出さない
+     * どのプレイヤーに渡すか。UA だけで分かる分はサーバが決めて渡してくる
+     * (ブラウザで判定してから出すと、読み込み直後に再生ボタンが一瞬消える)。
+     *
+     * iPad だけは UA で Macintosh を名乗るので、ここでタッチ点数を見て直す。
+     * origin も同じ理由でサーバの値から始める
      */
-    let platform = $state<Platform | null>(null);
-    let origin = $state('');
+    let refined = $state<{ platform: Platform; origin: string } | null>(null);
     $effect(() => {
-        // iPad は Macintosh を名乗るので、タッチ点数まで見ないと Mac と区別できない
-        platform = detectPlatform(navigator.userAgent, navigator.maxTouchPoints);
-        origin = location.origin;
+        refined = {
+            platform: detectPlatform(navigator.userAgent, navigator.maxTouchPoints),
+            origin: location.origin,
+        };
     });
+    const platform = $derived(refined?.platform ?? data.platform);
+    const origin = $derived(refined?.origin ?? data.origin);
 
     /** プレイヤーに渡すので絶対URLにする */
     const fileUrl = (id: number) => `${origin}/api/recordings/${id}/file`;
@@ -128,380 +133,401 @@
     }
 </script>
 
-<h1 class="mb-4 text-2xl font-bold">予約と録画</h1>
-
 <!--
+    広い画面では2つの一覧を横に並べ、画面の残りを丁度使い切る。
+    高さをJSで測って入れていた頃は、測る前の当ての値で一度描かれるので
+    読み込むたびに一覧が縮んだ状態から伸びて見えた。ここは全部 CSS で決める。
+
+    畳まれる幅 (lg 未満) では素直にページごとスクロールさせる。
+    小さい画面で中だけスクロールさせると、指の届く範囲が二重になって使いづらい
+-->
+<div class="lg:flex lg:h-full lg:flex-col">
+    <h1 class="mb-4 text-2xl font-bold">予約と録画</h1>
+
+    <!--
     知らせは重ねて出す。一覧の上に差し込むと、その分だけ表が下にずれて
     画面からはみ出し、外側にスクロールバーが生える。
     ナビの下に置き、しばらくしたら自分で消える
 -->
-{#if notice}
-    <div class="toast toast-top toast-center top-20 z-50">
-        {#if form?.message}
-            <div class="alert alert-error" data-testid="dashboard-error">{form.message}</div>
-        {/if}
-        {#if form?.reconcile}
-            <div class="alert alert-info" data-testid="reconcile-result">
-                照合 {form.reconcile.checked} 件 / 実体が無く削除済み {form.reconcile.removed} 件
-            </div>
-        {/if}
-    </div>
-{/if}
+    {#if notice}
+        <div class="toast toast-top toast-center top-20 z-50">
+            {#if form?.message}
+                <div class="alert alert-error" data-testid="dashboard-error">{form.message}</div>
+            {/if}
+            {#if form?.reconcile}
+                <div class="alert alert-info" data-testid="reconcile-result">
+                    照合 {form.reconcile.checked} 件 / 実体が無く削除済み {form.reconcile.removed} 件
+                </div>
+            {/if}
+        </div>
+    {/if}
 
-<div class="grid gap-6 lg:grid-cols-5">
-    <!--
+    <div class="grid gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-5">
+        <!--
         min-w-0 が無いと、中の表の幅にグリッドの列が引きずられてページごとはみ出す。
         1列に畳まれたときは録画を先に出す(見るのはたいてい録れたほうなので)
     -->
-    <section class="order-2 min-w-0 lg:order-none lg:col-span-2">
-        <div class="mb-2 flex min-h-8 flex-wrap items-center justify-between gap-2">
-            <h2 class="text-lg font-bold">予約</h2>
-            <div class="flex gap-2">
-                <a class="btn btn-sm" href={data.showFinished ? '/' : '/?all=1'}>
-                    {data.showFinished ? '進行中のみ' : '完了分も表示'}
-                </a>
-                <form method="POST" action="?/resolve" use:submitting>
-                    <button class="btn btn-sm">競合を再計算</button>
-                </form>
+        <section class="order-2 min-w-0 lg:order-none lg:col-span-2 lg:flex lg:min-h-0 lg:flex-col">
+            <div class="mb-2 flex min-h-8 flex-wrap items-center justify-between gap-2">
+                <h2 class="text-lg font-bold">予約</h2>
+                <div class="flex gap-2">
+                    <a class="btn btn-sm" href={data.showFinished ? '/' : '/?all=1'}>
+                        {data.showFinished ? '進行中のみ' : '完了分も表示'}
+                    </a>
+                    <form method="POST" action="?/resolve" use:submitting>
+                        <button class="btn btn-sm">競合を再計算</button>
+                    </form>
+                </div>
             </div>
-        </div>
 
-        <!--
-            画面の残りいっぱいまで伸ばして、中だけスクロールさせる。2つ並べたときに、
-            片方が長いともう片方が下に置いていかれるため。
-            高さは実測で決める(class の値はJSが動くまでの当て)
+            <!--
+            残りいっぱいまで伸ばして、中だけスクロールさせる。2つ並べたときに、
+            片方が長いともう片方が下に置いていかれるため
         -->
-        <div class="overflow-auto rounded-box bg-base-100 max-h-[calc(100dvh-14rem)] shadow" use:fillViewport>
-            <table class="table-pin-rows table table-zebra">
-                <thead>
-                    <tr>
-                        <th class="whitespace-nowrap">放送日時</th>
-                        <!-- 番組名は省略せずそのまま出す。余りはこの列に寄せる -->
-                        <th class="w-full sm:min-w-48">番組</th>
-                        <th class="whitespace-nowrap">状態</th>
-                        <th></th>
-                    </tr>
-                </thead>
-                <tbody data-testid="reservation-list">
-                    {#each data.reservations as res (res.id)}
-                        <!-- 行を押すと番組表と同じ詳細が出る -->
-                        <tr
-                            data-testid="reservation-row"
-                            data-reservation-id={res.id}
-                            data-program-id={res.program_id}
-                            class="hover cursor-pointer"
-                            tabindex="0"
-                            onclick={(event) => rowClick(event, res.program_id, res)}
-                            onkeydown={(event) => rowClick(event, res.program_id, res)}
-                        >
-                            <!-- 日付と時刻で2行にする。1行だと番組名の幅をだいぶ食う -->
-                            <td class="whitespace-nowrap">
-                                <div>{date(res.start_at)}</div>
-                                <div class="text-base-content/60 text-sm">
-                                    {time(res.start_at)}〜{time(res.end_at)}
-                                    ({duration(res.start_at, res.end_at)})
-                                </div>
-                            </td>
-                            <!-- 局名も種別も番組名の下に小さく。録画一覧と同じ出し方 -->
-                            <td>
-                                <div class="font-medium">{res.name}</div>
-                                <div class="text-base-content/60 text-sm">{res.service_name}</div>
-                                {#if res.conflict_reason}
-                                    <div class="text-error text-sm">{res.conflict_reason}</div>
-                                {/if}
-                                <!-- 手動なら何も出さない。既定と違うときだけ言う -->
-                                {#if !res.manual}
-                                    <!-- ルール名をそのまま入口にする。行にボタンを足すと窮屈になる -->
-                                    <div class="text-base-content/60 text-xs" data-testid="rule-name">
-                                        ルール:
-                                        {#if res.rule_id !== null}
-                                            <a class="link" href="/rules?edit={res.rule_id}">
-                                                {res.rule_name}
-                                            </a>
-                                        {:else}
-                                            (削除済み)
-                                        {/if}
+            <div class="overflow-auto rounded-box bg-base-100 shadow lg:min-h-0 lg:flex-1">
+                <table class="table-pin-rows table table-zebra">
+                    <thead>
+                        <tr>
+                            <th class="whitespace-nowrap">放送日時</th>
+                            <!-- 番組名は省略せずそのまま出す。余りはこの列に寄せる -->
+                            <th class="w-full sm:min-w-48">番組</th>
+                            <th class="whitespace-nowrap">状態</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody data-testid="reservation-list">
+                        {#each data.reservations as res (res.id)}
+                            <!-- 行を押すと番組表と同じ詳細が出る -->
+                            <tr
+                                data-testid="reservation-row"
+                                data-reservation-id={res.id}
+                                data-program-id={res.program_id}
+                                class="hover cursor-pointer"
+                                tabindex="0"
+                                onclick={(event) => rowClick(event, res.program_id, res)}
+                                onkeydown={(event) => rowClick(event, res.program_id, res)}
+                            >
+                                <!-- 日付と時刻で2行にする。1行だと番組名の幅をだいぶ食う -->
+                                <td class="whitespace-nowrap">
+                                    <div>{date(res.start_at)}</div>
+                                    <div class="text-base-content/60 text-sm">
+                                        {time(res.start_at)}〜{time(res.end_at)}
+                                        ({duration(res.start_at, res.end_at)})
                                     </div>
-                                {/if}
-                                {#if !res.encode || res.keep_original}
-                                    <div class="mt-0.5 flex flex-wrap gap-1">
-                                        {#if !res.encode}
-                                            <span class="badge badge-ghost badge-sm">TSのみ</span>
-                                        {/if}
-                                        {#if res.keep_original}
-                                            <span class="badge badge-ghost badge-sm">生TSも残す</span>
-                                        {/if}
-                                    </div>
-                                {/if}
-                            </td>
-                            <!-- 番組の列に幅を寄せているぶん、こちらは縦書きにならないよう畳ませない -->
-                            <td class="whitespace-nowrap">
-                                <span
-                                    class="badge whitespace-nowrap {badgeClass(res.state)}"
-                                    data-testid="reservation-state"
-                                >
-                                    {stateLabel(res.state)}
-                                </span>
-                            </td>
-                            <td class="whitespace-nowrap">
-                                {#if active.includes(res.state)}
-                                    <form method="POST" action="?/cancel" use:submitting>
-                                        <input type="hidden" name="id" value={res.id} />
-                                        <button
-                                            class="btn btn-sm btn-error btn-outline"
-                                            data-testid="cancel-button"
-                                        >
-                                            取消
-                                        </button>
-                                    </form>
-                                {:else if res.state === 'canceled' && res.end_at > Date.now()}
-                                    <!--
+                                </td>
+                                <!-- 局名も種別も番組名の下に小さく。録画一覧と同じ出し方 -->
+                                <td>
+                                    <div class="font-medium">{res.name}</div>
+                                    <div class="text-base-content/60 text-sm">{res.service_name}</div>
+                                    {#if res.conflict_reason}
+                                        <div class="text-error text-sm">{res.conflict_reason}</div>
+                                    {/if}
+                                    <!-- 手動なら何も出さない。既定と違うときだけ言う -->
+                                    {#if !res.manual}
+                                        <!-- ルール名をそのまま入口にする。行にボタンを足すと窮屈になる -->
+                                        <div class="text-base-content/60 text-xs" data-testid="rule-name">
+                                            ルール:
+                                            {#if res.rule_id !== null}
+                                                <a class="link" href="/rules?edit={res.rule_id}">
+                                                    {res.rule_name}
+                                                </a>
+                                            {:else}
+                                                (削除済み)
+                                            {/if}
+                                        </div>
+                                    {/if}
+                                    {#if !res.encode || res.keep_original}
+                                        <div class="mt-0.5 flex flex-wrap gap-1">
+                                            {#if !res.encode}
+                                                <span class="badge badge-ghost badge-sm">TSのみ</span>
+                                            {/if}
+                                            {#if res.keep_original}
+                                                <span class="badge badge-ghost badge-sm">生TSも残す</span>
+                                            {/if}
+                                        </div>
+                                    {/if}
+                                </td>
+                                <!-- 番組の列に幅を寄せているぶん、こちらは縦書きにならないよう畳ませない -->
+                                <td class="whitespace-nowrap">
+                                    <span
+                                        class="badge whitespace-nowrap {badgeClass(res.state)}"
+                                        data-testid="reservation-state"
+                                    >
+                                        {stateLabel(res.state)}
+                                    </span>
+                                </td>
+                                <td class="whitespace-nowrap">
+                                    {#if active.includes(res.state)}
+                                        <form method="POST" action="?/cancel" use:submitting>
+                                            <input type="hidden" name="id" value={res.id} />
+                                            <button
+                                                class="btn btn-sm btn-error btn-outline"
+                                                data-testid="cancel-button"
+                                            >
+                                                取消
+                                            </button>
+                                        </form>
+                                    {:else if res.state === 'canceled' && res.end_at > Date.now()}
+                                        <!--
                                         取り消した予約はルールが作り直さないので、
                                         気が変わったときに戻せるのはここだけ
                                     -->
-                                    <form method="POST" action="?/restore" use:submitting>
-                                        <input type="hidden" name="id" value={res.id} />
-                                        <button class="btn btn-sm" data-testid="restore-button">
-                                            戻す
-                                        </button>
-                                    </form>
-                                {/if}
-                            </td>
-                        </tr>
-                    {:else}
-                        <tr><td colspan="4" class="text-base-content/60">予約はありません</td></tr>
-                    {/each}
-                </tbody>
-            </table>
-        </div>
-    </section>
-
-    <section class="order-1 min-w-0 lg:order-none lg:col-span-3">
-        <!-- 見出しの高さと下の余白は予約側と揃える。並べたときにずれて見えるため -->
-        <div class="mb-2 flex min-h-8 flex-wrap items-center justify-between gap-2">
-            <h2 class="text-lg font-bold">録画</h2>
-            <div class="flex gap-2">
-                <a class="btn btn-sm" href={data.showDeleted ? '/' : '/?deleted=1'}>
-                    {data.showDeleted ? '現存分を表示' : '削除済みを表示'}
-                </a>
-                <form method="POST" action="?/reconcile" use:submitting>
-                    <button class="btn btn-sm" data-testid="reconcile-button">実体と照合</button>
-                </form>
-            </div>
-        </div>
-
-        {#if data.jobs.length > 0}
-            <div class="card bg-base-100 mb-4 shadow" data-testid="encode-panel">
-                <div class="card-body gap-3">
-                    <h2 class="card-title text-base">エンコード</h2>
-                    <ul class="space-y-3" data-testid="encode-list">
-                        {#each data.jobs as job (job.id)}
-                            <li data-testid="encode-row" data-job-id={job.id}>
-                                <div class="flex flex-wrap items-center justify-between gap-2">
-                                    <span class="font-medium">{job.recording_name}</span>
-                                    <div class="flex items-center gap-2">
-                                        <span
-                                            class="badge {badgeClass(job.state)}"
-                                            data-testid="encode-state"
-                                        >
-                                            {stateLabel(job.state)}
-                                        </span>
-                                        <form method="POST" action="?/cancelEncode" use:submitting>
-                                            <input type="hidden" name="id" value={job.id} />
-                                            <button
-                                                class="btn btn-xs btn-error btn-outline"
-                                                data-testid="encode-cancel"
-                                            >
-                                                中止
+                                        <form method="POST" action="?/restore" use:submitting>
+                                            <input type="hidden" name="id" value={res.id} />
+                                            <button class="btn btn-sm" data-testid="restore-button">
+                                                戻す
                                             </button>
                                         </form>
-                                    </div>
-                                </div>
-                                <!-- 失敗したものはここには出ない。録画の行に出て、理由は詳細で見せる -->
-                                <progress class="progress progress-primary w-full" value={job.percent} max="1"
-                                ></progress>
-                                <div class="text-base-content/60 text-xs">
-                                    {percent(job.percent)}{#if job.log}・{job.log}{/if}
-                                </div>
-                            </li>
+                                    {/if}
+                                </td>
+                            </tr>
+                        {:else}
+                            <tr><td colspan="4" class="text-base-content/60">予約はありません</td></tr>
                         {/each}
-                    </ul>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="order-1 min-w-0 lg:order-none lg:col-span-3 lg:flex lg:min-h-0 lg:flex-col">
+            <!-- 見出しの高さと下の余白は予約側と揃える。並べたときにずれて見えるため -->
+            <div class="mb-2 flex min-h-8 flex-wrap items-center justify-between gap-2">
+                <h2 class="text-lg font-bold">録画</h2>
+                <div class="flex gap-2">
+                    <a class="btn btn-sm" href={data.showDeleted ? '/' : '/?deleted=1'}>
+                        {data.showDeleted ? '現存分を表示' : '削除済みを表示'}
+                    </a>
+                    <form method="POST" action="?/reconcile" use:submitting>
+                        <button class="btn btn-sm" data-testid="reconcile-button">実体と照合</button>
+                    </form>
                 </div>
             </div>
-        {/if}
 
-        <!--
-            画面の残りいっぱいまで伸ばして、中だけスクロールさせる。2つ並べたときに、
-            片方が長いともう片方が下に置いていかれるため。
-            高さは実測で決める(class の値はJSが動くまでの当て)
+            <!--
+            残りいっぱいまで伸ばして、中だけスクロールさせる。2つ並べたときに、
+            片方が長いともう片方が下に置いていかれるため
         -->
-        <div class="overflow-auto rounded-box bg-base-100 max-h-[calc(100dvh-14rem)] shadow" use:fillViewport>
-            <table class="table-pin-rows table table-zebra">
-                <thead>
-                    <tr>
-                        <th class="whitespace-nowrap">放送日時</th>
-                        <!-- 番組名は省略せずそのまま出す。余りはこの列に寄せる -->
-                        <th class="w-full sm:min-w-48">番組</th>
-                        <th class="hidden whitespace-nowrap sm:table-cell">サイズ</th>
-                        <th class="whitespace-nowrap">状態</th>
-                        <th class="text-right"></th>
-                    </tr>
-                </thead>
-                <tbody data-testid="recording-list">
-                    {#each data.recordings as rec (rec.id)}
-                        <!-- 行を押すと番組表と同じ詳細が出る -->
-                        <tr
-                            data-testid="recording-row"
-                            data-recording-id={rec.id}
-                            data-program-id={rec.program_id}
-                            data-library-path={rec.library_path}
-                            data-duration-ms={rec.duration_ms}
-                            class="hover cursor-pointer"
-                            tabindex="0"
-                            onclick={(event) => rowClick(event, rec.program_id, rec, rec.encode_error)}
-                            onkeydown={(event) => rowClick(event, rec.program_id, rec, rec.encode_error)}
-                        >
-                            <td class="whitespace-nowrap">
-                                {dateTime(rec.start_at)}
-                                <!-- 番組表の尺ではなく実際に録れた長さ。
+            <div class="overflow-auto rounded-box bg-base-100 shadow lg:min-h-0 lg:flex-1">
+                <table class="table-pin-rows table table-zebra">
+                    <thead>
+                        <tr>
+                            <th class="whitespace-nowrap">放送日時</th>
+                            <!-- 番組名は省略せずそのまま出す。余りはこの列に寄せる -->
+                            <th class="w-full sm:min-w-48">番組</th>
+                            <th class="hidden whitespace-nowrap sm:table-cell">サイズ</th>
+                            <th class="whitespace-nowrap">状態</th>
+                            <th class="text-right"></th>
+                        </tr>
+                    </thead>
+                    <tbody data-testid="recording-list">
+                        {#each data.recordings as rec (rec.id)}
+                            <!-- 行を押すと番組表と同じ詳細が出る -->
+                            <tr
+                                data-testid="recording-row"
+                                data-recording-id={rec.id}
+                                data-program-id={rec.program_id}
+                                data-library-path={rec.library_path}
+                                data-duration-ms={rec.duration_ms}
+                                class="hover cursor-pointer"
+                                tabindex="0"
+                                onclick={(event) => rowClick(event, rec.program_id, rec, rec.encode_error)}
+                                onkeydown={(event) => rowClick(event, rec.program_id, rec, rec.encode_error)}
+                            >
+                                <td class="whitespace-nowrap">
+                                    {dateTime(rec.start_at)}
+                                    <!-- 番組表の尺ではなく実際に録れた長さ。
                                      途中で止めたときやCMを切ったときは合わない -->
-                                <span class="text-base-content/60 text-xs">
-                                    ({recordedDuration(rec)})
-                                </span>
-                            </td>
-                            <td>
-                                <div class="font-medium">{rec.name}</div>
-                                <!-- ファイルの置き場所は普段は見ないので出さない。
+                                    <span class="text-base-content/60 text-xs">
+                                        ({recordedDuration(rec)})
+                                    </span>
+                                </td>
+                                <td>
+                                    <div class="font-medium">{rec.name}</div>
+                                    <!-- ファイルの置き場所は普段は見ないので出さない。
                                      必要なときは data-library-path を見る -->
-                                <div class="text-base-content/60 text-sm">{rec.service_name}</div>
-                                {#if rec.error}
-                                    <!--
+                                    <div class="text-base-content/60 text-sm">{rec.service_name}</div>
+                                    {#if rec.error}
+                                        <!--
                                         失敗したことはこの行に出し、理由は行を押して詳細で見せる。
                                         ffmpeg の出力は長いので一覧に貼ると読みづらい。
                                         削除済みの行では error 列に削除理由が入る。失敗ではないので赤くしない
                                     -->
-                                    <div
-                                        class="line-clamp-2 text-sm {rec.deleted_at === null
-                                            ? 'text-error'
-                                            : 'text-base-content/60'}"
-                                        data-testid="recording-error"
-                                    >
-                                        {rec.error}
-                                        {#if rec.encode_error}
-                                            <span class="text-base-content/60">(押すと理由が出ます)</span>
-                                        {/if}
-                                    </div>
-                                {/if}
-                                {#if rec.cm_cut !== 'off' && cmRanges(rec.cm_ranges)}
-                                    <!-- 何を検出したかは録画ごとに違うので出す。
+                                        <div
+                                            class="line-clamp-2 text-sm {rec.deleted_at === null
+                                                ? 'text-error'
+                                                : 'text-base-content/60'}"
+                                            data-testid="recording-error"
+                                        >
+                                            {rec.error}
+                                            {#if rec.encode_error}
+                                                <span class="text-base-content/60">(押すと理由が出ます)</span>
+                                            {/if}
+                                        </div>
+                                    {/if}
+                                    {#if rec.cm_cut !== 'off' && cmRanges(rec.cm_ranges)}
+                                        <!-- 何を検出したかは録画ごとに違うので出す。
                                          コーデックとCMの設定そのものは全体設定なので出さない -->
-                                    <div class="text-base-content/60 text-xs" data-testid="cm-info">
-                                        CM {cmRanges(rec.cm_ranges)}
-                                    </div>
-                                {/if}
-                            </td>
-                            <td class="hidden whitespace-nowrap sm:table-cell">{size(rec.ts_size)}</td>
-                            <td class="whitespace-nowrap">
-                                <!-- 消したものは「視聴可能」のままだと嘘になる。
+                                        <div class="text-base-content/60 text-xs" data-testid="cm-info">
+                                            CM {cmRanges(rec.cm_ranges)}
+                                        </div>
+                                    {/if}
+                                </td>
+                                <td class="hidden whitespace-nowrap sm:table-cell">{size(rec.ts_size)}</td>
+                                <td class="whitespace-nowrap">
+                                    <!-- 消したものは「視聴可能」のままだと嘘になる。
                                      行は履歴として残るので、状態のほうを差し替える -->
-                                <span
-                                    class="badge whitespace-nowrap {rec.deleted_at === null
-                                        ? badgeClass(rec.state)
-                                        : 'badge-ghost'}"
-                                    data-testid="recording-state"
-                                >
-                                    {rec.deleted_at === null ? stateLabel(rec.state) : '削除済み'}
-                                </span>
-                            </td>
-                            <!--
+                                    <span
+                                        class="badge whitespace-nowrap {rec.deleted_at === null
+                                            ? badgeClass(rec.job_state ?? rec.state)
+                                            : 'badge-ghost'}"
+                                        data-testid="recording-state"
+                                    >
+                                        {#if rec.deleted_at !== null}
+                                            削除済み
+                                        {:else if rec.job_state === 'running'}
+                                            エンコード中
+                                        {:else if rec.job_state === 'queued'}
+                                            エンコード待ち
+                                        {:else}
+                                            {stateLabel(rec.state)}
+                                        {/if}
+                                    </span>
+                                    <!--
+                                    進み具合は状態のすぐ下に出す。別のカードに分けていた頃は
+                                    同じ番組が2箇所に並び、増えるたびに表が下へずれていた
+                                -->
+                                    {#if rec.job_id !== null}
+                                        <div class="mt-1 w-28" data-testid="encode-progress">
+                                            <progress
+                                                class="progress progress-primary h-1 w-full"
+                                                value={rec.job_percent ?? 0}
+                                                max="1"
+                                            ></progress>
+                                            <div class="text-base-content/60 text-xs">
+                                                {percent(rec.job_percent ?? 0)}
+                                            </div>
+                                            {#if rec.job_log}
+                                                <!-- 速さや残りはここでしか分からない。折り返して全部出す -->
+                                                <div
+                                                    class="text-base-content/60 text-xs break-words whitespace-normal"
+                                                    data-testid="encode-log"
+                                                >
+                                                    {rec.job_log}
+                                                </div>
+                                            {/if}
+                                        </div>
+                                    {/if}
+                                </td>
+                                <!--
                                 広い画面では畳ませない(縦積みになる)。狭い画面では畳ませる。
                                 右端に寄せる。再生ボタンが出ない行でも削除の位置が揃う
                             -->
-                            <td class="sm:whitespace-nowrap">
-                                <div class="flex flex-wrap items-center justify-end gap-2 sm:flex-nowrap">
-                                    {#if rec.deleted_at === null}
-                                        <!--
+                                <td class="sm:whitespace-nowrap">
+                                    <div class="flex flex-wrap items-center justify-end gap-2 sm:flex-nowrap">
+                                        {#if rec.deleted_at === null}
+                                            <!--
                                             まだエンコードしていないものや、引き継いだ未エンコードの
                                             録画は生TSしか無い。配信は library_path ?? ts_path を返すので、
                                             どちらかがあれば開ける
                                         -->
-                                        {#if (rec.library_path ?? rec.ts_path) !== null && platform !== null}
-                                            <!--
+                                            {#if (rec.library_path ?? rec.ts_path) !== null}
+                                                <!--
                                     ブラウザは MPEG-2 も AV1+Opus の mkv も素直には再生できない。
                                     端末に入っているプレイヤーに URL を渡して開かせる
                                 -->
-                                            {#each playLinks(fileUrl(rec.id), rec.name, platform, data.credentials) as link (link.href)}
+                                                {#each playLinks(fileUrl(rec.id), rec.name, platform, data.credentials) as link (link.href)}
+                                                    <a
+                                                        class="btn btn-sm btn-primary"
+                                                        href={link.href}
+                                                        data-testid="play-link"
+                                                        title={link.note ?? ''}
+                                                    >
+                                                        {link.label}
+                                                    </a>
+                                                {/each}
                                                 <a
-                                                    class="btn btn-sm btn-primary"
-                                                    href={link.href}
-                                                    data-testid="play-link"
-                                                    title={link.note ?? ''}
+                                                    class="btn btn-sm btn-ghost"
+                                                    href={downloadUrl(rec.id)}
+                                                    download
+                                                    data-testid="download-link"
                                                 >
-                                                    {link.label}
+                                                    ダウンロード
                                                 </a>
-                                            {/each}
-                                            <a
-                                                class="btn btn-sm btn-ghost"
-                                                href={downloadUrl(rec.id)}
-                                                download
-                                                data-testid="download-link"
-                                            >
-                                                ダウンロード
-                                            </a>
-                                        {/if}
-                                        <!--
-                                            元になるのは生TS。エンコード済みを元に録り直しても
-                                            画質は戻らないので、生TSがあるときだけ出す。
-                                            録画中・エンコード中は元がまだ書かれている最中なので触らせない
-                                        -->
-                                        {#if encodeSource(rec) !== null && rec.state !== 'recording' && rec.state !== 'encoding'}
-                                            <form method="POST" action="?/reencode" use:submitting>
-                                                <input type="hidden" name="id" value={rec.id} />
-                                                <button class="btn btn-sm" data-testid="reencode-button"
-                                                    >再エンコード</button
-                                                >
-                                            </form>
-                                        {/if}
-                                        <form method="POST" action="?/delete" use:submitting>
-                                            <input type="hidden" name="id" value={rec.id} />
-                                            {#if armed === rec.id}
-                                                <button
-                                                    class="btn btn-sm btn-error"
-                                                    data-testid="delete-confirm"
-                                                >
-                                                    本当に削除
-                                                </button>
-                                            {:else}
-                                                <button
-                                                    type="button"
-                                                    class="btn btn-sm btn-error btn-outline"
-                                                    onclick={() => arm(rec.id)}
-                                                    data-testid="delete-button"
-                                                >
-                                                    削除
-                                                </button>
                                             {/if}
-                                        </form>
-                                    {:else}
-                                        <!--
+                                            {#if rec.job_id !== null}
+                                                <!--
+                                                動いている間は中止だけ。この裏で ffmpeg が
+                                                元のTSを読んでいるので、消させると道連れになる
+                                            -->
+                                                <form method="POST" action="?/cancelEncode" use:submitting>
+                                                    <input type="hidden" name="id" value={rec.job_id} />
+                                                    <button
+                                                        class="btn btn-sm btn-error btn-outline"
+                                                        data-testid="encode-cancel"
+                                                    >
+                                                        エンコード中止
+                                                    </button>
+                                                </form>
+                                            {:else}
+                                                <!--
+                                                元になるのは生TS。エンコード済みを元に録り直しても
+                                                画質は戻らないので、生TSがあるときだけ出す。
+                                                録画中は元がまだ書かれている最中なので触らせない
+                                            -->
+                                                {#if encodeSource(rec) !== null && rec.state !== 'recording'}
+                                                    <form method="POST" action="?/reencode" use:submitting>
+                                                        <input type="hidden" name="id" value={rec.id} />
+                                                        <button
+                                                            class="btn btn-sm"
+                                                            data-testid="reencode-button">再エンコード</button
+                                                        >
+                                                    </form>
+                                                {/if}
+                                                <form method="POST" action="?/delete" use:submitting>
+                                                    <input type="hidden" name="id" value={rec.id} />
+                                                    {#if armed === rec.id}
+                                                        <button
+                                                            class="btn btn-sm btn-error"
+                                                            data-testid="delete-confirm"
+                                                        >
+                                                            本当に削除
+                                                        </button>
+                                                    {:else}
+                                                        <button
+                                                            type="button"
+                                                            class="btn btn-sm btn-error btn-outline"
+                                                            onclick={() => arm(rec.id)}
+                                                            data-testid="delete-button"
+                                                        >
+                                                            削除
+                                                        </button>
+                                                    {/if}
+                                                </form>
+                                            {/if}
+                                        {:else}
+                                            <!--
                                             消したものにはファイルが無いので、押せるものは何もない。
                                             空欄のままだと列が崩れて「出るはずのものが出ていない」に
                                             見えるので、いつ消したかを同じ場所に出す
                                         -->
-                                        <span class="text-base-content/60 text-sm" data-testid="deleted-at">
-                                            {date(rec.deleted_at!)} に削除
-                                        </span>
-                                    {/if}
-                                </div>
-                            </td>
-                        </tr>
-                    {:else}
-                        <tr><td colspan="5" class="text-base-content/60">録画はありません</td></tr>
-                    {/each}
-                </tbody>
-            </table>
-        </div>
-    </section>
+                                            <span
+                                                class="text-base-content/60 text-sm"
+                                                data-testid="deleted-at"
+                                            >
+                                                {date(rec.deleted_at!)} に削除
+                                            </span>
+                                        {/if}
+                                    </div>
+                                </td>
+                            </tr>
+                        {:else}
+                            <tr><td colspan="5" class="text-base-content/60">録画はありません</td></tr>
+                        {/each}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
 </div>
 
 {#if detail}
