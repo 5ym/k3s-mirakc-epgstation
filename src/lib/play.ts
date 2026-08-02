@@ -6,16 +6,21 @@
  * サーバ側で作らず、ブラウザで作る(どの端末から見ているかで渡し先が変わるため)。
  */
 
-export type Platform = 'windows' | 'android' | 'ios' | 'other';
+export type Platform = 'windows' | 'mac' | 'android' | 'ios' | 'other';
 
-/** User-Agent から、どのスキームを出すか決めるためだけの雑な判定 */
-export function detectPlatform(userAgent: string): Platform {
+/**
+ * User-Agent から、どのスキームを出すか決めるためだけの雑な判定。
+ *
+ * iPadOS は Macintosh を名乗るので、UA だけでは Mac と見分けられない。
+ * 渡す口が違う(Mac は denpa://、iPad は vlc-x-callback://)ので、
+ * タッチ点数で分ける。Mac のトラックパッドは maxTouchPoints 0 になる。
+ */
+export function detectPlatform(userAgent: string, touchPoints = 0): Platform {
     const ua = userAgent.toLowerCase();
-    // iPadOS は Macintosh を名乗るので、タッチの有無でしか見分けられない。
-    // ここでは iPhone/iPad/iPod だけを iOS 扱いにする
     if (/iphone|ipad|ipod/.test(ua)) return 'ios';
     if (/android/.test(ua)) return 'android';
     if (/windows/.test(ua)) return 'windows';
+    if (/macintosh|mac os x/.test(ua)) return touchPoints > 1 ? 'ios' : 'mac';
     return 'other';
 }
 
@@ -51,12 +56,16 @@ export interface PlayLink {
 /**
  * 再生リンク。`url` は録画ファイルの絶対URL、`title` は番組名。
  *
- * Android は「動画を開く」インテントを投げて、どのアプリで開くかは端末に選ばせる。
+ * Android だけは「動画を開く」インテントを投げて、どのアプリで開くかを端末に選ばせられる。
  * アプリを名指しすると入っていないときに何も起きないうえ、好みも人それぞれなので、
  * 選択は端末の役目にする。
  *
- * iOS には同じ仕組みが無く、アプリごとの URL スキームを直に叩くしかない。
- * Windows も同様で、mpv-handler (https://github.com/akiirui/mpv-handler) が要る。
+ * **他の端末にこれに当たる仕組みは無い。** リンクから開けるのは「そのスキームを
+ * 登録しているアプリ」だけで、選択画面を出す方法がない(iOS の共有シートはリンクからは
+ * 呼べない)。そのため Windows・Mac・iOS は VLC 決め打ちにしてある。
+ *
+ * Windows と Mac は VLC 自身がスキームを持たないので、denpa:// を自前で用意して
+ * windows/denpa.ps1・mac/denpa.sh で登録する。リンクの形は両者で同じ。
  */
 export function playLinks(
     url: string,
@@ -69,13 +78,9 @@ export function playLinks(
     const encodedUrl = encodeURIComponent(authed);
     const encodedTitle = encodeURIComponent(title);
 
-    if (platform === 'windows') {
+    if (platform === 'windows' || platform === 'mac') {
         /*
-         * denpa 自前のスキーム。windows/denpa.ps1 で登録し、VLC (または mpv) に渡す。
-         *
-         * Windows には Android の intent のような仕組みが無く、プレイヤーごとの
-         * スキームを直に叩くしかない。VLC は Windows 版にスキームを持たないので、
-         * こちらで1つ用意して、どのプレイヤーで開くかは登録時に決める。
+         * denpa 自前のスキーム。登録役が VLC に渡す。
          *
          * URL もタイトルもパディング無しの base64url にする。生のURLを
          * クエリに入れると、資格情報の @ や記号でブラウザ側の解釈がぶれる
@@ -84,14 +89,14 @@ export function playLinks(
             {
                 label: '再生',
                 href: `denpa://play/${base64Url(authed)}/?title=${base64Url(title)}`,
-                note: 'windows/denpa.ps1 で登録が必要',
+                note: platform === 'windows' ? 'windows/denpa.ps1 で登録が必要' : 'mac/denpa.sh で登録が必要',
             },
         ];
     }
     if (platform === 'android') {
         // scheme は Intent 側に持たせるので、URL からは取り除いて渡す。
         // 資格情報は authority の一部なので、取り除いたあとにも残る
-        // (user:pass@host/... の形)。S.title は VLC・mpv-android とも見てくれる
+        // (user:pass@host/... の形)。S.title は VLC も MX Player も見てくれる
         const scheme = url.startsWith('https') ? 'https' : 'http';
         const rest = authed.replace(/^https?:\/\//, '');
         return [
@@ -106,16 +111,8 @@ export function playLinks(
         ];
     }
     if (platform === 'ios') {
-        return [
-            {
-                label: 'VLC で再生',
-                href: `vlc-x-callback://x-callback-url/stream?url=${encodedUrl}`,
-            },
-            {
-                label: 'Infuse で再生',
-                href: `infuse://x-callback-url/play?url=${encodedUrl}&name=${encodedTitle}`,
-            },
-        ];
+        // VLC 決め打ち。iOS はリンクから「どのアプリで開くか」を選ばせられない
+        return [{ label: 'VLC で再生', href: `vlc-x-callback://x-callback-url/stream?url=${encodedUrl}` }];
     }
     // 判定できない端末には、プレイヤーに貼れる素のURLだけ出す
     return [{ label: 'ファイルを開く', href: url }];

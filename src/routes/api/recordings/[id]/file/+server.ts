@@ -6,7 +6,7 @@ import type { Recording } from '$lib/types';
 
 /**
  * 録画ファイルをそのまま配る。
- * mpv / VLC / Infuse に URL を渡して直接再生させるための口。
+ * VLC / Infuse / Kodi に URL を渡して直接再生させるための口。
  */
 function respond(id: number, request: Request, download: boolean): Response {
     if (!Number.isFinite(id)) error(400, '録画IDが不正です');

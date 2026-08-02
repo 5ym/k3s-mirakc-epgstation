@@ -2,8 +2,12 @@
 #
 #   docker compose -f compose.prod.yml up -d
 #
-# チューナーのデバイスは環境ごとに違うので、下の devices と
-# mirakc/config.yml の tuners を手元に合わせてください。
+# イメージは公開してあるので、リポジトリを持ってこなくてもこのファイルだけで動きます。
+# 自分で焼くなら image: を消して build: を書いてください。
+#
+# 手元に合わせるところは2つ。
+#   1. 下の devices  … チューナーとカードリーダーのデバイス
+#   2. ./config/config.yml の tuners … 初回起動で出てくるので、そこに書く
 name: denpa
 
 services:
@@ -11,9 +15,7 @@ services:
     # PID 1 はエージェント (mirakc/agent.ts) で、mirakc を子として抱えます。
     # チャンネルスキャンとB-CASカードの面倒を見るためです
     mirakc:
-        build:
-            context: .
-            dockerfile: mirakc/Dockerfile
+        image: ghcr.io/danything/mirakc:latest
         restart: unless-stopped
         # チューナーとカードリーダーに触るため
         privileged: true
@@ -27,9 +29,10 @@ services:
             RECORDED_DIR: /denpa-recorded
             LIBRARY_DIR: /denpa-library
         volumes:
-            # 設定。スキャン結果が書き戻されるので名前付きボリュームに置く。
+            # 設定。初回起動で config.yml が出てくるので、tuners はここで直す。
+            # ファイル単位ではなくディレクトリで渡す (スキャン結果を書き戻すため)。
             # /etc/mirakc は mirakc 自身の strings.yml が居るので使わない
-            - mirakc-config:/app-config
+            - ./config:/app-config
             - mirakc-epg:/var/lib/mirakc/epg
             - denpa-recorded:/denpa-recorded
             - denpa-library:/denpa-library
@@ -37,9 +40,7 @@ services:
             - '40772:40772'
 
     denpa:
-        build:
-            context: .
-            target: runtime
+        image: ghcr.io/danything/denpa:latest
         restart: unless-stopped
         depends_on:
             - mirakc
@@ -62,7 +63,6 @@ services:
             - '3000:3000'
 
 volumes:
-    mirakc-config:
     mirakc-epg:
     denpa-data:
     # 生TSの作業領域。mirakc 側にも見せて、スクランブル解除をあちらにやらせる

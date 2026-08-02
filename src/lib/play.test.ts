@@ -5,12 +5,21 @@ const TITLE = 'テストアニメ 第1話';
 
 const URL = 'http://denpa.local/api/recordings/12/file';
 
+const MAC_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)';
+
 describe('detectPlatform', () => {
     test('端末を見分ける', () => {
         expect(detectPlatform('Mozilla/5.0 (Windows NT 10.0; Win64; x64)')).toBe('windows');
         expect(detectPlatform('Mozilla/5.0 (Linux; Android 14; Pixel 8)')).toBe('android');
         expect(detectPlatform('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)')).toBe('ios');
+        expect(detectPlatform(MAC_UA)).toBe('mac');
         expect(detectPlatform('Mozilla/5.0 (X11; Linux x86_64)')).toBe('other');
+    });
+
+    test('iPadOS は Macintosh を名乗るのでタッチ点数で分ける', () => {
+        // 渡す先が違う (Mac は denpa://、iPad は vlc-x-callback://)
+        expect(detectPlatform(MAC_UA, 5)).toBe('ios');
+        expect(detectPlatform(MAC_UA, 0)).toBe('mac');
     });
 });
 
@@ -24,7 +33,7 @@ describe('base64Url', () => {
 });
 
 /** denpa://play/<ここ>/?... を取り出す */
-function mpvUrl(href: string): string {
+function schemeUrl(href: string): string {
     return href.replace('denpa://play/', '').replace(/\/\?.*$/, '');
 }
 
@@ -48,13 +57,20 @@ describe('playLinks', () => {
         expect(link.href).toContain(`S.title=${encodeURIComponent(TITLE)}`);
     });
 
-    test('iOS は x-callback-url でURLを渡す', () => {
+    test('Mac も Windows と同じリンクを出す', () => {
+        // 受け口 (mac/denpa.sh と windows/denpa.ps1) が違うだけで、リンクの形は同じ
+        const [mac] = playLinks(URL, TITLE, 'mac');
+        const [windows] = playLinks(URL, TITLE, 'windows');
+        expect(mac.href).toBe(windows.href);
+        expect(mac.note).toContain('denpa.sh');
+    });
+
+    test('iOS は VLC 決め打ち', () => {
+        // どのアプリで開くか選ばせる仕組みが iOS に無いので、1つに絞る
         const links = playLinks(URL, TITLE, 'ios');
+        expect(links).toHaveLength(1);
         expect(links[0].href).toContain('vlc-x-callback://x-callback-url/stream?url=');
-        expect(links[1].href).toContain('infuse://x-callback-url/play?url=');
-        for (const link of links) expect(link.href).toContain(encodeURIComponent(URL));
-        // 番組名を渡せるものには渡す
-        expect(links[1].href).toContain(`name=${encodeURIComponent(TITLE)}`);
+        expect(links[0].href).toContain(encodeURIComponent(URL));
     });
 
     test('判定できない端末には素のURLを出す', () => {
@@ -74,13 +90,12 @@ describe('ベーシック認証つきのURL', () => {
 
     test('Windows のスキームには資格情報を埋めたURLを渡す', () => {
         const [link] = playLinks(URL, TITLE, 'windows', cred);
-        const decoded = atob(mpvUrl(link.href).replace(/-/g, '+').replace(/_/g, '/'));
+        const decoded = atob(schemeUrl(link.href).replace(/-/g, '+').replace(/_/g, '/'));
         expect(decoded).toBe('http://denpa:p%40ss%20word@denpa.local/api/recordings/12/file');
     });
 
     test('iOS のスキームにも埋める', () => {
-        const links = playLinks(URL, TITLE, 'ios', cred);
-        for (const link of links) {
+        for (const link of playLinks(URL, TITLE, 'ios', cred)) {
             // searchParams が一段解いてくれる。中身は資格情報つきのURLそのもの
             const url = new globalThis.URL(link.href).searchParams.get('url') ?? '';
             expect(url).toBe('http://denpa:p%40ss%20word@denpa.local/api/recordings/12/file');
@@ -99,6 +114,6 @@ describe('ベーシック認証つきのURL', () => {
 
     test('資格情報が無ければ素のURLのまま', () => {
         const [link] = playLinks(URL, TITLE, 'windows');
-        expect(atob(mpvUrl(link.href))).toBe(URL);
+        expect(atob(schemeUrl(link.href))).toBe(URL);
     });
 });

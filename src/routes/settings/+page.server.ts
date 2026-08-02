@@ -32,7 +32,7 @@ export function load() {
 
 export const actions = {
     /**
-     * ベーシック認証。mpv も Kodi もリダイレクト型の認証を扱えないので、
+     * ベーシック認証。VLC も Kodi もリダイレクト型の認証を扱えないので、
      * ファイルを取りに来る口だけにかけられるようにしてある。
      */
     saveAuth: async ({ request }) => {

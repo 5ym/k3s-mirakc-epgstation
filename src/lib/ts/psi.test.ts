@@ -103,3 +103,44 @@ describe('サービスの読み取り', () => {
         expect(reader.transport).toBeNull();
     });
 });
+
+/**
+ * 電波が弱いと途中でバイトが落ちる。1バイトずれただけで以降ずっと
+ * 1パケットも読めなくなると、受信できているのに「局が居ない」ことになる。
+ */
+describe('同期の取り直し', () => {
+    /** 実際のチューナーと同じで、同じ表が何度も流れてくる状況にする */
+    function repeated(times = 4): Uint8Array {
+        const parts: number[] = [];
+        for (let i = 0; i < times; i++) parts.push(...stream());
+        return Uint8Array.from(parts);
+    }
+
+    test('頭がずれていても読める', () => {
+        const body = repeated();
+        // わざと 0x47 で埋める。頭が1つ合っただけでは切れ目とは言えない
+        const data = new Uint8Array(37 + body.length);
+        data.fill(0x47, 0, 37);
+        data.set(body, 37);
+
+        const reader = new ServiceReader();
+        reader.feed(data);
+        expect(reader.complete).toBe(true);
+    });
+
+    test('途中で落ちても後ろを読める', () => {
+        const data = repeated();
+        // 頭の NIT の直後で 3 バイト落とす。以降の切れ目が 188 の倍数から外れる
+        const broken = Uint8Array.from([...data.subarray(0, 188), ...data.subarray(191)]);
+        const reader = new ServiceReader();
+        reader.feed(broken);
+        expect(reader.transport).not.toBeNull();
+    });
+
+    test('同期が取れなくても溜め込まない', () => {
+        const reader = new ServiceReader();
+        for (let i = 0; i < 50; i++) reader.feed(new Uint8Array(4096).fill(0x00));
+        reader.feed(repeated());
+        expect(reader.complete).toBe(true);
+    });
+});

@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { encodeSource } from '../source';
 import type { EncodeJob, Recording, VideoCodec } from '../types';
 import { type CmDetection, chapterMetadata, detectCm, keepRanges, type Range } from './cm';
 import { config } from './config';
@@ -430,17 +431,6 @@ async function trimCm(jobId: number, input: string, keep: Range[]): Promise<stri
 }
 
 /**
- * エンコードの元にできるファイル。
- *
- * 生TSがあればそれ。無ければ保存先にあるものを使う。引き継いだ録画は
- * 生TSを持たず、中身がまだ生TSのまま「視聴可能」になっていることがある
- * (EPGStation 側でエンコードが済んでいなかったもの)。
- */
-export function encodeSource(recording: Recording): string | null {
-    return recording.ts_path ?? recording.library_path;
-}
-
-/**
  * 生TSを残すか。
  *
  * 録画ごとの指定ではなく全体設定に従う。録り直すたびに「あのときどうしたか」を
@@ -481,9 +471,12 @@ async function runJob(jobId: number): Promise<void> {
     if (recording === undefined || input === null) {
         database()
             .prepare(`UPDATE encode_jobs SET state = 'failed', error = ?, finished_at = ? WHERE id = ?`)
-            .run('元の録画ファイルが見つかりません', now(), jobId);
+            .run('元にできる生TSがありません', now(), jobId);
         return;
     }
+
+    // 引き継いだ録画は生TSが保存先に置かれている。後片付けの扱いが変わる
+    const fromLibrary = input === recording.library_path;
 
     database()
         .prepare(`UPDATE recordings SET state = 'encoding', updated_at = ? WHERE id = ?`)
@@ -512,7 +505,7 @@ async function runJob(jobId: number): Promise<void> {
             fail(jobId, recording, `スクランブルを解除できませんでした: ${result.error}`);
             return;
         }
-        if (keepOriginal() && recording.ts_path === input) {
+        if (keepOriginal()) {
             // 生TSを残す設定なら、残すのは解けたほうだけにする。
             // 掛かったままのTSを取っておいても、あとから解ける保証は無い
             renameSync(target, input);
@@ -585,9 +578,13 @@ async function runJob(jobId: number): Promise<void> {
     renameSync(working, output);
     /*
      * 番組名が変わっていると置き場所も変わる。前のエンコード済みが別名で残ると
-     * 同じ録画が2本並ぶので、サイドカーごと片付ける
+     * 同じ録画が2本並ぶので、サイドカーごと片付ける。
+     *
+     * ただし引き継いだ録画では、その「前のもの」が生TSそのもの。
+     * 残す設定なら消さず、下で ts_path として覚え直す
      */
-    if (recording.library_path !== null && recording.library_path !== output) {
+    const keptSource = fromLibrary && keepOriginal();
+    if (recording.library_path !== null && recording.library_path !== output && !keptSource) {
         removeIfExists(recording.library_path);
         const stale = sidecarPaths(recording.library_path);
         removeIfExists(stale.nfo);
@@ -628,7 +625,14 @@ async function runJob(jobId: number): Promise<void> {
         },
     });
 
-    if (keepOriginal()) {
+    if (keptSource) {
+        // 引き継いだ録画の元は保存先に置かれたまま。これから先は生TSとして扱う
+        database()
+            .prepare(
+                `UPDATE recordings SET state = 'available', library_path = ?, ts_path = ?, ts_size = ?, updated_at = ? WHERE id = ?`,
+            )
+            .run(output, input, size, now(), recording.id);
+    } else if (keepOriginal()) {
         database()
             .prepare(
                 `UPDATE recordings SET state = 'available', library_path = ?, ts_size = ?, updated_at = ? WHERE id = ?`,

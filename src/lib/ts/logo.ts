@@ -13,7 +13,7 @@
  * 片方だけでは紐付かないので、両方見て初めて「この局のロゴ」になる。
  */
 
-import { descriptors, PACKET, SectionAssembler } from './psi';
+import { descriptors, PacketStream, SectionAssembler } from './psi';
 
 const PID_CDT = 0x0029;
 const PID_SDT = 0x0011;
@@ -107,7 +107,7 @@ export interface CollectedLogo {
 export class LogoCollector {
     private readonly cdt = new SectionAssembler(PID_CDT);
     private readonly sdt = new SectionAssembler(PID_SDT);
-    private rest = new Uint8Array(0);
+    private readonly packets = new PacketStream();
 
     /** logo_id ごとの、いま持っている一番大きいロゴ */
     private readonly logos = new Map<number, LogoData>();
@@ -115,13 +115,7 @@ export class LogoCollector {
     private readonly links = new Map<number, number>();
 
     feed(chunk: Uint8Array): void {
-        const data = new Uint8Array(this.rest.length + chunk.length);
-        data.set(this.rest);
-        data.set(chunk, this.rest.length);
-
-        const usable = data.length - (data.length % PACKET);
-        for (let at = 0; at < usable; at += PACKET) {
-            const packet = data.subarray(at, at + PACKET);
+        for (const packet of this.packets.feed(chunk)) {
             for (const section of this.cdt.feed(packet)) {
                 const logo = parseCdt(section);
                 if (logo !== null && logo.data.length > 0) this.remember(logo);
@@ -132,7 +126,6 @@ export class LogoCollector {
                 }
             }
         }
-        this.rest = data.slice(usable);
     }
 
     private remember(logo: LogoData): void {

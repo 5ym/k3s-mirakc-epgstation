@@ -28,6 +28,14 @@ export const ADDED_COLUMNS: { table: string; column: string; definition: string 
     { table: 'programs', column: 'genre_detail', definition: 'TEXT' },
     // 引き継ぎ元での識別子。二重に取り込まないための印
     { table: 'rules', column: 'source', definition: 'TEXT' },
+    /*
+     * キーワードを当てる範囲 (name / description / extended のカンマ区切り)。
+     *
+     * 既定値がスキーマ側 ('name') と違うのはわざと。この列が無かった頃のルールは
+     * 「番組名+概要」で当てていたので、そのまま埋めないと黙って当たらなくなる。
+     * 新しく作るルールの初期値は番組名だけ (画面側)
+     */
+    { table: 'rules', column: 'search_fields', definition: "TEXT NOT NULL DEFAULT 'name,description'" },
     // ARIB のサービス種別。1 がデジタルTV
     { table: 'services', column: 'service_type', definition: 'INTEGER NOT NULL DEFAULT 1' },
 ];
@@ -101,6 +109,8 @@ CREATE TABLE IF NOT EXISTS rules (
     name TEXT NOT NULL,
     keyword TEXT NOT NULL DEFAULT '',
     ignore_keyword TEXT NOT NULL DEFAULT '',
+    -- キーワードを当てる範囲。name / description / extended のカンマ区切り
+    search_fields TEXT NOT NULL DEFAULT 'name',
     service_ids TEXT,                 -- JSON 配列。NULL は全チャンネル対象
     service_types TEXT,               -- JSON 配列 (GR/BS/CS)。個別チャンネルとのORで効く
     genres TEXT,                      -- JSON 配列 (lv1)。NULL は全ジャンル

@@ -17,7 +17,7 @@ export function contentDisposition(filename: string, attachment: boolean): strin
 /**
  * ファイルをそのまま返す。Range に対応する。
  *
- * mpv も VLC も Kodi も Range でシークする。対応していないと、
+ * VLC も Infuse も Kodi も Range でシークする。対応していないと、
  * プレイヤーによっては全部落とし終わるまで早送りできない。
  */
 export function serveFile(

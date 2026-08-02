@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { nitSection, packetize, sdtSection } from '../src/lib/ts/synth';
@@ -19,6 +19,20 @@ function writeStream(path: string, services: [number, number][]): void {
         ...packetize(0x0011, sdtSection(0x0408, 0x0004, services), 3),
     ];
     writeFileSync(path, Uint8Array.from(data));
+}
+
+/** その文字列を含むプロセスの数。孫が残っていないかを見るのに使う */
+function running(needle: string): number {
+    let count = 0;
+    for (const name of readdirSync('/proc')) {
+        if (!/^\d+$/.test(name)) continue;
+        try {
+            if (readFileSync(`/proc/${name}/cmdline`, 'utf8').includes(needle)) count++;
+        } catch {
+            // 見ている間に終わったもの
+        }
+    }
+    return count;
 }
 
 function fakeTuner(services: [number, number][] = [[1024, 0x01]]): string {
@@ -100,9 +114,34 @@ describe('1チャンネルの読み取り', () => {
         // SDT だけ。どのネットワークのものか分からないので設定には書けない
         const path = join(mkdtempSync(join(tmpdir(), 'denpa-scan-')), 'half.ts');
         writeFileSync(path, packetize(0x0011, sdtSection(0x0408, 0x0004, [[1024, 0x01]])));
-        const { services, error } = await readServices(`cat ${path}; sleep 5`, 2000);
+        const { services, error, signal } = await readServices(`cat ${path}; sleep 5`, 2000);
         expect(services).toBeNull();
-        expect(error).toBe('受信できませんでした');
+        // 「受信できませんでした」で片付けない。電波は来ているので疑うところが違う
+        expect(signal).toBe(true);
+        expect(error).toBe('NIT が来ませんでした');
+    });
+
+    test('失敗した理由を持ち帰る', async () => {
+        // recisdb は「デバイスが使用中」などを stderr に書く。捨てると原因が分からない
+        const { error, signal } = await readServices('echo "Cannot open device" >&2; exit 1', 5000);
+        expect(signal).toBe(false);
+        expect(error).toBe('受信できませんでした (Cannot open device)');
+    });
+
+    test('パイプラインでも孫プロセスを残さない', async () => {
+        /*
+         * 掴んだままにするとチューナーが空かず、以降のチャンネルが全部
+         * 「受信できませんでした」になる。sh を1つ殺すだけでは足りない
+         */
+        const path = fakeTuner();
+        // /proc から見分けるため、待つ側は名前がユニークなスクリプトにする
+        const hold = join(mkdtempSync(join(tmpdir(), 'denpa-hold-')), 'hold.sh');
+        writeFileSync(hold, 'sleep 300\n');
+
+        const { error } = await readServices(`{ cat ${path}; sh ${hold}; } | cat`, 5000);
+        expect(error).toBeNull();
+        // 揃った時点で打ち切るので、この時点ではまだ sleep している最中のはず
+        expect(running(hold)).toBe(0);
     });
 
     test('揃った時点で打ち切る', async () => {
@@ -141,6 +180,25 @@ describe('総当たり', () => {
             { name: 'a', types: ['GR'], command: `cat ${path}`, disabled: true },
         ]).run([['GR', ['T20']]]);
         expect(found).toEqual([]);
+    });
+
+    test('電波は来たのに揃わなかったチャンネルはもう一度試す', async () => {
+        // NIT は 10 秒に1回。選局が落ち着くのが遅れると1回も入らないことがある
+        const half = join(mkdtempSync(join(tmpdir(), 'denpa-scan-')), 'half.ts');
+        writeFileSync(half, packetize(0x0011, sdtSection(0x0408, 0x0004, [[1024, 0x01]])));
+
+        const lines: (string | undefined)[] = [];
+        await new Scanner([{ name: 'a', types: ['GR'], command: `cat ${half}` }], (p) =>
+            lines.push(p.line),
+        ).run([['GR', ['T20']]]);
+        expect(lines).toContain('GR: 1ch をもう一度試します');
+
+        // 何も来なかったチャンネルは回し直さない (総当たりが倍の時間になる)
+        const quiet: (string | undefined)[] = [];
+        await new Scanner([{ name: 'a', types: ['GR'], command: 'true' }], (p) => quiet.push(p.line)).run([
+            ['GR', ['T20']],
+        ]);
+        expect(quiet.some((line) => line?.includes('もう一度'))).toBe(false);
     });
 
     test('受信できなかったチャンネルは残さない', async () => {

@@ -1,4 +1,5 @@
 import { type Genre, genreMatches } from '$lib/arib';
+import { parseSearchFields, type SearchField } from '../search';
 import type { Program, Rule } from '../types';
 import { database, now, queryAll } from './db';
 import { settings } from './settings';
@@ -14,9 +15,28 @@ function parseList(json: string | null): number[] | null {
     }
 }
 
-/** 検索対象のテキスト。番組名だけだと「ゲスト名で拾う」ができないので概要も含める */
-function haystack(program: Pick<Program, 'name' | 'description'>): string {
-    return toHalfWidth(`${program.name} ${program.description}`).toLowerCase();
+/** 詳細は見出し付きの JSON。見出しごと繋いで、素のテキストとして探せるようにする */
+function extendedText(json: string | null): string {
+    if (json === null || json === '') return '';
+    try {
+        const value = JSON.parse(json) as Record<string, string>;
+        return Object.entries(value)
+            .map(([heading, body]) => `${heading} ${body}`)
+            .join(' ');
+    } catch {
+        return '';
+    }
+}
+
+/** 検索対象のテキスト */
+function haystack(
+    program: Pick<Program, 'name' | 'description' | 'extended'>,
+    fields: SearchField[],
+): string {
+    const parts = fields.map((field) =>
+        field === 'extended' ? extendedText(program.extended) : program[field],
+    );
+    return toHalfWidth(parts.join(' ')).toLowerCase();
 }
 
 /** JSON配列の文字列版。種別(GR/BS/CS)の絞り込みに使う */
@@ -74,7 +94,7 @@ export function matches(rule: Rule, program: Program, serviceType?: string, free
         if (!genreMatches(genres, detail)) return false;
     }
 
-    const text = haystack(program);
+    const text = haystack(program, parseSearchFields(rule.search_fields));
 
     // キーワードは空白区切りの AND。「アニメ 再放送」で両方含むものだけ拾える
     const keywords = toHalfWidth(rule.keyword).toLowerCase().split(/\s+/).filter(Boolean);

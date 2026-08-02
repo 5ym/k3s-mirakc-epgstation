@@ -15,6 +15,7 @@
         stateLabel,
         time,
     } from '$lib/format';
+    import { encodeSource } from '$lib/source';
     import type { ProgramDetail as Detail } from '$lib/types';
 
     let { data, form } = $props();
@@ -31,7 +32,8 @@
     let platform = $state<Platform | null>(null);
     let origin = $state('');
     $effect(() => {
-        platform = detectPlatform(navigator.userAgent);
+        // iPad は Macintosh を名乗るので、タッチ点数まで見ないと Mac と区別できない
+        platform = detectPlatform(navigator.userAgent, navigator.maxTouchPoints);
         origin = location.origin;
     });
 
@@ -440,10 +442,11 @@
                                         {/if}
                                         <!--
                                             元になるのは生TS。エンコード済みを元に録り直しても
-                                            画質は戻らないので、生TSがあるときだけ出す。
+                                            画質は戻らないので、生TSがあるときだけ出す
+                                            (引き継いだ録画は保存先に生TSのまま置かれていることがある)。
                                             録画中・エンコード中は元がまだ書かれている最中なので触らせない
                                         -->
-                                        {#if rec.ts_path && rec.state !== 'recording' && rec.state !== 'encoding'}
+                                        {#if encodeSource(rec) !== null && rec.state !== 'recording' && rec.state !== 'encoding'}
                                             <form method="POST" action="?/reencode" use:submitting>
                                                 <input type="hidden" name="id" value={rec.id} />
                                                 <button class="btn btn-sm" data-testid="reencode-button"

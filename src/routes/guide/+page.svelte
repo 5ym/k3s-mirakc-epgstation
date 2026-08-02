@@ -125,10 +125,11 @@
     <form method="GET" action="/rules" class="flex flex-wrap items-end gap-2" data-testid="guide-filter">
         <label class="flex flex-col gap-1">
             <span class="text-sm font-medium">番組を探す</span>
+            <!-- 探す範囲(番組名/概要/詳細)はルール画面で切り替えられる。既定は番組名だけ -->
             <input
                 type="search"
                 name="keyword"
-                placeholder="全チャンネルから探す"
+                placeholder="全チャンネルの番組名から"
                 class="input input-bordered"
                 data-testid="filter-keyword"
             />

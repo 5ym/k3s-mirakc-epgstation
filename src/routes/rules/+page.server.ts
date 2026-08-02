@@ -1,5 +1,6 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { genreName } from '$lib/arib';
+import { parseSearchFields } from '$lib/search';
 import { database, now, queryAll, queryOne } from '$lib/server/db';
 import { sync } from '$lib/server/epg';
 import { matches } from '$lib/server/rules';
@@ -30,6 +31,8 @@ function conditionsFrom(params: URLSearchParams): Rule | null {
         name: '',
         keyword,
         ignore_keyword: get('ignoreKeyword'),
+        // 番組表から来たときは指定が無い。既定 (番組名だけ) になる
+        search_fields: parseSearchFields(params.getAll('searchFields').join(',')).join(','),
         service_ids: numbers.length === 0 ? null : JSON.stringify(numbers),
         service_types: types.length === 0 ? null : JSON.stringify(types),
         genres: genres.length === 0 ? null : JSON.stringify(genres),
@@ -125,6 +128,11 @@ function serviceTypes(form: FormData): string | null {
     return types.length === 0 ? null : JSON.stringify(types);
 }
 
+/** キーワードを当てる範囲。全部外れていたら番組名だけに戻す */
+function searchFields(form: FormData): string {
+    return parseSearchFields(form.getAll('searchFields').join(',')).join(',');
+}
+
 const TYPE_LABEL: Record<string, string> = { GR: '地上波', BS: 'BS', CS: 'CS', SKY: 'SKY' };
 
 /**
@@ -182,14 +190,15 @@ export const actions = {
 
         database()
             .prepare(
-                `INSERT INTO rules (name, keyword, ignore_keyword, service_ids, service_types, genres,
-                                free_only, enabled, priority, encode, keep_original, cm_cut, codec, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
+                `INSERT INTO rules (name, keyword, ignore_keyword, search_fields, service_ids, service_types,
+                                genres, free_only, enabled, priority, encode, keep_original, cm_cut, codec, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
             )
             .run(
                 name,
                 keyword,
                 String(form.get('ignoreKeyword') ?? '').trim(),
+                searchFields(form),
                 ids,
                 types,
                 genreIds,
@@ -225,7 +234,7 @@ export const actions = {
         const current = settings();
         database()
             .prepare(
-                `UPDATE rules SET name = ?, keyword = ?, ignore_keyword = ?, service_ids = ?,
+                `UPDATE rules SET name = ?, keyword = ?, ignore_keyword = ?, search_fields = ?, service_ids = ?,
                  service_types = ?, genres = ?, free_only = ?, priority = ?, encode = ?,
                  keep_original = ?, cm_cut = ?, codec = ? WHERE id = ?`,
             )
@@ -233,6 +242,7 @@ export const actions = {
                 ruleName(keyword, types, ids, genreIds, services),
                 keyword,
                 String(form.get('ignoreKeyword') ?? '').trim(),
+                searchFields(form),
                 ids,
                 types,
                 genreIds,

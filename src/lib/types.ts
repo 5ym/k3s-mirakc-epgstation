@@ -72,6 +72,8 @@ export interface Rule {
     name: string;
     keyword: string;
     ignore_keyword: string;
+    /** キーワードを当てる範囲。SearchField のカンマ区切り */
+    search_fields: string;
     service_ids: string | null;
     service_types: string | null;
     genres: string | null;

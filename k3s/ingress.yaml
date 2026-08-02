@@ -19,7 +19,7 @@ spec:
   tls:
     certResolver: mydnschallenge
   routes:
-    # 配信と WebDAV は forward-auth を通さない。mpv も Kodi も OIDC の
+    # 配信と WebDAV は forward-auth を通さない。VLC も Kodi も OIDC の
     # リダイレクトを扱えないため。代わりに denpa 自身のベーシック認証で守る。
     # priority は長いマッチほど大きくしないと Host だけのルールに食われる
     - match: Host(`dp.doany.io`) && (PathPrefix(`/api/recordings`) || PathPrefix(`/dav`))
@@ -38,7 +38,7 @@ spec:
         - name: denpa
           port: 3000
 ---
-# LAN からプレイヤー(mpv / Kodi / VLC)で開くための口。
+# LAN からプレイヤー(VLC / Infuse / Kodi)で開くための口。
 #
 # dp.doany.io は forward-auth を通しているが、プレイヤーは OIDC のリダイレクトを
 # 扱えない。こちらは forward-auth を通さず、denpa 自身のベーシック認証に任せる。

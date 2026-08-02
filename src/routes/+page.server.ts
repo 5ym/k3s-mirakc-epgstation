@@ -6,6 +6,7 @@ import { deleteRecordingFiles, reconcile } from '$lib/server/files';
 import { cancel, restore } from '$lib/server/reservations';
 import { resolveConflicts } from '$lib/server/scheduler';
 import { settings } from '$lib/server/settings';
+import { encodeSource } from '$lib/source';
 import type { EncodeJob, Recording, Reservation } from '$lib/types';
 
 interface JobRow extends EncodeJob {
@@ -83,7 +84,7 @@ export function load({ url }) {
         showDeleted,
         /*
          * プレイヤーに渡すURLに埋める資格情報。
-         * mpv も Infuse もベーシック認証のダイアログを出さないので、URL に入れるしかない。
+         * VLC も Infuse もベーシック認証のダイアログを出さないので、URL に入れるしかない。
          *
          * BASIC_AUTH_SCOPE=files だとこの画面自体は素通しなので、画面を開ければ
          * パスワードも見える。画面の前段に別の認証を置いている前提の設定。
@@ -113,7 +114,8 @@ export const actions = {
         const recording = target(await request.formData());
         if (recording === undefined) return fail(400, { message: '録画が見つかりません' });
         // 元になるのは生TS。エンコード済みを元に録り直しても画質は戻らない
-        if (recording.ts_path === null) {
+        // (引き継いだ録画は保存先に生TSのまま置かれていることがある)
+        if (encodeSource(recording) === null) {
             return fail(400, { message: '生TSが残っていないため再エンコードできません' });
         }
         enqueue(recording.id);

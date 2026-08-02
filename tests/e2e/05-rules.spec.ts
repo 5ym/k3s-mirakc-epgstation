@@ -53,6 +53,29 @@ test.describe('自動予約ルール', () => {
     });
 });
 
+test.describe('キーワードを当てる範囲', () => {
+    /*
+     * 偽mirakc の番組は、番組名にも概要にも出てこない語を詳細に持たせてある。
+     * 既定(番組名だけ)では当たらず、詳細まで広げると当たる、という差を見る。
+     */
+    test('既定は番組名だけで、詳細まで広げると出演者でも当たる', async ({ page, request }) => {
+        await syncEpg(request);
+        await goto(page, '/rules');
+
+        await page.getByTestId('rule-keyword').fill('ゲスト太郎');
+        await page.getByTestId('rule-preview').click();
+        await expect(page.getByTestId('preview')).toContainText('0 件');
+
+        // 詳細にチェックを入れると同じキーワードで当たる
+        await page.getByTestId('rule-keyword').fill('ゲスト太郎');
+        await page.getByTestId('rule-search-fields').locator('input[value="extended"]').check();
+        await page.getByTestId('rule-preview').click();
+        await expect(page.getByTestId('preview-row').first()).toBeVisible();
+        // 選んだ範囲は結果と一緒に残る。押し直すたびに戻ると使えない
+        await expect(page.getByTestId('rule-search-fields').locator('input[value="extended"]')).toBeChecked();
+    });
+});
+
 test.describe('ジャンル指定', () => {
     test.beforeEach(async ({ page, request }) => {
         await syncEpg(request);

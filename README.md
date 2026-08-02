@@ -4,7 +4,7 @@
 の2つだけで、メディアサーバは置きません。
 
 ```text
-チューナー ── mirakc ── denpa ── 録画(mkv) ─┬─→ VLC / mpv / Infuse (URLスキーム)
+チューナー ── mirakc ── denpa ── 録画(mkv) ─┬─→ VLC / Infuse (URLスキーム)
                                               └─→ Kodi (WebDAV)
 ```
 
@@ -14,19 +14,29 @@
 - **B-CASカード** と PC/SC 対応のリーダー
 - **Docker** か **Kubernetes**
 
+イメージは公開してあるので、**リポジトリを持ってくる必要はありません。**
+
 ## docker compose で動かす
 
 ```sh
-git clone https://github.com/danything/denpa && cd denpa
+mkdir denpa && cd denpa
+curl -LO https://raw.githubusercontent.com/danything/denpa/main/compose.prod.yml
 docker compose -f compose.prod.yml up -d
 ```
 
-チューナーのデバイスは環境ごとに違うので、`compose.prod.yml` の `devices:` と、
-`mirakc/config.yml` の `tuners:` を手元に合わせてください。
+初回起動で `./config/config.yml` が出てきます。**そこの `tuners:` と、
+`compose.prod.yml` の `devices:` を手元の機材に合わせて**から、
+
+```sh
+docker compose -f compose.prod.yml restart mirakc
+```
+
+チャンネルは書かなくて構いません(この後のスキャンで入ります)。
 
 ## Kubernetes で動かす
 
 ```sh
+curl -L https://github.com/danything/denpa/archive/refs/heads/main.tar.gz | tar xz --strip=1 denpa-main/k3s
 kubectl apply -f k3s/
 ```
 
@@ -43,8 +53,8 @@ kubectl apply -f k3s/
 3. **番組を予約** — 番組表から選ぶか、「ルール」でキーワードを登録して自動予約に
 
 うまくいかないときは画面の「チューナー」を見てください。mirakc とカードリーダーの
-状態が出ます。**カードリーダーが NG のまま録ると、成功したように見えて中身が全部
-スクランブルされたまま**になります。
+状態、スキャンの1チャンネルごとの結果が出ます。**カードリーダーが NG のまま録ると、
+成功したように見えて中身が全部スクランブルされたまま**になります。
 
 ## 再生
 
@@ -52,10 +62,11 @@ kubectl apply -f k3s/
 
 | 端末 | 必要なもの |
 | --- | --- |
-| Windows | VLC (または mpv)。[docs/windows.md](docs/windows.md) で `denpa://` を登録 |
+| Windows | VLC。[docs/windows.md](docs/windows.md) で `denpa://` を登録 |
+| Mac | VLC。[docs/mac.md](docs/mac.md) で `denpa://` を登録 |
 | Android | 動画が再生できるアプリ (端末が選択画面を出します) |
-| iOS | VLC または Infuse |
-| Kodi | `/dav` を WebDAV サーバーとして追加 |
+| iOS / iPadOS | VLC |
+| Kodi | `/dav` を WebDAV サーバーとして追加。Android TV・Fire TV でもこれで観られます |
 
 ## 開発
 
@@ -79,5 +90,7 @@ ffmpeg も既定では偽物 (`tests/fake/ffmpeg.sh`) を使います。
 
 - [docs/architecture.md](docs/architecture.md) — 構成と、なぜそうしたか
 - [docs/app.md](docs/app.md) — denpa の中身 (状態遷移・環境変数・テスト)
+- [docs/data.md](docs/data.md) — mirakc に都度聞くもの / denpa が持つもの
 - [docs/windows.md](docs/windows.md) — Windows で再生する準備
+- [docs/mac.md](docs/mac.md) — Mac で再生する準備
 - [docs/stream.md](docs/stream.md) — ライブ視聴の設計 (未実装)

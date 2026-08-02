@@ -13,6 +13,7 @@
 import { copyFileSync, existsSync, mkdirSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import mysql from 'mysql2/promise';
+import { parseSearchFields, SEARCH_FIELDS } from '$lib/search';
 import type { Recording } from '$lib/types';
 import { config } from './config';
 import { database, now, queryOne } from './db';
@@ -254,6 +255,10 @@ interface RuleRow {
     isFree: number;
     enable: number;
     isTimeSpecification: number;
+    /** キーワードを当てる範囲。EPGStation も同じ3つを持っている */
+    name: number;
+    description: number;
+    extended: number;
 }
 
 interface ReserveRow {
@@ -295,7 +300,7 @@ function parseGenres(json: string | null): number[] {
 async function importRules(connection: mysql.Connection, options: MigrateOptions): Promise<void> {
     const [rows] = await connection.query<(RuleRow & mysql.RowDataPacket)[]>(
         `SELECT id, keyword, ignoreKeyword, GR, BS, CS, SKY, channelIds, genres,
-                isFree, enable, isTimeSpecification
+                isFree, enable, isTimeSpecification, name, description, extended
          FROM rule ORDER BY id`,
     );
 
@@ -343,15 +348,17 @@ async function importRules(connection: mysql.Connection, options: MigrateOptions
 
         database()
             .prepare(
-                `INSERT INTO rules (name, keyword, ignore_keyword, service_ids, service_types, genres,
-                                    free_only, enabled, priority, encode, keep_original,
+                `INSERT INTO rules (name, keyword, ignore_keyword, search_fields, service_ids, service_types,
+                                    genres, free_only, enabled, priority, encode, keep_original,
                                     cm_cut, codec, source, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 2, 1, 0, ?, ?, ?, ?)`,
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 2, 1, 0, ?, ?, ?, ?)`,
             )
             .run(
                 name,
                 keyword,
                 toHalfWidth(row.ignoreKeyword ?? '').trim(),
+                // 当てる範囲も向こうから引き継ぐ。既定に寄せると黙って当たらなくなる
+                parseSearchFields(SEARCH_FIELDS.filter((field) => row[field] === 1).join(',')).join(','),
                 channels.length === 0 ? null : JSON.stringify(channels),
                 types.length === 0 ? null : JSON.stringify(types),
                 genreIds.length === 0 ? null : JSON.stringify(genreIds),

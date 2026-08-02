@@ -101,15 +101,8 @@ export async function openServiceStream(
     return res.body;
 }
 
-/**
- * 局ロゴ。mirakc が放送波から拾ったものをそのまま中継する。
- * ロゴを持たない局もあるので、無いときは null を返して呼び出し側で出し分ける。
- */
-export async function fetchLogo(serviceId: number): Promise<Response | null> {
-    const res = await fetch(`${config.mirakcUrl}/api/services/${serviceId}/logo`);
-    if (!res.ok || res.body === null) return null;
-    return res;
-}
+/* ロゴは mirakc から取らない。mirakc は TS からロゴを集めないので、
+   denpa が放送波から自分で拾って持つ (server/logo.ts、docs/data.md) */
 
 /** mirakc が生きているか。ダッシュボードの表示用 */
 export async function ping(): Promise<{ ok: boolean; version?: string; error?: string }> {

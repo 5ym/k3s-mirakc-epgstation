@@ -34,6 +34,21 @@ describe('addMissingColumns', () => {
         expect(row.acknowledged_at).toBeNull();
     });
 
+    test('前からあるルールは、それまでと同じ範囲を探し続ける', () => {
+        /*
+         * 検索対象を選べるようにする前のルールは「番組名+概要」で当てていた。
+         * 新しい既定 (番組名だけ) で埋めると、黙って当たらなくなるものが出る
+         */
+        const db = new Database(':memory:');
+        db.exec(`CREATE TABLE rules (id INTEGER PRIMARY KEY, keyword TEXT NOT NULL DEFAULT '')`);
+        db.exec(`INSERT INTO rules (id, keyword) VALUES (1, '名探偵')`);
+
+        addMissingColumns(db);
+
+        const row = db.query('SELECT * FROM rules WHERE id = 1').get() as Record<string, unknown>;
+        expect(row.search_fields).toBe('name,description');
+    });
+
     test('何度実行しても壊れない', () => {
         const db = new Database(':memory:');
         db.exec(`CREATE TABLE services (id INTEGER PRIMARY KEY)`);

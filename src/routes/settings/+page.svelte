@@ -85,7 +85,7 @@
             <div class="card-body">
                 <h2 class="card-title">ベーシック認証</h2>
                 <p class="text-base-content/70 text-sm">
-                    mpv も Kodi も、画面の前段に置くリダイレクト型の認証を扱えません。
+                    VLC も Kodi も、画面の前段に置くリダイレクト型の認証を扱えません。
                     ファイルを取りに来る口だけにベーシック認証をかけられます。 ユーザー名とパスワードの<strong
                         >両方</strong
                     >が入っているときだけ有効です。

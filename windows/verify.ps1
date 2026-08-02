@@ -31,15 +31,16 @@ foreach ($name in @('Build-Command', 'ConvertTo-Base64Url')) {
             $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
         }, $true)
     if (-not $found) { throw "$name が見つかりません" }
+    # 同じ名前が2つあると、PowerShell は後の定義を使う。ここで先頭だけ見ていると
+    # 「検証は通るのに実際には古い定義が動く」という一番わかりにくい壊れ方をする
+    if ($found.Count -ne 1) { throw "$name が $($found.Count) 個あります" }
     Invoke-Expression $found[0].Extent.Text
 }
 
-# Build-Command は $Player を見るので、両方ぶん確かめる
-$Player = 'vlc'
 $exe = 'C:\Program Files\VideoLAN\VLC\vlc.exe'
 $inner = Build-Command $exe
 
-# 起動はさせず、mpv に渡る引数だけ見る
+# 起動はさせず、VLC に渡る引数だけ見る
 function Start-Process { param($p, $ArgumentList) $global:got = @{ path = $p; args = $ArgumentList } }
 function Test-Path { param($p) $true }
 
@@ -53,7 +54,7 @@ $global:got = $null
 # Windows が %1 を差し替えるのと同じことをする
 Invoke-Expression $inner.Replace('%1', $link)
 
-if (-not $global:got) { throw 'mpv が呼ばれませんでした' }
+if (-not $global:got) { throw 'VLC が呼ばれませんでした' }
 $joined = $global:got.args -join ' '
 Write-Host "VLC:  $($global:got.path)"
 Write-Host "引数: $joined"
@@ -66,26 +67,10 @@ if ($titleArg[0] -ne "--meta-title=`"$title`"") { throw "タイトルがくく�
 if ($joined -notlike "*$url*") { throw 'URLを復元できていない' }
 Write-Host '=> 復号して VLC に渡せている'
 
-# mpv 側も同じリンクで通ること
-$Player = 'mpv'
-$mpvExe = 'C:\Program Files\MPV Player\mpv.exe'
-$global:got = $null
-Invoke-Expression ((Build-Command $mpvExe).Replace('%1', $link))
-if (-not $global:got) { throw 'mpv で開けませんでした' }
-$mpvArgs = $global:got.args -join ' '
-Write-Host "mpv:  $($global:got.path)"
-Write-Host "引数: $mpvArgs"
-$mpvTitle = @($global:got.args | Where-Object { $_ -like '*media-title*' })
-if ($mpvTitle.Count -ne 1) { throw 'mpv でタイトルが1つの引数になっていない' }
-if ($mpvTitle[0] -ne "--force-media-title=`"$title`"") { throw 'mpv でタイトルがくくられていない' }
-Write-Host '=> 復号して mpv にも渡せている'
-
-$Player = 'vlc'
-
 # --- 通してはいけないリンク -----------------------------------------------
 
 # 失敗すると F がメッセージボックスを出そうとする。Windows 以外では
-# そこで落ちるので、mpv まで届かなかったことだけを見る
+# そこで落ちるので、VLC まで届かなかったことだけを見る
 $bad = @{
     'base64 が壊れている'    = 'denpa://play/!!!!/?title='
     'http(s) ではない'       = "denpa://play/$(ConvertTo-Base64Url 'file:///etc/passwd')/?title="

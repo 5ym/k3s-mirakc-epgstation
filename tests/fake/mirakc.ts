@@ -59,7 +59,9 @@ function programsFor(service: FakeService) {
             isFree: true,
             name: `${TITLES[(slot + service.serviceId) % TITLES.length]}`,
             description: `${service.name} のテスト番組 (slot ${slot})`,
-            extended: {},
+            // 詳細は見出し付き。番組名にも概要にも出てこない語を入れておく
+            // (ルールの「当てる範囲」を切り替えたときの違いを見るため)
+            extended: { 出演者: 'ゲスト太郎 山田花子', 番組内容: `${service.name} の詳細` },
             genres: [{ lv1: 7, lv2: 0 }],
             audio: { componentType: 1 },
             // 本物と同じ形で返す。番組詳細はこれを読んで「ステレオ (日本語)」等に直す

@@ -136,6 +136,58 @@ export class SectionAssembler {
     }
 }
 
+/**
+ * 同期が取れているとみなすのに必要な連続パケット数。
+ * 1つだけでは中身のたまたまの 0x47 を頭と誤認する
+ */
+const CONFIRM = 3;
+
+/** `from` 以降で、188 間隔に 0x47 が続くところを探す。無ければ -1 */
+export function findSync(data: Uint8Array, from = 0): number {
+    for (let at = from; at + PACKET * (CONFIRM - 1) < data.length; at++) {
+        let ok = true;
+        for (let i = 0; i < CONFIRM; i++) {
+            if (data[at + i * PACKET] !== SYNC) {
+                ok = false;
+                break;
+            }
+        }
+        if (ok) return at;
+    }
+    return -1;
+}
+
+/**
+ * 任意の長さで届くバイト列を 188 バイトのパケットに切り分ける。
+ *
+ * 頭が必ずパケットの先頭とは限らず、電波が弱いと途中で数バイト落ちる。
+ * ずれたままだと**以降ずっと1パケットも読めなくなる**ので、頭が 0x47 でなければ
+ * 取り直す。普段は先頭が 0x47 なので、探しに行くのはずれたときだけ。
+ */
+export class PacketStream {
+    private rest = new Uint8Array(0);
+
+    *feed(chunk: Uint8Array): Generator<Uint8Array> {
+        const data = new Uint8Array(this.rest.length + chunk.length);
+        data.set(this.rest);
+        data.set(chunk, this.rest.length);
+
+        let at = 0;
+        while (at + PACKET <= data.length) {
+            if (data[at] !== SYNC) {
+                const found = findSync(data, at);
+                if (found < 0) break;
+                at = found;
+                if (at + PACKET > data.length) break;
+            }
+            yield data.subarray(at, at + PACKET);
+            at += PACKET;
+        }
+        // 同期が取れないまま溜め込まないよう、頭を探せるぶんだけ残す
+        this.rest = data.slice(Math.max(at, data.length - PACKET * CONFIRM));
+    }
+}
+
 /** 記述子の並びを (tag, 中身) に切り分ける */
 export function* descriptors(data: Uint8Array): Generator<[number, Uint8Array]> {
     let at = 0;
@@ -231,7 +283,7 @@ export interface FoundService extends Service {
 export class ServiceReader {
     private readonly nit = new SectionAssembler(PID_NIT);
     private readonly sdt = new SectionAssembler(PID_SDT);
-    private rest = new Uint8Array(0);
+    private readonly packets = new PacketStream();
 
     network: NetworkInfo | null = null;
     transport: TransportInfo | null = null;
@@ -242,14 +294,7 @@ export class ServiceReader {
 
     /** 任意の長さのバイト列を食わせる。揃ったら true */
     feed(chunk: Uint8Array): boolean {
-        const data = new Uint8Array(this.rest.length + chunk.length);
-        data.set(this.rest);
-        data.set(chunk, this.rest.length);
-
-        // 188 の切れ目に関係なく届くので、半端は次に回す
-        const usable = data.length - (data.length % PACKET);
-        for (let at = 0; at < usable; at += PACKET) {
-            const packet = data.subarray(at, at + PACKET);
+        for (const packet of this.packets.feed(chunk)) {
             if (this.network === null) {
                 for (const section of this.nit.feed(packet)) {
                     this.network = parseNit(section) ?? this.network;
@@ -261,7 +306,6 @@ export class ServiceReader {
                 }
             }
         }
-        this.rest = data.slice(usable);
         return this.complete;
     }
 

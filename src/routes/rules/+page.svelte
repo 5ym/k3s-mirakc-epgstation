@@ -2,6 +2,7 @@
     import { submitting } from '$lib/actions';
     import { GENRE_TREE, genreName } from '$lib/arib';
     import { CM_LABEL, dateTime } from '$lib/format';
+    import { parseSearchFields, SEARCH_FIELD_LABEL, SEARCH_FIELDS, searchFieldLabel } from '$lib/search';
 
     let { data, form } = $props();
 
@@ -17,6 +18,7 @@
     const seedTypes = $derived(parse(data.seed?.service_types ?? null).map(String));
     const seedServices = $derived(parse(data.seed?.service_ids ?? null).map(Number));
     const seedGenres = $derived(parse(data.seed?.genres ?? null).map(String));
+    const seedFields = $derived(parseSearchFields(data.seed?.search_fields));
 
     const TYPE_LABEL: Record<string, string> = { GR: '地上波', BS: 'BS', CS: 'CS', SKY: 'SKY' };
 
@@ -92,8 +94,26 @@
                         data-testid="rule-keyword"
                     />
                     <span class="text-base-content/60 text-xs">
-                        番組名と概要から探します。空白区切りは<strong>すべて含む</strong>もの
+                        空白区切りは<strong>すべて含む</strong>もの
                     </span>
+                    <!--
+                        当てる範囲。既定は番組名だけ。概要まで広げると番宣で名前が出ただけの
+                        番組を拾い、詳細まで広げると出演者でも拾える
+                    -->
+                    <div class="mt-1 flex flex-wrap gap-x-4 gap-y-1" data-testid="rule-search-fields">
+                        {#each SEARCH_FIELDS as field (field)}
+                            <label class="flex cursor-pointer items-center gap-2">
+                                <input
+                                    type="checkbox"
+                                    name="searchFields"
+                                    value={field}
+                                    checked={seedFields.includes(field)}
+                                    class="checkbox checkbox-xs"
+                                />
+                                <span class="text-xs">{SEARCH_FIELD_LABEL[field]}</span>
+                            </label>
+                        {/each}
+                    </div>
                 </label>
                 <label class="flex flex-col gap-1">
                     <span class="text-sm font-medium">除外キーワード</span>
@@ -325,6 +345,12 @@
                         <span class="badge badge-sm {rule.enabled ? 'badge-success' : 'badge-ghost'}">
                             {rule.enabled ? '有効' : '無効'}
                         </span>
+                        <!-- どこを見て当たったのか分からないと、絞り込みの直しようがない -->
+                        {#if rule.keyword}
+                            <span class="text-base-content/60 text-xs" data-testid="rule-search-scope">
+                                {searchFieldLabel(rule.search_fields)}から
+                            </span>
+                        {/if}
                     </td>
                     <td class="text-error text-sm">{rule.ignore_keyword || '-'}</td>
                     <td class="max-w-48 text-sm" data-testid="rule-channels">{channels(rule)}</td>
