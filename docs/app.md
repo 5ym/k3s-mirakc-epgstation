@@ -86,7 +86,10 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 | `ENCODE_CODEC` | `av1` | 録画の既定コーデック (`av1` / `h264`) |
 | `ENCODE_H264_PRESET` / `ENCODE_H264_CRF` | `medium` / `22` | H.264 のときの品質 |
 | `ENCODE_RETRY_SEEK` | `0.2` | 頭が壊れていて失敗したとき、捨てて再試行する秒数 |
-| `START_MARGIN` / `END_MARGIN` | `10000` / `15000` | 録画の前後マージン(ms) |
+| `START_MARGIN` / `END_MARGIN` | `10000` / `15000` | 録画の前後マージン(ms)。放送に追従しているときは mirakc 側が切れ目を決める |
+| `FOLLOW_ONAIR` | `1` | 放送の延長に追従する。`0` で番組表の時刻どおりに開いて閉じる |
+| `ONAIR_POLL_INTERVAL` | `30000` | 追従中に終了時刻を見に行く間隔(ms) |
+| `ONAIR_FALLBACK_WAIT` | `90000` | 番組単位で開いても何も来ないとき、サービス単位に落とすまで(ms) |
 | `EPG_SYNC_INTERVAL` | `600000` | EPG取得の間隔(ms) |
 | `SCHEDULER_TICK` | `5000` | 予約チェックの間隔(ms) |
 | `CM_CUT_DEFAULT` | `chapter` | `off` / `chapter` / `cut` の**初期値**。設定画面で変えられる |

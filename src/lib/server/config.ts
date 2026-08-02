@@ -94,6 +94,24 @@ export const config = {
     startMargin: num('START_MARGIN', 10 * SEC),
     endMargin: num('END_MARGIN', 15 * SEC),
 
+    /**
+     * 放送の延長に追従する。
+     *
+     * 番組単位のストリーム (`/api/programs/:id/stream`) で録ると、切れ目を決めるのが
+     * 番組表の時刻ではなく**いま流れている放送** (EIT[p/f]) になる。野球が延びれば
+     * その分だけ録り続け、頭に前番組が混ざることもなくなる。
+     *
+     * 0 にすると番組表の時刻で開いて閉じる、前のやり方に戻る。
+     */
+    followOnair: bool('FOLLOW_ONAIR', true),
+    /** 追従中に終了時刻を見に行く間隔。ここで延びたぶんを予約表にも反映する */
+    onairPollInterval: num('ONAIR_POLL_INTERVAL', 30 * SEC),
+    /**
+     * 番組単位で開いたのに何も流れてこないとき、サービス単位に切り替えるまでの待ち時間。
+     * mirakc は番組が始まるまで1バイトも出さないので、開いた直後は空でも正常
+     */
+    onairFallbackWait: num('ONAIR_FALLBACK_WAIT', 90 * SEC),
+
     epgSyncInterval: num('EPG_SYNC_INTERVAL', 10 * MIN),
     schedulerTick: num('SCHEDULER_TICK', 5 * SEC),
     /** 保存先の実体とDBを突き合わせる間隔。外から消されたものをここで拾う */

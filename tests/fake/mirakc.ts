@@ -165,6 +165,16 @@ const TUNERS = [
 /** テストから切り替える。使用中と故障の見え方を確かめるため */
 let busyTuners = false;
 
+/**
+ * 放送の延長。/api/programs/:id の尺にこれを足して返す。
+ * 本物では EIT[p/f] を拾った mirakc が書き換えるところ
+ */
+let extendedMs = 0;
+/** 番組単位で開いても何も流れてこない状況。denpa の切り替えを確かめるため */
+let programStreamSilent = false;
+/** 一時的な追従役を立てた番組。本物は User-Agent を見て決める */
+const trackedPrograms = new Set<number>();
+
 /** スキャンの状態。本物はチューナー側のエージェントが持っている */
 let scanState = {
     state: 'idle',
@@ -306,6 +316,21 @@ Bun.serve({
             return json({ busy: busyTuners });
         }
         // テスト用。カードが読めていない状態(スクランブルされたまま)に切り替える
+        /*
+         * 放送の延長。ここを動かすと /api/programs/:id の終了時刻が後ろへ動く。
+         * 本物では EIT[p/f] で書き換わるところ
+         */
+        if (url.pathname === '/__control/extend' && request.method === 'POST') {
+            extendedMs = Number(url.searchParams.get('ms') ?? 0);
+            return json({ ok: true, extendedMs });
+        }
+        if (url.pathname === '/__control/onair' && request.method === 'POST') {
+            programStreamSilent = url.searchParams.get('silent') === '1';
+            return json({ ok: true, programStreamSilent });
+        }
+        if (url.pathname === '/__control/onair') {
+            return json({ tracked: [...trackedPrograms] });
+        }
         if (url.pathname === '/__control/scrambled' && request.method === 'POST') {
             scrambled = new URL(request.url).searchParams.get('on') === '1';
             return json({ scrambled });
@@ -380,6 +405,14 @@ Bun.serve({
             );
         }
         if (url.pathname === '/api/programs') return json(SERVICES.flatMap(programsFor));
+
+        // 番組1つぶん。放送が延びた分 (extendedMs) をここに乗せる
+        const program = url.pathname.match(/^\/api\/programs\/(\d+)$/);
+        if (program !== null) {
+            const found = SERVICES.flatMap(programsFor).find((p) => p.id === Number(program[1]));
+            if (found === undefined) return new Response('unknown program', { status: 404 });
+            return json({ ...found, duration: found.duration + extendedMs });
+        }
         if (url.pathname === '/api/channels') {
             // 物理チャンネル単位。同じ ch に複数の局が相乗りしている
             const channels = new Map<string, ReturnType<typeof channelOf>>();
@@ -408,6 +441,44 @@ Bun.serve({
                     return tuner;
                 }),
             );
+        }
+
+        /*
+         * 番組単位のストリーム。本物は番組が始まるまで1バイトも出さず、
+         * 番組が終わると自分で閉じる。ここでは「開いたら流れ、閉じるのは
+         * denpa 側から」で足りる (延長の追従は /api/programs/:id のほうで見る)。
+         *
+         * 本物と同じく、User-Agent が EPGStation/ で始まるかどうかで
+         * 一時的な追従役を立てるかが決まる。立てたことを控えて、テストから見えるようにする
+         */
+        const programStream = url.pathname.match(/^\/api\/programs\/(\d+)\/stream$/);
+        if (programStream !== null) {
+            const found = SERVICES.flatMap(programsFor).find((p) => p.id === Number(programStream[1]));
+            if (found === undefined) return new Response('unknown program', { status: 404 });
+            if ((request.headers.get('user-agent') ?? '').startsWith('EPGStation/')) {
+                trackedPrograms.add(found.id);
+            }
+            if (programStreamSilent) {
+                /*
+                 * 番組が始まらない状況。denpa はサービス単位へ切り替えるはず。
+                 *
+                 * 何も enqueue しないと Bun は応答ヘッダごと送らずに待つ。本物は
+                 * ヘッダだけ先に返して黙るので、長さ0のチャンクで押し出しておく
+                 * (0バイトなので denpa 側の「1バイトも来ない」判定は変わらない)
+                 */
+                return new Response(
+                    new ReadableStream({
+                        start(controller) {
+                            controller.enqueue(new Uint8Array(0));
+                        },
+                    }),
+                    { headers: { 'Content-Type': 'video/MP2T' } },
+                );
+            }
+            const service = SERVICES.find((s) => s.serviceId === found.serviceId);
+            return new Response(fakeStream(request.signal, service), {
+                headers: { 'Content-Type': 'video/MP2T' },
+            });
         }
 
         const stream = url.pathname.match(/^\/api\/services\/(\d+)\/stream$/);

@@ -10,7 +10,7 @@ import { moveFile } from './fsx';
 import { libraryPath, recordedPath } from './library';
 import { watch as watchLogo } from './logo';
 import { writeNfo, writeThumbnail } from './metadata';
-import { openServiceStream } from './mirakc';
+import { getProgram, openProgramStream, openServiceStream } from './mirakc';
 import { chunks } from './stream';
 import { parseTitle } from './title';
 import { notify } from './webhook';
@@ -137,12 +137,15 @@ export async function startRecording(reservation: Reservation): Promise<Recordin
 const OPEN_RETRIES = 5;
 const OPEN_RETRY_WAIT = 2000;
 
-async function openWithRetry(serviceId: number, signal: AbortSignal): Promise<ReadableStream<Uint8Array>> {
+async function openWithRetry(
+    open: (signal: AbortSignal) => Promise<ReadableStream<Uint8Array>>,
+    signal: AbortSignal,
+): Promise<ReadableStream<Uint8Array>> {
     let last: unknown;
     for (let attempt = 0; attempt < OPEN_RETRIES; attempt++) {
         if (signal.aborted) throw new Error('録画が中止されました');
         try {
-            return await openServiceStream(serviceId, signal);
+            return await open(signal);
         } catch (error) {
             last = error;
             if (attempt < OPEN_RETRIES - 1) {
@@ -151,6 +154,53 @@ async function openWithRetry(serviceId: number, signal: AbortSignal): Promise<Re
         }
     }
     throw new Error(`チューナーを ${OPEN_RETRIES} 回試して掴めませんでした: ${last}`);
+}
+
+/**
+ * 放送の延長に追い付く。
+ *
+ * 番組単位で録っている間、mirakc の番組情報は EIT[p/f] で書き換わる。
+ * 終わりが後ろへ動いたら、こちらの予定も合わせておく。合わせないと
+ * スケジューラが元の時刻で止めてしまい、延長したところで切れる。
+ *
+ * 縮む方向には追わない。番組表が短くなったからといって録画を早く切ると、
+ * 実際にはまだ流れていたときに取り返しがつかない。
+ */
+function followEndTime(recording: Recording): () => void {
+    if (recording.program_id === null) return () => {};
+
+    const timer = setInterval(() => {
+        void (async () => {
+            try {
+                const program = await getProgram(recording.program_id!);
+                const endAt = program.startAt + program.duration;
+                const current = queryOne<{ end_at: number }>(
+                    'SELECT end_at FROM recordings WHERE id = ?',
+                    recording.id,
+                );
+                if (current === undefined || endAt <= current.end_at) return;
+
+                const at = now();
+                database()
+                    .prepare('UPDATE recordings SET end_at = ?, updated_at = ? WHERE id = ?')
+                    .run(endAt, at, recording.id);
+                if (recording.reservation_id !== null) {
+                    database()
+                        .prepare('UPDATE reservations SET end_at = ?, updated_at = ? WHERE id = ?')
+                        .run(endAt, at, recording.reservation_id);
+                }
+                const minutes = Math.round((endAt - current.end_at) / 60000);
+                console.log(`[rec] 放送が延びました: ${recording.name} (+${minutes}分)`);
+                emit('recordings');
+                emit('reservations');
+            } catch {
+                // 取れなくてもそのまま録り続ける。番組表が引けないだけで録画とは別
+            }
+        })();
+    }, config.onairPollInterval);
+    timer.unref?.();
+
+    return () => clearInterval(timer);
 }
 
 /** 実際に録れた長さを足す。再開したぶんも合算するので加算にする */
@@ -165,9 +215,57 @@ async function pump(recording: Recording, controller: AbortController): Promise<
     const path = recording.ts_path!;
     mkdirSync(dirname(path), { recursive: true });
 
+    /*
+     * 番組単位のストリームだけを閉じられるようにしておく。録画そのものの中止
+     * (controller) とは別に、サービス単位へ切り替えるためにこちらから閉じる
+     */
+    const inner = new AbortController();
+    const linkAbort = () => inner.abort();
+    controller.signal.addEventListener('abort', linkAbort);
+
     let written = 0;
+    let stopFollowing = () => {};
+    /** 番組が始まらないので、サービス単位に切り替える */
+    let switching = false;
+
+    /*
+     * 番組単位で開くと、番組が始まるまで1バイトも出てこない。それが正しい動きだが、
+     * EIT[p/f] が来ない局に当たるといつまでも出てこない。**開くところから
+     * 最初の1バイトまで**を見張り、待ちすぎる前にサービス単位へ落とす。
+     * mirakc は番組が始まるまで応答ヘッダも返さないことがあるので、
+     * 見張りは開く前から掛けておく
+     */
+    const armWatchdog = () =>
+        setTimeout(() => {
+            if (written > 0 || controller.signal.aborted) return;
+            console.warn(`[rec] 番組が始まりません。サービス単位に切り替えます: ${recording.name}`);
+            switching = true;
+            inner.abort();
+        }, config.onairFallbackWait);
+
+    const openService = () =>
+        openWithRetry((signal) => openServiceStream(recording.service_id, signal), controller.signal);
+
     try {
-        const stream = await openWithRetry(recording.service_id, controller.signal);
+        const follow = config.followOnair && recording.program_id !== null;
+        let watchdog = follow ? armWatchdog() : undefined;
+
+        let stream: ReadableStream<Uint8Array>;
+        try {
+            stream = follow
+                ? await openProgramStream(recording.program_id!, inner.signal)
+                : await openService();
+            if (follow) stopFollowing = followEndTime(recording);
+        } catch (error) {
+            clearTimeout(watchdog);
+            watchdog = undefined;
+            if (!follow || controller.signal.aborted) throw error;
+            // 番組単位で開けない (番組表から消えた・見張りが切った)。サービス単位で録る
+            if (!switching) console.warn(`[rec] 番組単位で開けません (${recording.name}): ${error}`);
+            switching = false;
+            stream = await openService();
+        }
+
         // 追記で開く。再起動をまたいで録画を再開したときに、それまでの分を消さないため
         // (MPEG-TS は 188 バイトのパケットの並びなので、そのまま繋げても読める)
         const sink = createWriteStream(path, { flags: 'a' });
@@ -178,12 +276,31 @@ async function pump(recording: Recording, controller: AbortController): Promise<
         // 局ロゴのために別途チューナーを開かずに済む (logo.ts)
         const collectLogo = watchLogo(recording.service_id);
         try {
-            for await (const chunk of chunks(stream)) {
-                written += chunk.byteLength;
-                collectLogo(chunk);
-                if (!sink.write(chunk)) await once(sink, 'drain');
+            for (;;) {
+                try {
+                    for await (const chunk of chunks(stream)) {
+                        if (written === 0) {
+                            // 流れ始めた。もう切り替えない
+                            clearTimeout(watchdog);
+                            watchdog = undefined;
+                        }
+                        written += chunk.byteLength;
+                        collectLogo(chunk);
+                        if (!sink.write(chunk)) await once(sink, 'drain');
+                    }
+                } catch (error) {
+                    // 見張りが切ったときだけ握りつぶす。それ以外は本当の失敗
+                    if (!switching) throw error;
+                }
+                if (!switching) break;
+
+                switching = false;
+                stopFollowing();
+                stopFollowing = () => {};
+                stream = await openService();
             }
         } finally {
+            clearTimeout(watchdog);
             addDuration(recording.id, Date.now() - from);
             await new Promise<void>((resolve, reject) => {
                 sink.end((error?: Error | null) => (error ? reject(error) : resolve()));
@@ -197,6 +314,8 @@ async function pump(recording: Recording, controller: AbortController): Promise<
             return;
         }
     } finally {
+        controller.signal.removeEventListener('abort', linkAbort);
+        stopFollowing();
         active.delete(recording.id);
     }
 
