@@ -94,12 +94,24 @@ function findAvs(input: string, stdout: string): string | null {
     return newest?.path ?? (fromStdout === null ? null : fromStdout[0]);
 }
 
+/**
+ * logoframe が「ロゴの位置を決められなかった」と言っているか。
+ *
+ * 自動探索は「画面の隅にずっと同じ縁があること」を手がかりにするので、
+ * 薄いロゴや動くロゴだと見つけられない。そのときは位置を人に教えてもらう
+ * (録画の詳細から範囲を指定できる)。
+ */
+export function isLogoMissing(output: string): boolean {
+    return /no persistent edge|uniform background|too few active pixels|logo file|-logo-area/i.test(output);
+}
+
 export async function detectWithJls(
     input: string,
     duration: number,
     signal?: AbortSignal,
     channel = '',
-): Promise<{ cm: Range[]; note: string }> {
+    area = '',
+): Promise<{ cm: Range[]; note: string; logoMissing: boolean }> {
     /*
      * 局名を渡すと、logoframe が**その局のロゴデータを自分で作って覚える**。
      * 1本目は作るぶん遅く、2本目からは使い回す。渡さないとロゴ無しの判定になり、
@@ -111,7 +123,9 @@ export async function detectWithJls(
     const quote = (value: string) => value.replaceAll("'", '');
     const command = config.cmJlsCommand
         .replaceAll('{input}', quote(input))
-        .replaceAll('{channel}', quote(channel));
+        .replaceAll('{channel}', quote(channel))
+        // 自動で見つからなかった局だけ、画面から教わった範囲を渡す
+        .replaceAll('{area}', /^\d+,\d+,\d+,\d+$/.test(area) ? area : '');
     const proc = Bun.spawn(['sh', '-c', command], { stdout: 'pipe', stderr: 'pipe' });
 
     const timer = setTimeout(() => proc.kill(), config.cmDetectTimeout);
@@ -126,19 +140,26 @@ export async function detectWithJls(
     clearTimeout(timer);
     signal?.removeEventListener('abort', kill);
 
+    // ロゴを当てられたかどうかは、CM が取れたかどうかとは別に伝える
+    const logoMissing = isLogoMissing(stderr);
+
     if (code !== 0) {
-        return { cm: [], note: `join_logo_scp が失敗 (code ${code}): ${stderr.slice(-500)}` };
+        return {
+            cm: [],
+            note: `join_logo_scp が失敗 (code ${code}): ${stderr.slice(-500)}`,
+            logoMissing,
+        };
     }
 
     const avsPath = findAvs(input, stdout);
     if (avsPath === null) {
-        return { cm: [], note: 'join_logo_scp の出力 avs が見つかりませんでした' };
+        return { cm: [], note: 'join_logo_scp の出力 avs が見つかりませんでした', logoMissing };
     }
 
     const keep = parseTrimRanges(readFileSync(avsPath, 'utf8'), await probeFps(input));
     if (keep.length === 0) {
-        return { cm: [], note: `${avsPath} に Trim が含まれていませんでした` };
+        return { cm: [], note: `${avsPath} に Trim が含まれていませんでした`, logoMissing };
     }
 
-    return { cm: invertRanges(keep, duration), note: `join_logo_scp: ${avsPath}` };
+    return { cm: invertRanges(keep, duration), note: 'join_logo_scp', logoMissing };
 }

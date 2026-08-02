@@ -1,13 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import {
-    boundaries,
-    chapterMetadata,
-    detectCmRanges,
-    isCmLength,
-    keepRanges,
-    parseSilences,
-    selectExpression,
-} from './cm';
+import { boundaries, chapterMetadata, detectCmRanges, isCmLength, keepRanges, parseSilences } from './cm';
 import { invertRanges, parseTrimRanges } from './cm-jls';
 
 describe('parseSilences', () => {
@@ -98,17 +90,6 @@ describe('chapterMetadata', () => {
     });
 });
 
-describe('selectExpression', () => {
-    test('between の和で残す区間を表す', () => {
-        expect(
-            selectExpression([
-                { start: 0, end: 12.5 },
-                { start: 60, end: 90 },
-            ]),
-        ).toBe('between(t,0.000,12.500)+between(t,60.000,90.000)');
-    });
-});
-
 describe('join_logo_scp の出力', () => {
     test('avs の Trim をフレームから秒に直す', () => {
         const ranges = parseTrimRanges('Trim(0,2996)++Trim(4497,8993)', 30000 / 1001);
@@ -131,5 +112,24 @@ describe('join_logo_scp の出力', () => {
                 600,
             ),
         ).toEqual([{ start: 100, end: 160 }]);
+    });
+});
+
+describe('ロゴを当てられなかったとき', () => {
+    test('logoframe の言い分から判定する', async () => {
+        const { isLogoMissing } = await import('./cm-jls');
+        // 実機で出たもの。位置を教えてもらえば直る種類の失敗
+        expect(
+            isLogoMissing(
+                'error: Automatic logo position detection found no persistent edge; specify -logo-area x,y,w,h',
+            ),
+        ).toBe(true);
+        expect(isLogoMissing('error: Insufficient frames with a uniform background around the logo')).toBe(
+            true,
+        );
+        expect(isLogoMissing('error: The initial logo estimate contains too few active pixels')).toBe(true);
+        // ロゴは当てられている。ここで印を付けると、直しようのないものまで拾う
+        expect(isLogoMissing('managed logo: v0001 match=87.00% threshold=10%')).toBe(false);
+        expect(isLogoMissing('')).toBe(false);
     });
 });

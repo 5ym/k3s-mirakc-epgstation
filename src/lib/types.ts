@@ -44,6 +44,8 @@ export interface Service {
     channel: string;
     remote_control_key: number | null;
     has_logo: number;
+    /** 局ロゴの位置 ("x,y,w,h")。CM検出 (jls) で自動検出できなかった局だけ手で入れる */
+    logo_area: string | null;
     updated_at: number;
 }
 
@@ -136,6 +138,10 @@ export interface Recording {
     cm_cut: CmMode;
     codec: VideoCodec;
     cm_ranges: string | null;
+    /** CM検出が何をしたか。詳細で見せる */
+    cm_note: string | null;
+    /** ロゴを当てられなかった。位置を教えてもらうと次から効く */
+    logo_missing: number;
     /** 実際に録れた長さ。取れていなければ null (古い行) */
     duration_ms: number | null;
     deleted_at: number | null;

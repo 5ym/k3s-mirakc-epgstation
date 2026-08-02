@@ -1,5 +1,6 @@
 <script lang="ts">
     import { submitting } from '$lib/actions';
+    import LogoArea from '$lib/components/LogoArea.svelte';
     import ProgramDetail from '$lib/components/ProgramDetail.svelte';
     import { liveUpdates } from '$lib/live-updates.svelte';
     import { detectPlatform, type Platform, playLinks, withCredentials } from '$lib/play';
@@ -69,6 +70,15 @@
     let detailError = $state<string | null>(null);
     /** その行で検出したCM区間。長いので一覧には出さず、詳細でだけ見せる */
     let detailCm = $state<string | null>(null);
+    /** 何で検出したか。ロゴが効いているかどうかがここで分かる */
+    let detailCmNote = $state<string | null>(null);
+    /** ロゴを当てられなかった録画。詳細で位置を教えてもらう */
+    let detailLogo = $state<{
+        recordingId: number;
+        serviceId: number;
+        serviceName: string;
+        area: string | null;
+    } | null>(null);
 
     /** 続けて別の行を押したとき、遅れて届いた前の結果で上書きされないようにする */
     let opened = 0;
@@ -93,10 +103,14 @@
         row: Row,
         error: string | null = null,
         cm: string | null = null,
+        logo: typeof detailLogo = null,
+        cmNote: string | null = null,
     ): Promise<void> {
         const token = ++opened;
         detailError = error;
         detailCm = cm;
+        detailLogo = logo;
+        detailCmNote = cmNote;
         detail = {
             ...row,
             extended: null,
@@ -132,10 +146,23 @@
         row: Row,
         error: string | null = null,
         cm: string | null = null,
+        logo: typeof detailLogo = null,
+        cmNote: string | null = null,
     ): void {
         if (event instanceof KeyboardEvent && event.key !== 'Enter') return;
         if ((event.target as HTMLElement).closest('a, button, input, label')) return;
-        void openDetail(programId, row, error, cm);
+        void openDetail(programId, row, error, cm, logo, cmNote);
+    }
+
+    /** ロゴを当てられなかった録画だけ、詳細に位置の指定を出す */
+    function logoOf(rec: (typeof data.recordings)[number]): typeof detailLogo {
+        if (!rec.logo_missing || rec.deleted_at !== null) return null;
+        return {
+            recordingId: rec.id,
+            serviceId: rec.service_id,
+            serviceName: rec.service_name,
+            area: rec.logo_area,
+        };
     }
 </script>
 
@@ -336,9 +363,25 @@
                                 class="hover relative cursor-pointer"
                                 tabindex="0"
                                 onclick={(event) =>
-                                    rowClick(event, rec.program_id, rec, rec.encode_error, rec.cm_ranges)}
+                                    rowClick(
+                                        event,
+                                        rec.program_id,
+                                        rec,
+                                        rec.encode_error,
+                                        rec.cm_ranges,
+                                        logoOf(rec),
+                                        rec.cm_note,
+                                    )}
                                 onkeydown={(event) =>
-                                    rowClick(event, rec.program_id, rec, rec.encode_error, rec.cm_ranges)}
+                                    rowClick(
+                                        event,
+                                        rec.program_id,
+                                        rec,
+                                        rec.encode_error,
+                                        rec.cm_ranges,
+                                        logoOf(rec),
+                                        rec.cm_note,
+                                    )}
                             >
                                 <td class="whitespace-nowrap">
                                     {dateTime(rec.start_at)}
@@ -375,6 +418,19 @@
                                     {/if}
                                     <!-- CM をどこで検出したかは行に出さない。長くて場所を食う割に
                                          普段は見ないので、行を押したときの詳細に回す -->
+                                    {#if rec.logo_missing && rec.deleted_at === null}
+                                        <!--
+                                            ロゴを当てられなかったので、無音だけでCMを判定している。
+                                            精度が落ちているのを黙っていると「なぜか切れていない」に
+                                            なるので出す。押すと位置を教えられる
+                                        -->
+                                        <div class="text-warning text-sm" data-testid="logo-missing">
+                                            ロゴ未検出 (無音のみで判定)
+                                            <span class="text-base-content/60">
+                                                — 押すと位置を教えられます
+                                            </span>
+                                        </div>
+                                    {/if}
                                 </td>
                                 <td class="hidden whitespace-nowrap sm:table-cell">{size(rec.ts_size)}</td>
                                 <td class="whitespace-nowrap">

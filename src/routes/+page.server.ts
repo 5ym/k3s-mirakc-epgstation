@@ -20,6 +20,8 @@ interface RecordingRow extends Recording {
     job_percent: number | null;
     job_eta_ms: number | null;
     job_log: string | null;
+    /** その局に入れてあるロゴの位置。詳細で指定し直せるように渡す */
+    logo_area: string | null;
 }
 
 interface ReservationRow extends Reservation {
@@ -78,8 +80,10 @@ export function load({ url, request }) {
                  ORDER BY j2.id DESC LIMIT 1
              ) AS encode_error,
              j.id AS job_id, j.state AS job_state, j.phase AS job_phase,
-             j.percent AS job_percent, j.eta_ms AS job_eta_ms, j.log AS job_log
+             j.percent AS job_percent, j.eta_ms AS job_eta_ms, j.log AS job_log,
+             s.logo_area AS logo_area
              FROM recordings r
+             LEFT JOIN services s ON s.id = r.service_id
              -- 動いているエンコードは録画1本につき高々1つ (encoder.enqueue が重複を弾く)
              LEFT JOIN encode_jobs j ON j.id = (
                  SELECT id FROM encode_jobs
@@ -188,5 +192,32 @@ export const actions = {
         if (!Number.isFinite(id)) return fail(400, { message: '予約IDが不正です' });
         await cancel(id);
         return { success: true };
+    },
+
+    /**
+     * 局ロゴの位置を覚える。
+     *
+     * CM検出 (jls) で logoframe が自分で見つけられなかった局だけ、画面から
+     * 囲ってもらう。局ごとの設定なので、次に同じ局を録ったときから効く。
+     */
+    logoArea: async ({ request }) => {
+        const form = await request.formData();
+        const serviceId = Number(form.get('serviceId'));
+        const area = String(form.get('area') ?? '').trim();
+        if (!Number.isFinite(serviceId)) return fail(400, { message: '局IDが不正です' });
+        // logoframe に渡す形。数字4つ以外は受けない
+        if (!/^\d+,\d+,\d+,\d+$/.test(area)) {
+            return fail(400, { message: 'ロゴの範囲を囲ってください' });
+        }
+        database().prepare('UPDATE services SET logo_area = ? WHERE id = ?').run(area, serviceId);
+        return { success: true, message: `ロゴの位置を覚えました (${area})` };
+    },
+
+    logoAreaClear: async ({ request }) => {
+        const form = await request.formData();
+        const serviceId = Number(form.get('serviceId'));
+        if (!Number.isFinite(serviceId)) return fail(400, { message: '局IDが不正です' });
+        database().prepare('UPDATE services SET logo_area = NULL WHERE id = ?').run(serviceId);
+        return { success: true, message: 'ロゴの位置を自動に戻しました' };
     },
 };

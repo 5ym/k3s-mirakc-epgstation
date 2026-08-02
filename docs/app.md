@@ -33,7 +33,8 @@ EPGStation の置き換えとして作ったもので、エンコード設定は
 | `src/lib/server/serve.ts` | ファイルの配信 (Range 対応) |
 | `src/lib/server/scramble.ts` | スクランブルの検出と、チューナー側への解除依頼 |
 | `src/lib/server/scan.ts` | チャンネルスキャン (チューナー側に投げて進み具合を読む) |
-| `src/lib/server/logo.ts` | 局ロゴの収集と保存 |
+| `src/lib/server/logo.ts` | 局ロゴの収集と保存 (番組表に出すPNG) |
+| `src/lib/components/LogoArea.svelte` | CM検出用のロゴ位置を画面から教える |
 | `src/lib/ts/psi.ts` | TS の PSI (NIT / SDT) を読む。チューナー側と共通 |
 | `src/lib/ts/logo.ts` | TS から局ロゴ (CDT) を読む |
 | `src/lib/ts/synth.ts` | TS のセクションを組み立てる (テストと偽mirakc用) |
@@ -109,7 +110,7 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 | `CM_JLS_FALLBACK_FPS` | `29.97` | fps を取れなかったときに使う値 |
 | `CM_DETECT_TIMEOUT` | `1800000` | CM検出を打ち切るまで(ms) |
 | `PROGRAM_RETENTION` | `86400000` | 終わった番組をDBに残す期間(ms) |
-| `HISTORY_RETENTION` | `1209600000` | 終わった予約と削除済み録画の行を残す期間(ms。既定は2週間) |
+| `HISTORY_RETENTION` | `1209600000` | 終わった予約・削除済み録画・エンコードの記録を残す期間(ms。既定は2週間) |
 | `DENPA_AUTOSTART` | `1` | `0` で常駐処理を止める |
 
 ## 画面
@@ -122,6 +123,7 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 | `/tuners` | チャンネルスキャン、チューナーの空き、取れているチャンネル (mirakc 側の局と番組表の集まり具合つき)、mirakc とカードリーダーの状態 |
 | `/settings` | 録画のしかた(コーデック/CM)、通知先(Webhook)、ベーシック認証、EPGStation からの引き継ぎ |
 | `/api/recordings/<id>/file` | 録画ファイル。Range 対応 |
+| `/api/recordings/<id>/frame?at=<秒>` | 録画から1コマ (JPEG)。ロゴの位置を指定するときに使う |
 | `/dav` | WebDAV (PROPFIND / GET / HEAD)。Kodi 用。書き込みは受けない |
 
 ## チューナー側 (`mirakc/`)

@@ -53,7 +53,10 @@ const aborts = new Map<number, AbortController>();
 const canceled = new Set<number>();
 
 export interface EncodeOptions {
-    /** CM実カット時に残す区間。null なら全部残す */
+    /**
+     * CM実カット時に残す区間。null なら全部残す。
+     * 切るのは buildSegmentArgs 側で、buildArgs はこれを見ない
+     */
     keep?: Range[] | null;
     /** チャプター(CM位置)を書き込む ffmetadata ファイル */
     chaptersFile?: string | null;
@@ -63,7 +66,8 @@ export interface EncodeOptions {
  * ffmpeg の引数。EPGStation 時代の enc.js をそのまま移植したもので、
  * 各フラグの理由はコメントに残してある(ARIB字幕の焼き込み、インタレ解除、デュアルモノ分離)。
  *
- * CM実カット時だけは filter_complex で select を掛けるため、フィルタの組み方が変わる。
+ * CM を切る場合でもここは変わらない。**切るのはエンコードの前にTSの段階**で、
+ * ここに来る入力は既に切り終えたものになっている (buildSegmentArgs)。
  */
 export function buildArgs(
     input: string,
@@ -141,13 +145,6 @@ export function buildArgs(
     return args;
 }
 
-/**
- * CM実カット版の引数。
- *
- * select は「元の時刻 t」で判定するので、bwdif の後・エンコードの前に挟む。
- * 字幕は別ストリームのままだと切った後の時刻に追従できずズレるため落とす
- * (焼き込みに変える手もあるが、字幕を消せなくなるほうが不便という判断)。
- */
 /**
  * CM を切り落としたTSを作る。
  *
@@ -454,15 +451,37 @@ async function prepareCm(
 
     let detection: CmDetection;
     try {
-        detection = await detectCm(input, signal, recording.service_name, progressReporter(jobId));
+        /*
+         * ロゴの位置を手で入れてもらっていれば渡す。自動で見つからない局
+         * (薄い・動くロゴ) はこれが無いとロゴ無しの判定に落ちる
+         */
+        const service = queryOne<{ logo_area: string | null }>(
+            'SELECT logo_area FROM services WHERE id = ?',
+            recording.service_id,
+        );
+        detection = await detectCm(
+            input,
+            signal,
+            recording.service_name,
+            progressReporter(jobId),
+            service?.logo_area ?? '',
+        );
     } catch (error) {
         console.error(`[cm] 検出に失敗したためCM処理をスキップします: ${error}`);
         return none;
     }
 
     database()
-        .prepare('UPDATE recordings SET cm_ranges = ?, updated_at = ? WHERE id = ?')
-        .run(JSON.stringify(detection.cm), now(), recording.id);
+        .prepare(
+            'UPDATE recordings SET cm_ranges = ?, cm_note = ?, logo_missing = ?, updated_at = ? WHERE id = ?',
+        )
+        .run(
+            JSON.stringify(detection.cm),
+            detection.note,
+            detection.logoMissing ? 1 : 0,
+            now(),
+            recording.id,
+        );
     database()
         .prepare('UPDATE encode_jobs SET log = ? WHERE id = ?')
         .run(`CM ${detection.cm.length} 箇所 (${detection.note})`, jobId);

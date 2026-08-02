@@ -210,11 +210,6 @@ export function chapterMetadata(cm: Range[], duration: number): string {
     return `${lines.join('\n')}\n`;
 }
 
-/** select/aselect に渡す区間式。`between(t,a,b)+between(t,c,d)` の形 */
-export function selectExpression(keep: Range[]): string {
-    return keep.map((r) => `between(t,${r.start.toFixed(3)},${r.end.toFixed(3)})`).join('+');
-}
-
 /**
  * 尺とフレームレートを先に取る。
  *
@@ -268,6 +263,8 @@ export interface CmDetection {
     cm: Range[];
     duration: number;
     note: string;
+    /** ロゴを当てられなかった。位置を教えてもらえば次から効く (jls のときだけ) */
+    logoMissing: boolean;
 }
 
 /**
@@ -280,13 +277,19 @@ export async function detectCm(
     signal?: AbortSignal,
     channel = '',
     onProgress?: (percent: number) => void,
+    area = '',
 ): Promise<CmDetection> {
+    /** ロゴを当てられなかったことは、無音検出に落ちたあとも伝える */
+    let logoMissing = false;
     if (config.cmDetector === 'jls') {
         const duration = await probeDuration(input);
         if (Number.isFinite(duration)) {
             const { detectWithJls } = await import('./cm-jls');
-            const result = await detectWithJls(input, duration, signal, channel);
-            if (result.cm.length > 0) return { cm: result.cm, duration, note: result.note };
+            const result = await detectWithJls(input, duration, signal, channel, area);
+            logoMissing = result.logoMissing;
+            if (result.cm.length > 0) {
+                return { cm: result.cm, duration, note: result.note, logoMissing };
+            }
             console.warn(`[cm] jls で検出できなかったため無音検出に切り替えます: ${result.note}`);
         }
     }
@@ -300,6 +303,9 @@ export async function detectCm(
     return {
         cm: detectCmRanges(silences, duration),
         duration,
-        note: `silencedetect: 無音 ${silences.length} 箇所`,
+        note: logoMissing
+            ? `ロゴを当てられなかったので無音で検出 (無音 ${silences.length} 箇所)`
+            : `無音 ${silences.length} 箇所`,
+        logoMissing,
     };
 }

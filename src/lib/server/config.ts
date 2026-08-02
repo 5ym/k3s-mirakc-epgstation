@@ -68,7 +68,7 @@ export const config = {
      * jls のときに回すコマンド。`{input}` に生TS、`{channel}` に局名が入る。
      * 最後に「残す区間を Trim() で並べた avs」のパスを出せば何でもよい
      */
-    cmJlsCommand: str('CM_JLS_COMMAND', "/opt/jls/detect.sh '{input}' '{channel}'"),
+    cmJlsCommand: str('CM_JLS_COMMAND', "/opt/jls/detect.sh '{input}' '{channel}' '{area}'"),
     /** jls の出力(Trim入りのavs)の探索先。空ならコマンドの標準出力から拾う */
     cmJlsOutputDir: str('CM_JLS_OUTPUT_DIR', ''),
     /** jls が返す Trim はフレーム番号なので、秒に直すためのfps。ffprobeで取れなければこれを使う */

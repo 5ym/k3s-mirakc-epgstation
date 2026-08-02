@@ -2,7 +2,7 @@
 #
 # join_logo_scp で CM 位置を出す。
 #
-#   detect.sh <入力TS> [局名]
+#   detect.sh <入力TS> [局名] [x,y,w,h]
 #
 # 最後に「残す区間を Trim() で並べた avs」のパスを標準出力へ出す。
 # denpa (src/lib/server/cm-jls.ts) はそれを読んで秒の区間に直す。
@@ -18,8 +18,10 @@
 # 1本目は作るぶん遅く、2本目からはそれを使い回す。合致率が落ちたら作り直す。
 set -eu
 
-input=${1:?usage: detect.sh <input.ts> [channel]}
+input=${1:?usage: detect.sh <input.ts> [channel] [x,y,w,h]}
 channel=${2:-}
+# ロゴの位置。自動で見つからない局だけ、denpa の画面から教わったものが入る
+area=${3:-${JLS_LOGO_AREA:-}}
 
 BIN=${JLS_BIN:-/opt/jls/bin}
 JL=${JLS_JL:-/opt/jls/JL/JL_標準.txt}
@@ -47,7 +49,7 @@ trap cleanup EXIT
 if [ -n "$channel" ]; then
     "$BIN/logoframe" "$input" -oa "$frames" -o "$erase" \
         -channel "$channel" -logo-dir "$LOGO_DIR" -logo-samples "$SAMPLES" \
-        ${JLS_LOGO_AREA:+-logo-area "$JLS_LOGO_AREA"} >&2
+        ${area:+-logo-area "$area"} >&2
 else
     # 局が分からないときは持っているロゴを全部当てる。無ければロゴ無しで進む
     "$BIN/logoframe" "$input" -oa "$frames" -o "$erase" -logo "$LOGO_DIR" >&2

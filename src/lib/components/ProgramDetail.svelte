@@ -16,6 +16,8 @@
         onclose,
         error = null,
         cm = null,
+        cmNote = null,
+        extra,
         actions,
     }: {
         program: ProgramDetail;
@@ -23,6 +25,10 @@
         error?: string | null;
         /** 検出したCM区間 (JSON)。録画から開いたときだけ入る */
         cm?: string | null;
+        /** 何を使って検出したか (無音 / join_logo_scp)。判定の当てにできるか分かる */
+        cmNote?: string | null;
+        /** 開いた場所だけで要るもの (録画ならロゴ位置の指定)。無ければ何も出ない */
+        extra?: Snippet;
         actions?: Snippet;
     } = $props();
 
@@ -92,10 +98,13 @@
             </div>
         {/each}
 
-        {#if cmText}
+        {#if cmText || cmNote}
             <!-- どこをCMとみなしたか。一覧に出すと長くて場所を食うので、見たいときだけ -->
             <div class="mt-3" data-testid="detail-cm">
                 <div class="text-sm font-medium">CM</div>
+                {#if cmNote}
+                    <div class="text-base-content/60 text-xs" data-testid="detail-cm-note">{cmNote}</div>
+                {/if}
                 <div class="text-base-content/70 text-sm break-words">{cmText}</div>
             </div>
         {/if}
@@ -107,6 +116,10 @@
                 <pre
                     class="bg-base-200 mt-1 max-h-48 overflow-auto rounded p-2 font-mono text-xs whitespace-pre-wrap">{error}</pre>
             </div>
+        {/if}
+
+        {#if extra}
+            {@render extra()}
         {/if}
 
         {#if actions}

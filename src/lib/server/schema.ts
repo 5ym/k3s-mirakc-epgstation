@@ -45,6 +45,15 @@ export const ADDED_COLUMNS: { table: string; column: string; definition: string 
     { table: 'encode_jobs', column: 'phase', definition: "TEXT NOT NULL DEFAULT 'encode'" },
     // 残り時間の見込み(ms)。ffmpeg の speed から出す
     { table: 'encode_jobs', column: 'eta_ms', definition: 'INTEGER' },
+    /*
+     * 局ロゴの位置 ("x,y,w,h")。CM検出を jls にしているときだけ使う。
+     * 空なら logoframe が自分で探す。探せなかった局だけ画面から入れてもらう
+     */
+    { table: 'services', column: 'logo_area', definition: 'TEXT' },
+    // CM検出が何をしたか。一覧には出さず、録画の詳細で見せる
+    { table: 'recordings', column: 'cm_note', definition: 'TEXT' },
+    // ロゴを当てられなかった。位置を教えてもらうために印を付ける
+    { table: 'recordings', column: 'logo_missing', definition: 'INTEGER NOT NULL DEFAULT 0' },
 ];
 
 export const SCHEMA = `
