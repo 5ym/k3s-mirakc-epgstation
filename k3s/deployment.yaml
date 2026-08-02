@@ -32,9 +32,10 @@ spec:
             # チューナー側エージェント。スキャン・カードの状態・スクランブル解除の窓口
             - containerPort: 40773
           volumeMounts:
-            # 設定。スキャン結果が書き戻されるのでPVCに置く
+            # 設定。スキャン結果が書き戻されるのでPVCに置く。
+            # /etc/mirakc は mirakc 自身の strings.yml が居るので使わない
             - name: mirakc-config
-              mountPath: /etc/mirakc
+              mountPath: /app-config
             # mirakc が覚えている局・時刻・番組表。スキャンのたびに捨てて拾い直す
             - name: mirakc-epg
               mountPath: /var/lib/mirakc/epg

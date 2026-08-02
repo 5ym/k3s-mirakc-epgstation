@@ -10,7 +10,6 @@
             "!**/*.svelte",
             "!static",
             "!k3s",
-            "!mirakc",
             "!windows",
             "!docs",
             "!.github",

@@ -6,7 +6,7 @@ import { emit } from './events';
 /**
  * チャンネルスキャン。
  *
- * 実際に選局するのはチューナー側のエージェント (mirakc/agent.py)。mirakc には
+ * 実際に選局するのはチューナー側のエージェント (mirakc/agent.ts)。mirakc には
  * 走査APIが無く、設定も起動時にしか読まれないので、あちらが mirakc を止めて
  * 総当たりし、結果を config.yml に書いてから起動し直す。
  *

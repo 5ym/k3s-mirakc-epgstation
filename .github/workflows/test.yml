@@ -54,13 +54,9 @@ jobs:
       - name: Type check
         run: bun run check
 
+      # denpa 本体と、チューナー側エージェント (mirakc/) の両方
       - name: Unit tests
         run: bun run test:unit
-
-      # チューナー側エージェント (mirakc/) の分。TSの解析とスキャンの駆動は
-      # あちらに置いてあるので、ここで回さないと誰も回さない
-      - name: Agent tests
-        run: bun run test:agent
 
       - name: Install Playwright browser
         run: bunx playwright install --with-deps chromium
