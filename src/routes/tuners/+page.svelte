@@ -38,6 +38,59 @@
 
 <div class="grid items-start gap-6 xl:grid-cols-2">
     <div class="flex flex-col gap-6">
+        <section class="card bg-base-100 shadow" data-testid="channel-card">
+            <div class="card-body">
+                <h2 class="card-title">取れているチャンネル</h2>
+                <p class="text-base-content/70 text-sm">
+                    mirakc の設定に入っている物理チャンネルです。局名は denpa が取り込んだものを出します。
+                </p>
+                {#await data.channels}
+                    <p class="text-base-content/60 text-sm">確認中…</p>
+                {:then channels}
+                    {#if channels.length === 0}
+                        <p class="text-base-content/60 text-sm" data-testid="channel-empty">
+                            まだ1つもありません。チャンネルスキャンを実行してください。
+                        </p>
+                    {:else}
+                        <div class="max-h-96 overflow-auto">
+                            <table class="table-pin-rows table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>種別</th>
+                                        <th>ch</th>
+                                        <th class="w-full">局</th>
+                                    </tr>
+                                </thead>
+                                <tbody data-testid="channel-list">
+                                    {#each channels as channel (`${channel.type}:${channel.channel}`)}
+                                        {@const services =
+                                            byChannel.get(`${channel.type}:${channel.channel}`) ?? []}
+                                        <tr data-testid="channel-row" data-channel={channel.channel}>
+                                            <td class="whitespace-nowrap text-sm">
+                                                {TYPE_LABEL[channel.type] ?? channel.type}
+                                            </td>
+                                            <td class="font-mono text-sm whitespace-nowrap">
+                                                {channel.channel}
+                                            </td>
+                                            <td class="text-sm">
+                                                {#if services.length > 0}
+                                                    {services.map((s) => s.name).join(', ')}
+                                                {:else}
+                                                    <span class="text-base-content/60">
+                                                        まだ取り込んでいません
+                                                    </span>
+                                                {/if}
+                                            </td>
+                                        </tr>
+                                    {/each}
+                                </tbody>
+                            </table>
+                        </div>
+                    {/if}
+                {/await}
+            </div>
+        </section>
+
         <section class="card bg-base-100 shadow" data-testid="scan-card">
             <div class="card-body">
                 <h2 class="card-title">チャンネルスキャン</h2>
@@ -129,7 +182,9 @@
                 {/if}
             </div>
         </section>
+    </div>
 
+    <div class="flex flex-col gap-6">
         <section class="card bg-base-100 shadow" data-testid="status-card">
             <div class="card-body">
                 <h2 class="card-title">つながり具合</h2>
@@ -175,9 +230,7 @@
                 </dl>
             </div>
         </section>
-    </div>
 
-    <div class="flex flex-col gap-6">
         <section class="card bg-base-100 shadow" data-testid="tuner-card">
             <div class="card-body">
                 <h2 class="card-title">チューナーの空き</h2>
@@ -231,59 +284,6 @@
                                                 {:else}
                                                     <span class="text-base-content/60">—</span>
                                                 {/each}
-                                            </td>
-                                        </tr>
-                                    {/each}
-                                </tbody>
-                            </table>
-                        </div>
-                    {/if}
-                {/await}
-            </div>
-        </section>
-
-        <section class="card bg-base-100 shadow" data-testid="channel-card">
-            <div class="card-body">
-                <h2 class="card-title">取れているチャンネル</h2>
-                <p class="text-base-content/70 text-sm">
-                    mirakc の設定に入っている物理チャンネルです。局名は denpa が取り込んだものを出します。
-                </p>
-                {#await data.channels}
-                    <p class="text-base-content/60 text-sm">確認中…</p>
-                {:then channels}
-                    {#if channels.length === 0}
-                        <p class="text-base-content/60 text-sm" data-testid="channel-empty">
-                            まだ1つもありません。チャンネルスキャンを実行してください。
-                        </p>
-                    {:else}
-                        <div class="max-h-96 overflow-auto">
-                            <table class="table-pin-rows table table-sm">
-                                <thead>
-                                    <tr>
-                                        <th>種別</th>
-                                        <th>ch</th>
-                                        <th class="w-full">局</th>
-                                    </tr>
-                                </thead>
-                                <tbody data-testid="channel-list">
-                                    {#each channels as channel (`${channel.type}:${channel.channel}`)}
-                                        {@const services =
-                                            byChannel.get(`${channel.type}:${channel.channel}`) ?? []}
-                                        <tr data-testid="channel-row" data-channel={channel.channel}>
-                                            <td class="whitespace-nowrap text-sm">
-                                                {TYPE_LABEL[channel.type] ?? channel.type}
-                                            </td>
-                                            <td class="font-mono text-sm whitespace-nowrap">
-                                                {channel.channel}
-                                            </td>
-                                            <td class="text-sm">
-                                                {#if services.length > 0}
-                                                    {services.map((s) => s.name).join(', ')}
-                                                {:else}
-                                                    <span class="text-base-content/60">
-                                                        まだ取り込んでいません
-                                                    </span>
-                                                {/if}
                                             </td>
                                         </tr>
                                     {/each}

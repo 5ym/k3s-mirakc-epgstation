@@ -42,8 +42,13 @@ export function load({ url }) {
          JOIN services s ON s.id = r.service_id
          LEFT JOIN rules ON rules.id = r.rule_id
          WHERE r.state IN ${states}
-         -- 録画中は真っ先に見たいので先頭に固定する
-         ORDER BY (r.state = 'recording') DESC, r.start_at ${showFinished ? 'DESC' : 'ASC'}
+         -- 録画中は真っ先に見たいので先頭に固定する。
+         -- そのあとは「これから」を近い順に、「終わったもの」を新しい順に。
+         -- 全部まとめて降順にすると、これからの予約が一番遠いものから並んでしまう
+         ORDER BY (r.state = 'recording') DESC,
+                  CASE WHEN r.state IN ('scheduled', 'conflict') THEN 0 ELSE 1 END,
+                  CASE WHEN r.state IN ('scheduled', 'conflict') THEN r.start_at END ASC,
+                  r.start_at DESC
          LIMIT 300`,
     );
 
@@ -114,7 +119,6 @@ export const actions = {
         const recording = target(await request.formData());
         if (recording === undefined) return fail(400, { message: '録画が見つかりません' });
         // 元になるのは生TS。エンコード済みを元に録り直しても画質は戻らない
-        // (引き継いだ録画は保存先に生TSのまま置かれていることがある)
         if (encodeSource(recording) === null) {
             return fail(400, { message: '生TSが残っていないため再エンコードできません' });
         }

@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { config } from './config';
 import { pump, requeueOrphanedJobs } from './encoder';
 import { sync } from './epg';
-import { reconcile } from './files';
+import { pruneHistory, reconcile } from './files';
 import { sweep } from './logo';
 import { recoverOrphanedRecordings } from './recorder';
 import { tick } from './scheduler';
@@ -65,6 +65,13 @@ export function start(): void {
      */
     void guard('reconcile', reconcile);
     every(config.reconcileInterval, 'reconcile', reconcile);
+
+    /*
+     * 古い履歴を畳む。終わった予約と、消した録画の行が対象。
+     * 実体はもう無いので、消えて困るものはない。照合と同じ周期でよい
+     */
+    void guard('prune', pruneHistory);
+    every(config.reconcileInterval, 'prune', pruneHistory);
 
     /*
      * 局ロゴ。mirakc は Mirakurun と違って TS から集めてくれないので、

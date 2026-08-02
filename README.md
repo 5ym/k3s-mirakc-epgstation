@@ -68,6 +68,16 @@ kubectl apply -f k3s/
 | iOS / iPadOS | VLC |
 | Kodi | `/dav` を WebDAV サーバーとして追加。Android TV・Fire TV でもこれで観られます |
 
+**放送中のものをそのまま観たい**ときは、denpa ではなく mirakc に直接繋ぎます。
+Kodi の PVR IPTV Simple Client に
+
+- プレイリスト: `http://<mirakcのホスト>:40772/api/iptv/playlist`
+- EPG: `http://<mirakcのホスト>:40772/api/iptv/xmltv`
+
+を入れると、番組表付きのライブTVになります (Android TV・Fire TV も同じ)。
+denpa は通らないので、予約もベーシック認証も効きません。
+詳しくは [docs/architecture.md](docs/architecture.md#ライブ視聴)。
+
 ## 開発
 
 **ホストに bun は入れません。全部コンテナの中で動かします。**
@@ -88,8 +98,8 @@ ffmpeg も既定では偽物 (`tests/fake/ffmpeg.sh`) を使います。
 
 ## もっと詳しく
 
-- [docs/architecture.md](docs/architecture.md) — 構成と、なぜそうしたか
-- [docs/app.md](docs/app.md) — denpa の中身 (状態遷移・環境変数・テスト)
+- [docs/architecture.md](docs/architecture.md) — **なぜこの形なのか** (決めたこと・踏んだ落とし穴)
+- [docs/app.md](docs/app.md) — **どこに何があるか** (ファイル・環境変数・画面・状態遷移)
 - [docs/data.md](docs/data.md) — mirakc に都度聞くもの / denpa が持つもの
 - [docs/windows.md](docs/windows.md) — Windows で再生する準備
 - [docs/mac.md](docs/mac.md) — Mac で再生する準備

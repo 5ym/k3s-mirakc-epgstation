@@ -55,6 +55,69 @@ test.describe('ルールの編集', () => {
             await page.waitForTimeout(80);
         }
     });
+
+    test('編集中に「何が録れるか見る」を押しても編集のまま', async ({ page }) => {
+        await goto(page, '/rules');
+        await page.getByTestId('rule-keyword').fill('テストアニメ');
+        await page.getByTestId('rule-submit').click();
+        await expect(page.getByTestId('rule-row').first()).toBeVisible();
+
+        await page.getByTestId('rule-edit').first().click();
+        await page.waitForURL(/edit=/);
+
+        // 条件をいじってから確かめる。ここで追加の画面に戻ると、押し直した先で
+        // ルールがもう1つ増えることになる
+        await page.getByTestId('rule-keyword').fill('テストアニメ 決戦');
+        await page.getByTestId('rule-preview').click();
+        await expect(page.getByTestId('preview')).toBeVisible();
+        await expect(page.getByTestId('rule-update')).toBeVisible();
+        await expect(page.getByTestId('rule-submit')).toHaveCount(0);
+        // 出ているのは保存済みの条件ではなく、いま入っている条件での結果
+        await expect(page.getByTestId('rule-keyword')).toHaveValue('テストアニメ 決戦');
+
+        await page.getByTestId('rule-cancel-edit').click();
+        await expect(page.getByTestId('rule-row')).toHaveCount(1);
+        await page.getByTestId('rule-delete').first().click();
+        await expect(page.getByTestId('rule-row')).toHaveCount(0);
+        await goto(page, '/');
+        for (let i = 0; i < 80; i++) {
+            const buttons = page.getByTestId('cancel-button');
+            if ((await buttons.count()) === 0) break;
+            await buttons.first().click();
+            await page.waitForTimeout(80);
+        }
+    });
+
+    test('ルールが立てた予約をまとめて取り消せる', async ({ page }) => {
+        /*
+         * ここで立てた予約は取り消しで残る (ルールは作り直さないため)。
+         * 他のテストが使う「テストアニメ」を消費すると、そちらで予約が
+         * 立たなくなるので、このテストだけの番組名を使う
+         */
+        await goto(page, '/rules');
+        await page.getByTestId('rule-keyword').fill('テスト番組C');
+        await page.getByTestId('rule-submit').click();
+        await expect(page.getByTestId('rule-row').first()).toBeVisible();
+
+        await page.getByTestId('rule-edit').first().click();
+        await page.waitForURL(/edit=/);
+
+        // 条件を狭めても既存の予約は残るので、要らないときはここから畳む
+        const cancelAll = page.getByTestId('rule-cancel-reservations');
+        await expect(cancelAll).toBeVisible();
+        await cancelAll.click();
+
+        // 予約が無くなればボタン自体が消える
+        await page.waitForURL(/edit=/);
+        await expect(page.getByTestId('rule-cancel-reservations')).toHaveCount(0);
+
+        await goto(page, '/');
+        await expect(page.getByTestId('reservation-row').filter({ hasText: 'テスト番組C' })).toHaveCount(0);
+
+        await goto(page, '/rules');
+        await page.getByTestId('rule-delete').first().click();
+        await expect(page.getByTestId('rule-row')).toHaveCount(0);
+    });
 });
 
 test.describe('ルールの作り直し', () => {

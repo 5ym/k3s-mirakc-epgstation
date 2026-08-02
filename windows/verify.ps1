@@ -25,7 +25,7 @@ Write-Host '構文エラーなし'
 
 # 中の関数だけ取り出して使う。denpa.ps1 をそのまま実行するとレジストリを触るため
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($target, [ref]$null, [ref]$null)
-foreach ($name in @('Build-Command', 'ConvertTo-Base64Url')) {
+foreach ($name in @('Build-Command', 'Build-RegistryCommand', 'ConvertTo-Base64Url')) {
     $found = $ast.FindAll({
             param($node)
             $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
@@ -39,6 +39,59 @@ foreach ($name in @('Build-Command', 'ConvertTo-Base64Url')) {
 
 $exe = 'C:\Program Files\VideoLAN\VLC\vlc.exe'
 $inner = Build-Command $exe
+
+<#
+    レジストリの1行が Windows にどう分解されるか。
+
+    値は `"powershell.exe" ... -Command "<script>"` という**1本のコマンドライン**で、
+    Windows は CommandLineToArgvW の規則で引数に割る。script の中に二重引用符が
+    1つでもあると、そこで -Command の値が打ち切られて script が複数の引数に割れ、
+    " も消える。**PowerShell は残りを空白で繋いで実行してしまう**ので、
+    構文エラーにもならずに「番組名がくくられていない」状態だけが残る。
+
+    実際にこれで VLC が開けなくなっていたのに、ここが script を直接
+    Invoke-Expression するだけだったので素通ししていた。分解まで真似て確かめる。
+#>
+function Split-CommandLine([string] $line) {
+    $args_ = New-Object System.Collections.Generic.List[string]
+    $current = New-Object System.Text.StringBuilder
+    $inQuotes = $false
+    $started = $false
+    $i = 0
+    while ($i -lt $line.Length) {
+        $c = $line[$i]
+        if ($c -eq '\') {
+            $slashes = 0
+            while ($i -lt $line.Length -and $line[$i] -eq '\') { $slashes++; $i++ }
+            if ($i -lt $line.Length -and $line[$i] -eq '"') {
+                [void]$current.Append('\' * [int]($slashes / 2))
+                if ($slashes % 2 -eq 1) { [void]$current.Append('"'); $i++ }
+                else { $inQuotes = -not $inQuotes; $started = $true; $i++ }
+            }
+            else { [void]$current.Append('\' * $slashes) }
+            continue
+        }
+        if ($c -eq '"') { $inQuotes = -not $inQuotes; $started = $true; $i++; continue }
+        if (($c -eq ' ' -or $c -eq "`t") -and -not $inQuotes) {
+            if ($current.Length -gt 0 -or $started) { $args_.Add($current.ToString()); [void]$current.Clear(); $started = $false }
+            $i++
+            continue
+        }
+        [void]$current.Append($c); $i++
+    }
+    if ($current.Length -gt 0 -or $started) { $args_.Add($current.ToString()) }
+    return $args_
+}
+
+$registry = Build-RegistryCommand $exe 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+$parts = Split-CommandLine $registry
+$commandAt = $parts.IndexOf('-Command')
+if ($commandAt -lt 0) { throw '-Command が渡っていない' }
+if ($parts.Count - $commandAt - 1 -ne 1) {
+    throw "-Command の値が $($parts.Count - $commandAt - 1) 個に割れている (中の二重引用符を疑う)"
+}
+if ($parts[$commandAt + 1] -ne $inner) { throw '-Command の値が欠けている' }
+Write-Host '=> レジストリの1行が Windows の引数分解を通っても欠けない'
 
 # 起動はさせず、VLC に渡る引数だけ見る
 function Start-Process { param($p, $ArgumentList) $global:got = @{ path = $p; args = $ArgumentList } }

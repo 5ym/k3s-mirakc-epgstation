@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# play.sh がリンクを解いて VLC に渡せるか確かめる。
+# denpa.sh がリンクを解いて VLC に渡せるか確かめる。
 #
 # アプレットの登録 (osacompile / PlistBuddy) は macOS でしか走らないが、
 # 一番壊れやすいのはリンクの復号と引数の渡し方なので、そこだけは
@@ -25,7 +25,7 @@ b64() { printf %s "$1" | openssl base64 -A | tr -- '+/' '-_' | tr -d '='; }
 
 play() {
     rm -f "$work/vlc.args"
-    DENPA_VLC="$work/vlc" sh "$here/play.sh" "$1"
+    DENPA_VLC="$work/vlc" sh "$here/denpa.sh" --play "$1"
     # 背景に回して起動するので、書き終わるのを少しだけ待つ
     for _ in 1 2 3 4 5 6 7 8 9 10; do
         [ -f "$work/vlc.args" ] && return 0
@@ -55,7 +55,7 @@ echo '=> 復号して VLC に渡せている'
 
 bad_link() {
     rm -f "$work/vlc.args"
-    if DENPA_VLC="$work/vlc" sh "$here/play.sh" "$2" >/dev/null 2>&1; then
+    if DENPA_VLC="$work/vlc" sh "$here/denpa.sh" --play "$2" >/dev/null 2>&1; then
         echo "通してはいけないものが通った: $1" >&2
         exit 1
     fi

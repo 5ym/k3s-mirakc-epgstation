@@ -45,8 +45,8 @@ export function libraryPath(rec: LibraryNameInput, ext: string): string {
 }
 
 /** 生TSの置き場。保存先と違い人が見るものではないので平置きでよい */
-export function recordedPath(rec: LibraryNameInput): string {
+export function recordedPath(rec: LibraryNameInput, ext = '.m2ts'): string {
     const d = new Date(rec.start_at);
     const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-    return join(config.recordedDir, `${sanitizeFileName(rec.series)}-${stamp}-${rec.id}.m2ts`);
+    return join(config.recordedDir, `${sanitizeFileName(rec.series)}-${stamp}-${rec.id}${ext}`);
 }

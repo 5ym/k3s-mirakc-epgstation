@@ -18,7 +18,7 @@ import type { Recording } from '$lib/types';
 import { config } from './config';
 import { database, now, queryOne } from './db';
 import { emit } from './events';
-import { libraryPath } from './library';
+import { libraryPath, recordedPath } from './library';
 import { writeNfo, writeThumbnail } from './metadata';
 import { reserve } from './reservations';
 import { parseTitle, toHalfWidth } from './title';
@@ -216,8 +216,18 @@ async function importOne(row: Row, options: MigrateOptions): Promise<'imported' 
 
     const id = Number(info.lastInsertRowid);
     const recording = queryOne<Recording>('SELECT * FROM recordings WHERE id = ?', id)!;
-    const extension = from.slice(from.lastIndexOf('.'));
-    const to = libraryPath(recording, extension === '' ? '.m2ts' : extension);
+
+    /*
+     * 生TSは保存先ではなく作業領域へ置く。
+     *
+     * EPGStation の video_file.type は 'ts'(未エンコード) か 'encoded'。
+     * 生TSを保存先に置くと denpa からは「エンコード済み」に見えてしまい、
+     * 録り直せず、Kodi にも巨大な MPEG-2 が並ぶ。denpa 自身が録ったときと
+     * 同じ形 (生TSは recorded、完成品は library) に揃える
+     */
+    const raw = row.fileType !== 'encoded';
+    const extension = from.slice(from.lastIndexOf('.')) || (raw ? '.m2ts' : '.mkv');
+    const to = raw ? recordedPath(recording, extension) : libraryPath(recording, extension);
 
     mkdirSync(dirname(to), { recursive: true });
     if (options.move) {
@@ -232,13 +242,17 @@ async function importOne(row: Row, options: MigrateOptions): Promise<'imported' 
         copyFileSync(from, to);
     }
 
+    const column = raw ? 'ts_path' : 'library_path';
     database()
-        .prepare('UPDATE recordings SET library_path = ?, ts_size = ?, updated_at = ? WHERE id = ?')
+        .prepare(`UPDATE recordings SET ${column} = ?, ts_size = ?, updated_at = ? WHERE id = ?`)
         .run(to, statSync(to).size, now(), id);
 
-    const placed = queryOne<Recording>('SELECT * FROM recordings WHERE id = ?', id)!;
-    writeNfo(placed, to);
-    await writeThumbnail(to, (Number(row.endAt) - Number(row.startAt)) / 1000);
+    // サイドカーは保存先に置いたものにだけ付ける。作業領域は Kodi から見えない
+    if (!raw) {
+        const placed = queryOne<Recording>('SELECT * FROM recordings WHERE id = ?', id)!;
+        writeNfo(placed, to);
+        await writeThumbnail(to, (Number(row.endAt) - Number(row.startAt)) / 1000);
+    }
     return 'imported';
 }
 
@@ -279,12 +293,33 @@ function serviceIdFor(channelId: number): number | undefined {
     return service?.id;
 }
 
-/** `[{"genre":6},{"genre":7}]` -> `[6, 7]` */
-function parseGenres(json: string | null): number[] {
-    if (json === null) return [];
+/**
+ * EPGStation のジャンル指定を denpa の書き方に直す。
+ *
+ * 向こうは `[{ "genre": 7, "subGenre": 0 }]`。subGenre は**あったり無かったり**で、
+ * 「アニメ全部」なら大分類だけになる。denpa は文字列で `"7"`(大分類だけ)と
+ * `"7-0"`(中分類まで)を持つので、そこへ写す。
+ *
+ * 数字でないものは捨てる。ここで素通しすると、画面のジャンル欄に
+ * 引ける名前の無い値が並ぶことになる。
+ */
+export function parseGenres(json: string | null): string[] {
+    if (json === null || json === '') return [];
     try {
-        const list = JSON.parse(json) as { genre?: number }[];
-        return list.map((g) => g.genre).filter((g): g is number => typeof g === 'number');
+        const list = JSON.parse(json) as unknown;
+        if (!Array.isArray(list)) return [];
+        return list
+            .map((item) => {
+                // 昔の形式で数値の配列になっていることもある
+                if (typeof item === 'number') return Number.isInteger(item) ? String(item) : null;
+                if (item === null || typeof item !== 'object') return null;
+                const { genre, subGenre } = item as { genre?: unknown; subGenre?: unknown };
+                if (typeof genre !== 'number' || !Number.isInteger(genre)) return null;
+                return typeof subGenre === 'number' && Number.isInteger(subGenre)
+                    ? `${genre}-${subGenre}`
+                    : String(genre);
+            })
+            .filter((value): value is string => value !== null);
     } catch {
         return [];
     }

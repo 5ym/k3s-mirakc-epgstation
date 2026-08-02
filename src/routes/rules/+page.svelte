@@ -75,6 +75,9 @@
         <form method="POST" use:submitting class="mt-2 space-y-4">
             {#if data.editing}
                 <input type="hidden" name="id" value={data.editing.id} />
+                <!-- 「この条件で何が録れるか見る」は GET でこの画面に戻ってくる。
+                     どのルールを編集していたかを持ち回らないと、追加の画面に戻ってしまう -->
+                <input type="hidden" name="edit" value={data.editing.id} />
             {/if}
             <!--
                 チェックを外した状態は GET だと「キー自体が無い」になって、
@@ -275,6 +278,20 @@
                         更新
                     </button>
                     <a class="btn" href="/rules" data-testid="rule-cancel-edit">やめる</a>
+                    {#if data.pending > 0}
+                        <!--
+                            条件を狭めても、既に立った予約はそのまま残る(意図して個別に
+                            残していることがあるので勝手には消さない)。要らないときはここから畳む
+                        -->
+                        <button
+                            class="btn btn-error btn-outline ml-auto"
+                            formaction="?/cancelReservations"
+                            formnovalidate
+                            data-testid="rule-cancel-reservations"
+                        >
+                            このルールの予約 {data.pending} 件を取り消す
+                        </button>
+                    {/if}
                 {:else}
                     <button class="btn btn-primary" formaction="?/create" data-testid="rule-submit">
                         追加

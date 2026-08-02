@@ -402,11 +402,15 @@
                             </td>
                             <td class="hidden whitespace-nowrap sm:table-cell">{size(rec.ts_size)}</td>
                             <td class="whitespace-nowrap">
+                                <!-- 消したものは「視聴可能」のままだと嘘になる。
+                                     行は履歴として残るので、状態のほうを差し替える -->
                                 <span
-                                    class="badge whitespace-nowrap {badgeClass(rec.state)}"
+                                    class="badge whitespace-nowrap {rec.deleted_at === null
+                                        ? badgeClass(rec.state)
+                                        : 'badge-ghost'}"
                                     data-testid="recording-state"
                                 >
-                                    {stateLabel(rec.state)}
+                                    {rec.deleted_at === null ? stateLabel(rec.state) : '削除済み'}
                                 </span>
                             </td>
                             <!--
@@ -416,7 +420,12 @@
                             <td class="sm:whitespace-nowrap">
                                 <div class="flex flex-wrap items-center justify-end gap-2 sm:flex-nowrap">
                                     {#if rec.deleted_at === null}
-                                        {#if rec.library_path !== null && platform !== null}
+                                        <!--
+                                            まだエンコードしていないものや、引き継いだ未エンコードの
+                                            録画は生TSしか無い。配信は library_path ?? ts_path を返すので、
+                                            どちらかがあれば開ける
+                                        -->
+                                        {#if (rec.library_path ?? rec.ts_path) !== null && platform !== null}
                                             <!--
                                     ブラウザは MPEG-2 も AV1+Opus の mkv も素直には再生できない。
                                     端末に入っているプレイヤーに URL を渡して開かせる
@@ -442,8 +451,7 @@
                                         {/if}
                                         <!--
                                             元になるのは生TS。エンコード済みを元に録り直しても
-                                            画質は戻らないので、生TSがあるときだけ出す
-                                            (引き継いだ録画は保存先に生TSのまま置かれていることがある)。
+                                            画質は戻らないので、生TSがあるときだけ出す。
                                             録画中・エンコード中は元がまだ書かれている最中なので触らせない
                                         -->
                                         {#if encodeSource(rec) !== null && rec.state !== 'recording' && rec.state !== 'encoding'}
@@ -474,6 +482,15 @@
                                                 </button>
                                             {/if}
                                         </form>
+                                    {:else}
+                                        <!--
+                                            消したものにはファイルが無いので、押せるものは何もない。
+                                            空欄のままだと列が崩れて「出るはずのものが出ていない」に
+                                            見えるので、いつ消したかを同じ場所に出す
+                                        -->
+                                        <span class="text-base-content/60 text-sm" data-testid="deleted-at">
+                                            {date(rec.deleted_at!)} に削除
+                                        </span>
                                     {/if}
                                 </div>
                             </td>

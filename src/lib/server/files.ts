@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import type { Recording } from '../types';
+import { config } from './config';
 import { database, now, queryAll } from './db';
 import { pruneEmptyDirs, removeIfExists } from './fsx';
 import { removeSidecars } from './metadata';
@@ -50,4 +51,36 @@ export function reconcile(): { checked: number; removed: number } {
     }
 
     return { checked: recordings.length, removed };
+}
+
+/**
+ * 古い履歴を捨てる。
+ *
+ * 残すのは「録れたか」を後から確かめるためだけなので、期限を切って畳む。
+ * 対象は**終わった予約**と**消した録画の行**だけ。ファイルが残っているものには
+ * 触らない(消すかどうかはユーザーが決めること)。
+ */
+export function pruneHistory(): { reservations: number; recordings: number } {
+    const cutoff = now() - config.historyRetention;
+
+    // 録画中や予約中のものは、いつ立てたかに関係なく残す
+    const reservations = database()
+        .prepare(
+            `DELETE FROM reservations
+             WHERE state IN ('done', 'failed', 'canceled', 'missed') AND end_at < ?`,
+        )
+        .run(cutoff).changes;
+
+    // 実体はもう無い (deleted_at が立つときに消してある)
+    const recordings = database()
+        .prepare('DELETE FROM recordings WHERE deleted_at IS NOT NULL AND deleted_at < ?')
+        .run(cutoff).changes;
+
+    // 録画の行を消したら、ぶら下がっていたエンコードの記録も要らない
+    database().prepare('DELETE FROM encode_jobs WHERE recording_id NOT IN (SELECT id FROM recordings)').run();
+
+    if (reservations > 0 || recordings > 0) {
+        console.log(`[files] 古い履歴を片付けました: 予約 ${reservations} 件 / 録画 ${recordings} 件`);
+    }
+    return { reservations, recordings };
 }

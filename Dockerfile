@@ -100,6 +100,8 @@ RUN ldconfig && fc-cache -f
 COPY --from=build /app/build ./build
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/package.json ./package.json
+# 引き継ぎで崩れたデータを直す道具。中で実行できないと意味が無いので入れておく
+COPY --from=build /app/scripts ./scripts
 
 EXPOSE 3000
 CMD ["bun", "./build/index.js"]

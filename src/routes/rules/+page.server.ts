@@ -3,6 +3,7 @@ import { genreName } from '$lib/arib';
 import { parseSearchFields } from '$lib/search';
 import { database, now, queryAll, queryOne } from '$lib/server/db';
 import { sync } from '$lib/server/epg';
+import { cancel } from '$lib/server/reservations';
 import { matches } from '$lib/server/rules';
 import { resolveConflicts } from '$lib/server/scheduler';
 import { settings } from '$lib/server/settings';
@@ -64,8 +65,14 @@ export function load({ url }) {
     // ?edit=<id> のときは、そのルールをフォームに読み込んで書き換えられるようにする
     const editing = queryOne<Rule>('SELECT * FROM rules WHERE id = ?', Number(url.searchParams.get('edit')));
 
-    // 条件が入っていれば、その条件で録れる番組を出す
-    const conditions = editing ?? conditionsFrom(url.searchParams);
+    /*
+     * 条件が入っていれば、その条件で録れる番組を出す。
+     *
+     * URL に載っている条件を優先する。編集中に「この条件で何が録れるか見る」を押すと
+     * ?edit=<id> と書き換えたフォームの値が一緒に飛んでくるので、保存済みのほうを
+     * 使うと**いま画面に入っている条件ではない結果**が出てしまう。
+     */
+    const conditions = conditionsFrom(url.searchParams) ?? editing ?? null;
     let preview: { total: number; programs: PreviewRow[] } | null = null;
     if (conditions !== null && url.searchParams.size > 0) {
         const all = queryAll<
@@ -101,9 +108,23 @@ export function load({ url }) {
         )
         .all() as Row[];
     const services = database().prepare('SELECT * FROM services ORDER BY type, channel').all() as Service[];
-    // フォームの初期値は「編集中のルール」か「URLに載った条件」。
-    // preview と別々に組み立てると、画面に出ている結果と保存されるものがズレる
-    return { rules, services, editing: editing ?? null, seed: conditions, preview, defaults };
+    /*
+     * 編集中のルールがこれから録る予定の件数。
+     *
+     * 条件を狭めても、既に立った予約はそのまま残る(意図して個別に残していることが
+     * あるため勝手に消さない)。まとめて取り消す口をここに置くので、何件あるかを出す。
+     */
+    const pending =
+        editing === undefined
+            ? 0
+            : (queryOne<{ n: number }>(
+                  `SELECT COUNT(*) AS n FROM reservations
+                   WHERE rule_id = ? AND state IN ('scheduled', 'conflict', 'recording')`,
+                  editing.id,
+              )?.n ?? 0);
+    // フォームの初期値は preview と同じものを使う。別々に組み立てると、
+    // 画面に出ている結果と保存されるものがズレる
+    return { rules, services, editing: editing ?? null, seed: conditions, preview, defaults, pending };
 }
 
 /** 選択されたチャンネルを JSON 配列に。未選択(=全チャンネル)は NULL で表す */
@@ -259,6 +280,27 @@ export const actions = {
         // 条件から外れた予約は残しておく(意図して個別に残している場合があるため)
         await reapply();
         redirect(303, '/rules');
+    },
+
+    /**
+     * このルールが立てた予約をまとめて取り消す。
+     *
+     * 条件を狭めても既存の予約は残る(意図して個別に残していることがあるため)ので、
+     * 「もう要らない」ときにここから畳む。取り消しであって削除ではないので、
+     * ルールが同じ番組を作り直すことはなく、1件ずつなら予約一覧から戻せる。
+     */
+    cancelReservations: async ({ request }) => {
+        const form = await request.formData();
+        const id = Number(form.get('id'));
+        if (!Number.isFinite(id)) return fail(400, { message: 'ルールIDが不正です' });
+
+        const targets = queryAll<{ id: number }>(
+            `SELECT id FROM reservations
+             WHERE rule_id = ? AND state IN ('scheduled', 'conflict', 'recording')`,
+            id,
+        );
+        for (const target of targets) await cancel(target.id);
+        return { success: true, canceled: targets.length };
     },
 
     toggle: async ({ request }) => {

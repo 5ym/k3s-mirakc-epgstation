@@ -19,6 +19,9 @@
 .PARAMETER PlayerPath
     vlc.exe の場所。省略すると PATH と既定の場所から探す。
 
+.PARAMETER NoPause
+    終わったあとに Enter を待たない。自動実行やパイプから使うとき用。
+
 .PARAMETER Origins
     確認なしで開くことを許す denpa の origin。既定は dp.home.arpa と dp.doany.io。
     Edge と Chrome のポリシー (AutoLaunchProtocolsFromOrigins) に書く。
@@ -44,12 +47,36 @@
 param(
     [string] $PlayerPath,
     [string[]] $Origins = @('http://dp.home.arpa', 'https://dp.doany.io'),
+    [switch] $NoPause,
     [switch] $Remove,
     [switch] $Show,
     [string] $Test
 )
 
 $ErrorActionPreference = 'Stop'
+
+<#
+    終わったあとに Enter を待つ。
+
+    右クリックの「PowerShell で実行」やショートカットから起動すると、
+    終わった瞬間に窓が閉じて何が出ていたのか読めない。読ませてから閉じる。
+    パイプや自動実行では止まると帰ってこないので、対話できるときだけ待つ。
+#>
+function Wait-Enter {
+    if ($NoPause) { return }
+    if (-not [Environment]::UserInteractive) { return }
+    if ($Host.Name -ne 'ConsoleHost') { return }
+    Write-Host ''
+    $null = Read-Host 'Enter で閉じます'
+}
+
+# 失敗しても同じこと。エラーだけ出して窓が消えるのが一番困る
+trap {
+    Write-Host ''
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    Wait-Enter
+    exit 1
+}
 
 $Root = 'HKCU:\Software\Classes\denpa'
 $CommandKey = "$Root\shell\open\command"
@@ -205,9 +232,18 @@ function ConvertTo-Base64Url([string] $text) {
     レジストリに入れる本体。
 
     レジストリの値は 1 行なので、ここで組み立てて ; で繋ぐ。
-    値全体が二重引用符で囲まれるため、中では**単引用符しか使えない**。
     %1 は Windows がリンクに置き換える。base64url の英数字と -_ しか入らないので、
     単引用符で囲んでおけば中身で壊れることはない。
+
+    **この中に二重引用符を1つも書かないこと。** 出来上がりは
+
+        "powershell.exe" ... -Command "<ここで組み立てたもの>"
+
+    という1本のコマンドラインになる。中に " があると、Windows の引数分解
+    (CommandLineToArgvW) がそこで -Command の値を打ち切ってしまい、script が
+    3つの引数に割れて " も消える。VLC に渡す番組名がくくられなくなり、
+    空白で分かれて「開けません」になる。二重引用符が要るところは $q ([char]34)
+    を連結して作る。windows/verify.ps1 がこの分解まで含めて確かめている。
 #>
 function Build-Command([string] $exe) {
     # パスに ' が入っていても壊れないよう、単引用符は倍にして埋める
@@ -216,12 +252,16 @@ function Build-Command([string] $exe) {
     # 連結は必ず括弧でくくる。@('a','b'+$t) は「配列に $t を足す」と解釈され、
     # 'b'+$t の連結にならない (, は + より結合が弱い)。
     #
-    # 値は二重引用符でくくる。Start-Process は引数を空白で繋いだ1本の
-    # コマンドラインとして渡すので、くくらないと**番組名の空白で分かれ**、
-    # 後ろがもう1つの入力として VLC に渡って「開けません」になる
-    $playerArgs = "@('--no-video-title-show',('--meta-title=`"'+`$t+'`"'),('`"'+`$u+'`"'))"
+    # 値は $q でくくる。Start-Process は引数を空白で繋いだ1本のコマンドラインとして
+    # 渡すので、くくらないと**番組名の空白で分かれ**、後ろがもう1つの入力として
+    # VLC に渡って「開けません」になる
+    $playerArgs = "@('--no-video-title-show',('--meta-title='+`$q+`$t+`$q),(`$q+`$u+`$q))"
 
     $lines = @(
+        # 二重引用符はここから作る (上の注意書き参照)。
+        # [char] のままだと .Replace($q,'') が Replace(char,char) に解決されて
+        # 空文字を char に変換できずに落ちるので、文字列にしておく
+        "`$q=[string][char]34"
         # 失敗を黙って捨てると「押しても何も起きない」になる。必ず見えるようにする
         "function F(`$m){Add-Type -A System.Windows.Forms;[void][Windows.Forms.MessageBox]::Show(`$m,'denpa');exit 1}"
         # base64url を戻す。パディングを足さないと FromBase64String が受け付けない
@@ -232,11 +272,21 @@ function Build-Command([string] $exe) {
         # 外から渡ってくるリンクなので、file:// などをそのまま食わせない
         "if(`$u -notmatch '^https?://'){F('http(s) 以外は開きません')}"
         # 番組名の " は引用をこわすので落とす。EPG の記号は当てにできない
-        "`$t=(D `$m.Groups[2].Value).Replace('`"','')"
+        "`$t=(D `$m.Groups[2].Value).Replace(`$q,'')"
         "if(!(Test-Path '$quoted')){F('プレイヤーが見つかりません: $quoted')}"
         "try{Start-Process '$quoted' $playerArgs}catch{F(`$_.Exception.Message)}"
     )
     return $lines -join ';'
+}
+
+<#
+    レジストリに実際に書く1行。組み立てを1か所にまとめて、verify.ps1 からも
+    同じものを確かめられるようにしてある。
+#>
+function Build-RegistryCommand([string] $exe, [string] $powershell) {
+    # -WindowStyle Hidden で窓を出さない。既定の実行ポリシーは Restricted なので Bypass が要る
+    return '"{0}" -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -Command "{1}"' `
+        -f $powershell, (Build-Command $exe)
 }
 
 
@@ -244,6 +294,7 @@ function Build-Command([string] $exe) {
 
 if ($Remove) {
     Remove-Registration
+    Wait-Enter
     return
 }
 
@@ -256,6 +307,7 @@ if ($Show) {
         $policy = (Get-ItemProperty -Path $browser.Value -Name $PolicyName -ErrorAction SilentlyContinue).$PolicyName
         Write-Host "$($browser.Key): $(if ($policy) { $policy } else { '(ポリシー未設定)' })"
     }
+    Wait-Enter
     return
 }
 
@@ -267,6 +319,7 @@ if ($PSBoundParameters.ContainsKey('Test')) {
     $link = "denpa://play/$(ConvertTo-Base64Url $target)/?title=$(ConvertTo-Base64Url 'denpa テスト')"
     Write-Host "開くリンク: $link"
     Start-Process $link
+    Wait-Enter
     return
 }
 
@@ -287,6 +340,7 @@ if ($existing) {
     $answer = Read-Host '登録し直しますか? (解除します) [y/N]'
     if ($answer -match '^[yY]') { Remove-Registration }
     else { Write-Host 'そのままにします。' }
+    Wait-Enter
     return
 }
 
@@ -299,9 +353,7 @@ Set-ItemProperty -Path $Root -Name '(default)' -Value 'URL:denpa Protocol'
 Set-ItemProperty -Path $Root -Name 'URL Protocol' -Value ''
 
 New-Item -Path $CommandKey -Force | Out-Null
-# -WindowStyle Hidden で窓を出さない。既定の実行ポリシーは Restricted なので Bypass が要る
-$command = '"{0}" -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -Command "{1}"' `
-    -f (Get-Command powershell.exe).Source, (Build-Command $exe)
+$command = Build-RegistryCommand $exe (Get-Command powershell.exe).Source
 Set-ItemProperty -Path $CommandKey -Name '(default)' -Value $command
 
 # 書けたことを読み返して確かめる。黙って失敗すると原因が分からなくなる
@@ -318,3 +370,4 @@ Write-Host ''
 Write-Host '確認は .\denpa.ps1 -Test'
 Write-Host '中身は .\denpa.ps1 -Show'
 Write-Host '解除は .\denpa.ps1 -Remove'
+Wait-Enter

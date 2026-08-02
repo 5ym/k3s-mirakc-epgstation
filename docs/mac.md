@@ -11,13 +11,13 @@ sh denpa.sh --show     # 登録されている中身を見る
 sh denpa.sh --remove   # 解除
 ```
 
-- macOS でスキームを名乗れるのは**アプリケーションバンドルだけ**なので、受け口として
-  小さなアプレットを `~/Applications/denpa.app` に作ります。中身は「届いたリンクを
-  [mac/play.sh](../mac/play.sh) に渡す」だけ。組み立てに使う `osacompile` と
-  `PlistBuddy` は macOS に最初から入っているので、入れるものはありません
-- 渡し役の `play.sh` は `~/Library/Application Support/denpa/` に置きます。
-  Windows 版がレジストリの値1行で済ませているところですが、macOS ではバンドルという
-  形でファイルを置くことになるので、こちらもファイルにしてあります
+- **配るのはこの1本だけ**です。macOS でスキームを名乗れるのは
+  **アプリケーションバンドルだけ**なので、受け口として小さなアプレットを
+  `~/Applications/denpa.app` に作りますが、中身は「届いたリンクを denpa.sh 自身に
+  渡す」だけ。登録のときにスクリプトが自分自身を
+  `~/Library/Application Support/denpa/` へ写すので、落としてきたファイルを
+  消したり移したりしても壊れません。組み立てに使う `osacompile` と `PlistBuddy` は
+  macOS に最初から入っているので、入れるものはありません
 - 開くのは http(s) だけです。リンクは外から渡ってくるので `file://` などは食わせません。
   失敗したら `display alert` を出します(黙って終わると「押しても何も起きない」になる)
 - **毎回出る確認ダイアログ**は Chrome と Edge のポリシー
@@ -33,6 +33,6 @@ sh denpa.sh --remove   # 解除
 sh mac/verify.sh
 ```
 
-> **実機での確認は取れていません。** 上の `verify.sh` が見ているのは `play.sh` までで、
+> **実機での確認は取れていません。** 上の `verify.sh` が見ているのはリンクの処理までで、
 > アプレットの組み立てと登録 (`osacompile` / `PlistBuddy` / `lsregister`) は
 > macOS がないと走らせられません。

@@ -102,6 +102,13 @@ export const config = {
     logoSweepInterval: num('LOGO_SWEEP_INTERVAL', 30 * MIN),
     /** 終了した番組情報をDBに残しておく期間。番組表の遡り表示にしか使わないので短くてよい */
     programRetention: num('PROGRAM_RETENTION', 24 * 60 * MIN),
+    /**
+     * 履歴を残しておく期間。終わった予約と、消した録画の行が対象。
+     *
+     * 「録れたか」を後から確かめるためのものなので、2週間もあれば足りる。
+     * 残し続けると一覧が伸びるだけで、探すのがかえって遅くなる。
+     */
+    historyRetention: num('HISTORY_RETENTION', 14 * 24 * 60 * MIN),
 
     /**
      * ベーシック認証。ユーザー名とパスワードの両方が入っているときだけ有効になる。

@@ -36,12 +36,18 @@ test.describe('ルールで立った予約', () => {
 
     test('取り消したあと戻せる', async ({ page }) => {
         await goto(page, '/');
-        // 先に走ったテストが残した予約と混ざらないよう、いま立っているものから選ぶ
+        /*
+         * 先に走ったテストが残した予約と混ざらないよう、いま立っているものから選ぶ。
+         *
+         * **一番後ろ**を取る。並びは放送が近い順で、偽mirakcの番組は10秒しかないため、
+         * 先頭のものは取り消して開き直す間に放送が終わってしまう。終わった予約は
+         * 戻しても意味が無いので、戻すボタン自体が出ない
+         */
         const row = page
             .getByTestId('reservation-row')
             .filter({ hasText: 'テストアニメ' })
             .filter({ has: page.getByTestId('cancel-button') })
-            .first();
+            .last();
         await expect(row).toBeVisible();
         const id = await row.getAttribute('data-reservation-id');
 
@@ -56,10 +62,16 @@ test.describe('ルールで立った予約', () => {
         await expect(canceled.getByTestId('restore-button')).toBeVisible();
         await canceled.getByTestId('restore-button').click();
 
+        /*
+         * 進行中の一覧に戻ってくれば戻せている。
+         * 状態そのものは見ない。偽mirakcの番組は10秒で始まるので、戻した直後に
+         * 録画中へ進んでいることがある (「取り消し」でなくなっていることが要点)
+         */
         await goto(page, '/');
-        await expect(
-            page.locator(`[data-reservation-id="${id}"]`).getByTestId('reservation-state'),
-        ).toHaveText('予約済み');
+        await expect(page.locator(`[data-reservation-id="${id}"]`)).toBeVisible();
+        await expect(page.locator(`[data-reservation-id="${id}"]`).getByTestId('restore-button')).toHaveCount(
+            0,
+        );
     });
 
     test('ルール名からそのルールの編集に飛べる', async ({ page }) => {

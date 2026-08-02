@@ -1,4 +1,10 @@
-# denpa (録画・エンコード管理アプリ)
+# どこに何があるか
+
+**索引。** ファイル・環境変数・画面・状態遷移・テストの入口をまとめてある。
+
+**「なぜそうなっているか」はここには書かない。** 理由は
+[architecture.md](architecture.md) に置く (両方に書くと必ず片方が古くなる)。
+迷ったら「これは何」ならここ、「なぜこれ」なら architecture.md。
 
 mirakc から EPG と TS を受け取り、予約・録画・エンコード・保存先への配置までを行う。
 出来上がった mkv は保存先に置かれ、denpa が配って外部プレイヤーで見る。削除は手動。
@@ -38,6 +44,7 @@ EPGStation の置き換えとして作ったもので、エンコード設定は
 | `src/lib/server/config.ts` | 環境変数 |
 | `src/lib/server/settings.ts` | 画面から変えられる設定 (環境変数を初期値にDBで上書き) |
 | `src/lib/server/db.ts` / `schema.ts` | SQLite と スキーマ |
+| `scripts/repair.ts` | 引き継ぎで崩れたデータを直す道具 (使い捨て) |
 
 ## 状態遷移
 
@@ -93,6 +100,7 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 | `CM_JLS_FALLBACK_FPS` | `29.97` | fps を取れなかったときに使う値 |
 | `CM_DETECT_TIMEOUT` | `1800000` | CM検出を打ち切るまで(ms) |
 | `PROGRAM_RETENTION` | `86400000` | 終わった番組をDBに残す期間(ms) |
+| `HISTORY_RETENTION` | `1209600000` | 終わった予約と削除済み録画の行を残す期間(ms。既定は2週間) |
 | `DENPA_AUTOSTART` | `1` | `0` で常駐処理を止める |
 
 ## 画面
@@ -109,7 +117,7 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 
 ## チューナー側 (`mirakc/`)
 
-mirakc の親として動くエージェント。詳しくは
+mirakc の親として動くエージェント。なぜ親を置いているかは
 [architecture.md](architecture.md#チューナー側-mirakc--エージェント)。
 
 | ファイル | 役割 |
@@ -118,6 +126,30 @@ mirakc の親として動くエージェント。詳しくは
 | `mirakc/scan.ts` | 物理チャンネルの総当たり |
 | `mirakc/config.ts` | mirakc の `config.yml` の読み書き |
 | `mirakc/config.yml` | 初回に配る設定の雛形 |
+
+## 引き継ぎで崩れたデータを直す
+
+移行のロジック自体は直してあるので、これから引き継ぐ人には要らない。
+**既に引き継いでしまった環境を直すためだけ**の使い捨て (`scripts/repair.ts`)。
+
+```sh
+# 何をするかを出すだけ
+kubectl -n epg exec deploy/denpa -- bun scripts/repair.ts
+# 実際に直す
+kubectl -n epg exec deploy/denpa -- bun scripts/repair.ts --apply
+
+# docker compose なら
+docker compose -f compose.prod.yml exec denpa bun scripts/repair.ts --apply
+```
+
+直すのは2つ。
+
+- **ルールのジャンル指定** — `{genre, subGenre}` のまま入っているものを `"7-0"` に直し、
+  引けない値は落とす
+- **保存先に入ってしまった生TS** — 作業領域へ移して `ts_path` に付け替える。
+  `.nfo` とサムネイルも片付け、空になったフォルダは畳む
+
+何度実行しても同じ結果になる。
 
 ## テスト
 
