@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: mirakurun
+  name: mirakc
   namespace: epg
 spec:
   replicas: 1
@@ -9,15 +9,15 @@ spec:
     type: Recreate
   selector:
     matchLabels:
-      app: mirakurun
+      app: mirakc
   template:
     metadata:
       labels:
-        app: mirakurun
+        app: mirakc
     spec:
       containers:
-        - name: mirakurun
-          image: ghcr.io/danything/mirakurun:sha-37ad25db5c2e
+        - name: mirakc
+          image: ghcr.io/danything/mirakc:latest
           imagePullPolicy: IfNotPresent
           securityContext:
             privileged: true
@@ -29,15 +29,16 @@ spec:
               value: /denpa-recorded
           ports:
             - containerPort: 40772
-            # スクランブル解除の受け口。カードを読めるのはこのコンテナだけなので、
-            # 掛かったまま録れたTSは denpa からここへ投げてもらう
+            # チューナー側エージェント。スキャン・カードの状態・スクランブル解除の窓口
             - containerPort: 40773
           volumeMounts:
-            - name: mirakurun-data
-              mountPath: /app-data
-            # 設定。スキャン結果が書き戻されるのでPVCに置く
-            - name: mirakurun-config
+            # 設定。スキャン結果が書き戻されるのでPVCに置く。
+            # /etc/mirakc は mirakc 自身の strings.yml が居るので使わない
+            - name: mirakc-config
               mountPath: /app-config
+            # mirakc が覚えている局・時刻・番組表。スキャンのたびに捨てて拾い直す
+            - name: mirakc-epg
+              mountPath: /var/lib/mirakc/epg
             - name: dev-bus
               mountPath: /dev/bus
             - name: dev-dvb
@@ -47,12 +48,12 @@ spec:
             - name: denpa-recorded
               mountPath: /denpa-recorded
       volumes:
-        - name: mirakurun-data
+        - name: mirakc-config
           persistentVolumeClaim:
-            claimName: mirakurun-data
-        - name: mirakurun-config
+            claimName: mirakc-config
+        - name: mirakc-epg
           persistentVolumeClaim:
-            claimName: mirakurun-config
+            claimName: mirakc-epg
         - name: denpa-recorded
           persistentVolumeClaim:
             claimName: denpa-recorded
@@ -100,12 +101,13 @@ spec:
             # kubelet のヘルスチェックは x-forwarded-host を付けないため
             - name: PROTOCOL_HEADER
               value: x-forwarded-proto
-            - name: MIRAKURUN_URL
-              value: http://mirakurun:40772
-            # スクランブルの解除は Mirakurun 側に頼む。カードは pcscd 経由でしか
-            # 読めず、その pcscd は向こうのコンテナにしか居ない
-            - name: DESCRAMBLER_URL
-              value: http://mirakurun:40773
+            - name: MIRAKC_URL
+              value: http://mirakc:40772
+            # チューナーに触る仕事はすべて向こうに頼む。カードも tuner デバイスも
+            # このコンテナからは開けない
+            - name: TUNER_AGENT_URL
+              value: http://mirakc:40773
+            # DBと、放送波から拾った局ロゴの置き場
             - name: DENPA_DB
               value: /app/data/denpa.db
             - name: RECORDED_DIR

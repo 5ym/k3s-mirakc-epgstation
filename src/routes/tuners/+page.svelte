@@ -1,0 +1,298 @@
+<script lang="ts">
+    import { submitting } from '$lib/actions';
+    import { liveUpdates } from '$lib/live-updates.svelte';
+
+    let { data, form } = $props();
+
+    // スキャンは数十分かかることがある。進み具合はサーバから push される
+    liveUpdates(['scan']);
+    const scan = $derived(data.scan);
+
+    const TYPE_LABEL: Record<string, string> = { GR: '地上波', BS: 'BS', CS: 'CS' };
+    const STATE_LABEL: Record<string, string> = {
+        running: '実行中',
+        done: '完了',
+        failed: '失敗',
+        idle: '待機中',
+    };
+
+    /** 進捗。総数が分かっているので割合で出せる */
+    const progress = $derived(scan.total > 0 ? scan.scanned / scan.total : 0);
+
+    /** denpa が取り込んだ局を物理チャンネルごとにまとめる */
+    const byChannel = $derived.by(() => {
+        const map = new Map<string, typeof data.services>();
+        for (const service of data.services) {
+            const key = `${service.type}:${service.channel}`;
+            map.set(key, [...(map.get(key) ?? []), service]);
+        }
+        return map;
+    });
+</script>
+
+<h1 class="mb-4 text-2xl font-bold">チューナー</h1>
+
+{#if form?.message}
+    <div class="alert alert-error mb-4" data-testid="tuner-error">{form.message}</div>
+{/if}
+
+<div class="grid items-start gap-6 xl:grid-cols-2">
+    <div class="flex flex-col gap-6">
+        <section class="card bg-base-100 shadow" data-testid="scan-card">
+            <div class="card-body">
+                <h2 class="card-title">チャンネルスキャン</h2>
+                <p class="text-base-content/70 text-sm">
+                    受信できるチャンネルを実際に選局して探します。<strong
+                        >その間チューナーを全部使い、mirakc も止まります</strong
+                    >ので、録画の予定が無いときに実行してください。 見つかったものは mirakc
+                    の設定に書き戻し、終わると番組表も取り直します。
+                </p>
+
+                <form method="POST" action="?/scan" use:submitting class="mt-2 space-y-3">
+                    <div>
+                        <span class="text-sm font-medium">種別</span>
+                        <div class="mt-1 flex flex-wrap gap-4" data-testid="scan-types">
+                            {#each ['GR', 'BS', 'CS'] as type (type)}
+                                <label class="flex cursor-pointer items-center gap-2">
+                                    <input
+                                        type="checkbox"
+                                        name="types"
+                                        value={type}
+                                        checked={type === 'GR'}
+                                        class="checkbox checkbox-sm"
+                                    />
+                                    <span class="text-sm">{TYPE_LABEL[type]}</span>
+                                </label>
+                            {/each}
+                        </div>
+                    </div>
+                    <!-- 地上波は 13〜62ch を総当たりする。範囲を狭めると早く終わる -->
+                    <div class="flex flex-wrap items-end gap-3">
+                        <label class="flex flex-col gap-1">
+                            <span class="text-sm font-medium">最小ch</span>
+                            <input
+                                type="number"
+                                name="min"
+                                class="input input-bordered w-24"
+                                data-testid="scan-min"
+                            />
+                        </label>
+                        <label class="flex flex-col gap-1">
+                            <span class="text-sm font-medium">最大ch</span>
+                            <input
+                                type="number"
+                                name="max"
+                                class="input input-bordered w-24"
+                                data-testid="scan-max"
+                            />
+                        </label>
+                        <button
+                            class="btn btn-primary"
+                            disabled={scan.state === 'running'}
+                            data-testid="scan-start"
+                        >
+                            {scan.state === 'running' ? '実行中…' : '開始する'}
+                        </button>
+                    </div>
+                </form>
+
+                {#if scan.state !== 'idle'}
+                    <div class="mt-4" data-testid="scan-progress" data-state={scan.state}>
+                        <div class="flex flex-wrap items-center gap-2 text-sm">
+                            <span class="badge" data-testid="scan-state">{STATE_LABEL[scan.state]}</span>
+                            {#if scan.phase}
+                                <span class="badge badge-ghost">{scan.phase}</span>
+                            {/if}
+                            <span data-testid="scan-found">見つかったチャンネル {scan.channels}</span>
+                        </div>
+
+                        <!-- 総当たりなので何分かかるか分かりにくい。どこまで進んだかを出す -->
+                        <progress
+                            class="progress progress-primary mt-2 w-full"
+                            value={progress}
+                            max="1"
+                            data-testid="scan-bar"
+                        ></progress>
+                        <div class="text-base-content/60 mt-1 text-xs" data-testid="scan-count">
+                            {scan.scanned} / {scan.total} チャンネル
+                        </div>
+
+                        {#if scan.error}
+                            <div class="alert alert-error mt-2" data-testid="scan-failed">{scan.error}</div>
+                        {/if}
+                        {#if scan.log.length > 0}
+                            <pre
+                                class="bg-base-200 mt-2 max-h-64 overflow-auto rounded p-2 font-mono text-xs whitespace-pre-wrap"
+                                data-testid="scan-log">{scan.log.join('\n')}</pre>
+                        {/if}
+                    </div>
+                {/if}
+            </div>
+        </section>
+
+        <section class="card bg-base-100 shadow" data-testid="status-card">
+            <div class="card-body">
+                <h2 class="card-title">つながり具合</h2>
+                <dl class="space-y-3">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <dt class="w-28 text-sm font-medium">mirakc</dt>
+                        {#await data.mirakc}
+                            <dd class="badge badge-ghost" data-testid="status-mirakc">確認中</dd>
+                        {:then mirakc}
+                            <dd
+                                class="badge {mirakc.ok ? 'badge-success' : 'badge-error'}"
+                                data-testid="status-mirakc"
+                            >
+                                {mirakc.ok ? (mirakc.version ?? 'OK') : 'NG'}
+                            </dd>
+                            {#if !mirakc.ok}
+                                <!-- スキャン中は止めてあるので、繋がらないのが正しい -->
+                                <dd class="text-base-content/60 w-full text-xs">
+                                    {scan.state === 'running' ? 'スキャン中のため止めています' : mirakc.error}
+                                </dd>
+                            {/if}
+                        {/await}
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <dt class="w-28 text-sm font-medium">カードリーダー</dt>
+                        {#await data.card}
+                            <dd class="badge badge-ghost" data-testid="status-card-reader">確認中</dd>
+                        {:then card}
+                            <dd
+                                class="badge {card.ok ? 'badge-success' : 'badge-error'}"
+                                data-testid="status-card-reader"
+                            >
+                                {card.ok ? 'OK' : 'NG'}
+                            </dd>
+                            <dd class="text-base-content/60 w-full text-xs">{card.message}</dd>
+                            {#each card.readers as reader (reader)}
+                                <dd class="text-base-content/60 w-full font-mono text-xs break-all">
+                                    {reader}
+                                </dd>
+                            {/each}
+                        {/await}
+                    </div>
+                </dl>
+            </div>
+        </section>
+    </div>
+
+    <div class="flex flex-col gap-6">
+        <section class="card bg-base-100 shadow" data-testid="tuner-card">
+            <div class="card-body">
+                <h2 class="card-title">チューナーの空き</h2>
+                {#await data.tuners}
+                    <p class="text-base-content/60 text-sm">確認中…</p>
+                {:then tuners}
+                    {#if tuners.length === 0}
+                        <p class="text-base-content/60 text-sm" data-testid="tuner-empty">
+                            チューナーが取れません。{scan.state === 'running'
+                                ? 'スキャン中は mirakc を止めています。'
+                                : 'mirakc の設定を確認してください。'}
+                        </p>
+                    {:else}
+                        <div class="overflow-x-auto">
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>名前</th>
+                                        <th>種別</th>
+                                        <th>状態</th>
+                                        <th class="w-full">使っているもの</th>
+                                    </tr>
+                                </thead>
+                                <tbody data-testid="tuner-list">
+                                    {#each tuners as tuner (tuner.index)}
+                                        <tr data-testid="tuner-row" data-tuner-index={tuner.index}>
+                                            <td class="whitespace-nowrap">{tuner.name}</td>
+                                            <td class="whitespace-nowrap text-sm">
+                                                {tuner.types.map((t) => TYPE_LABEL[t] ?? t).join('/')}
+                                            </td>
+                                            <td class="whitespace-nowrap">
+                                                <!-- 故障は空き/使用中より先に出す。直さないと録れない -->
+                                                {#if tuner.isFault}
+                                                    <span class="badge badge-sm badge-error">故障</span>
+                                                {:else if tuner.isUsing}
+                                                    <span class="badge badge-sm badge-warning">使用中</span>
+                                                {:else if tuner.isAvailable}
+                                                    <span class="badge badge-sm badge-success">空き</span>
+                                                {:else}
+                                                    <span class="badge badge-sm badge-ghost">使えません</span>
+                                                {/if}
+                                            </td>
+                                            <td class="text-sm">
+                                                {#each tuner.users ?? [] as user (user.id)}
+                                                    <div class="truncate">
+                                                        {user.agent ?? user.id}
+                                                        <span class="text-base-content/60">
+                                                            (優先度 {user.priority})
+                                                        </span>
+                                                    </div>
+                                                {:else}
+                                                    <span class="text-base-content/60">—</span>
+                                                {/each}
+                                            </td>
+                                        </tr>
+                                    {/each}
+                                </tbody>
+                            </table>
+                        </div>
+                    {/if}
+                {/await}
+            </div>
+        </section>
+
+        <section class="card bg-base-100 shadow" data-testid="channel-card">
+            <div class="card-body">
+                <h2 class="card-title">取れているチャンネル</h2>
+                <p class="text-base-content/70 text-sm">
+                    mirakc の設定に入っている物理チャンネルです。局名は denpa が取り込んだものを出します。
+                </p>
+                {#await data.channels}
+                    <p class="text-base-content/60 text-sm">確認中…</p>
+                {:then channels}
+                    {#if channels.length === 0}
+                        <p class="text-base-content/60 text-sm" data-testid="channel-empty">
+                            まだ1つもありません。チャンネルスキャンを実行してください。
+                        </p>
+                    {:else}
+                        <div class="max-h-96 overflow-auto">
+                            <table class="table-pin-rows table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>種別</th>
+                                        <th>ch</th>
+                                        <th class="w-full">局</th>
+                                    </tr>
+                                </thead>
+                                <tbody data-testid="channel-list">
+                                    {#each channels as channel (`${channel.type}:${channel.channel}`)}
+                                        {@const services =
+                                            byChannel.get(`${channel.type}:${channel.channel}`) ?? []}
+                                        <tr data-testid="channel-row" data-channel={channel.channel}>
+                                            <td class="whitespace-nowrap text-sm">
+                                                {TYPE_LABEL[channel.type] ?? channel.type}
+                                            </td>
+                                            <td class="font-mono text-sm whitespace-nowrap">
+                                                {channel.channel}
+                                            </td>
+                                            <td class="text-sm">
+                                                {#if services.length > 0}
+                                                    {services.map((s) => s.name).join(', ')}
+                                                {:else}
+                                                    <span class="text-base-content/60">
+                                                        まだ取り込んでいません
+                                                    </span>
+                                                {/if}
+                                            </td>
+                                        </tr>
+                                    {/each}
+                                </tbody>
+                            </table>
+                        </div>
+                    {/if}
+                {/await}
+            </div>
+        </section>
+    </div>
+</div>

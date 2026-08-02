@@ -3,6 +3,7 @@ import { config } from './config';
 import { pump, requeueOrphanedJobs } from './encoder';
 import { sync } from './epg';
 import { reconcile } from './files';
+import { sweep } from './logo';
 import { recoverOrphanedRecordings } from './recorder';
 import { tick } from './scheduler';
 
@@ -64,6 +65,15 @@ export function start(): void {
      */
     void guard('reconcile', reconcile);
     every(config.reconcileInterval, 'reconcile', reconcile);
+
+    /*
+     * 局ロゴ。mirakc は Mirakurun と違って TS から集めてくれないので、
+     * 持っていない局のぶんを少しずつ取りに行く。1回に1局だけ開く
+     * (チューナーを塞がないため。録画のついでにも拾っている)
+     */
+    every(config.logoSweepInterval, 'logo', async () => {
+        await sweep();
+    });
 }
 
 export function stop(): void {

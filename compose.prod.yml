@@ -1,0 +1,67 @@
+# 実運用向け。開発用は compose.yml のほう。
+#
+#   docker compose -f compose.prod.yml up -d
+#
+# チューナーのデバイスは環境ごとに違うので、下の devices と
+# mirakc/config.yml の tuners を手元に合わせてください。
+name: denpa
+
+services:
+    # チューナー制御・EPG・TS配信。
+    # PID 1 はエージェント (mirakc/agent.ts) で、mirakc を子として抱えます。
+    # チャンネルスキャンとB-CASカードの面倒を見るためです
+    mirakc:
+        build:
+            context: .
+            dockerfile: mirakc/Dockerfile
+        restart: unless-stopped
+        # チューナーとカードリーダーに触るため
+        privileged: true
+        devices:
+            - /dev/bus
+            - /dev/dvb
+        environment:
+            TZ: Asia/Tokyo
+            # 掛かったまま録れたTSを解く先。denpa と同じ実体を見せる
+            RECORDED_DIR: /denpa-recorded
+        volumes:
+            # 設定。スキャン結果が書き戻されるので名前付きボリュームに置く。
+            # /etc/mirakc は mirakc 自身の strings.yml が居るので使わない
+            - mirakc-config:/app-config
+            - mirakc-epg:/var/lib/mirakc/epg
+            - denpa-recorded:/denpa-recorded
+        ports:
+            - '40772:40772'
+
+    denpa:
+        build:
+            context: .
+            target: runtime
+        restart: unless-stopped
+        depends_on:
+            - mirakc
+        environment:
+            TZ: Asia/Tokyo
+            MIRAKC_URL: http://mirakc:40772
+            # チューナーに触る仕事はすべて向こうに頼む
+            TUNER_AGENT_URL: http://mirakc:40773
+            DENPA_DB: /app/data/denpa.db
+            RECORDED_DIR: /app/recorded
+            LIBRARY_DIR: /library
+            ENCODE_CODEC: av1
+            ENCODE_CONCURRENCY: '2'
+            CM_CUT_DEFAULT: chapter
+        volumes:
+            - denpa-data:/app/data
+            - denpa-recorded:/app/recorded
+            - denpa-library:/library
+        ports:
+            - '3000:3000'
+
+volumes:
+    mirakc-config:
+    mirakc-epg:
+    denpa-data:
+    # 生TSの作業領域。mirakc 側にも見せて、スクランブル解除をあちらにやらせる
+    denpa-recorded:
+    denpa-library:

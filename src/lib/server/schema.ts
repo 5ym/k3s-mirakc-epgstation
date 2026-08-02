@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS webhooks (
 );
 
 CREATE TABLE IF NOT EXISTS services (
-    id INTEGER PRIMARY KEY,           -- Mirakurun の service id
+    id INTEGER PRIMARY KEY,           -- mirakc の service id
     service_id INTEGER NOT NULL,
     network_id INTEGER NOT NULL,
     name TEXT NOT NULL,
@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS services (
 );
 
 CREATE TABLE IF NOT EXISTS programs (
-    id INTEGER PRIMARY KEY,           -- Mirakurun の program id
+    id INTEGER PRIMARY KEY,           -- mirakc の program id
     service_id INTEGER NOT NULL,
     network_id INTEGER NOT NULL,
     event_id INTEGER NOT NULL,

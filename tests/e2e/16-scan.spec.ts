@@ -1,33 +1,61 @@
 import { expect, test } from '@playwright/test';
+import { MIRAKC_URL } from '../../playwright.config';
 import { goto, syncEpg } from './helpers';
 
 /**
- * チャンネルスキャン。
+ * チューナー画面。
  *
- * 走らせるのは Mirakurun 側で、結果も Mirakurun が自分の channels.yml に
- * 書き戻す。denpa は開始を投げて進み具合を見せるだけ。
+ * 選局するのはチューナー側のエージェント。mirakc には走査APIが無く、設定も
+ * 起動時にしか読まれないので、あちらが mirakc を止めて総当たりし、書き戻して
+ * から起動し直す。denpa は開始を投げて進み具合を見せるだけ。
  */
-test.describe('チャンネルスキャン', () => {
-    test('番組表から実行でき、進み具合と結果が出る', async ({ page, request }) => {
+test.describe('チューナー画面', () => {
+    test.afterEach(async ({ request }) => {
+        await request.post(`${MIRAKC_URL}/__control/tuners?busy=0`);
+    });
+
+    test('チャンネルスキャンを実行でき、進み具合と結果が出る', async ({ page, request }) => {
         await syncEpg(request);
-        await goto(page, '/guide');
+        await goto(page, '/tuners');
 
-        await page.getByTestId('scan-open').click();
-        const dialog = page.getByTestId('scan-dialog');
-        await expect(dialog).toBeVisible();
-
+        const card = page.getByTestId('scan-card');
         // 何分もかかってチューナーを全部使うので、そうと分かるようにしておく
-        await expect(dialog).toContainText('チューナーを全部使う');
+        await expect(card).toContainText('チューナーを全部使い');
 
-        await dialog.getByTestId('scan-type').selectOption('GR');
-        await dialog.getByTestId('scan-start').click();
+        await card.getByTestId('scan-start').click();
 
-        await expect(dialog.getByTestId('scan-state')).toHaveText('完了', { timeout: 30_000 });
-        // 見つけた行だけ数える。信号が無かった分は数に入らない
-        await expect(dialog.getByTestId('scan-found')).toContainText('2');
-        await expect(dialog.getByTestId('scan-log')).toContainText('scan finished');
+        await expect(card.getByTestId('scan-state')).toHaveText('完了', { timeout: 30_000 });
+        // 総当たりなので、どこまで進んだかを割合で出せる
+        await expect(card.getByTestId('scan-count')).toContainText('4 / 4');
+        // 受信できた分だけ数える。信号が無かった分は数に入らない
+        await expect(card.getByTestId('scan-found')).toContainText('2');
+        await expect(card.getByTestId('scan-log')).toContainText('2 サービス');
+    });
 
-        await dialog.getByTestId('scan-close').click();
-        await expect(dialog).toHaveCount(0);
+    test('種別を1つも選ばなければ断る', async ({ page }) => {
+        await goto(page, '/tuners');
+        const card = page.getByTestId('scan-card');
+        await card.getByTestId('scan-types').getByRole('checkbox').first().uncheck();
+        await card.getByTestId('scan-start').click();
+        await expect(page.getByTestId('tuner-error')).toContainText('種別を選んでください');
+    });
+
+    test('チューナーの空きと取れているチャンネルが出る', async ({ page, request }) => {
+        await syncEpg(request);
+        await request.post(`${MIRAKC_URL}/__control/tuners?busy=1`);
+        await goto(page, '/tuners');
+
+        const tuners = page.getByTestId('tuner-list');
+        await expect(tuners.getByTestId('tuner-row')).toHaveCount(4);
+        // 録画で掴んでいるものは誰が使っているか分かるようにする
+        await expect(tuners.getByTestId('tuner-row').nth(1)).toContainText('使用中');
+        await expect(tuners.getByTestId('tuner-row').nth(1)).toContainText('denpa');
+        // 故障は空き/使用中より先に出す。直さないと録れない
+        await expect(tuners.getByTestId('tuner-row').nth(3)).toContainText('故障');
+
+        // mirakc の設定に入っている物理チャンネルと、denpa が取り込んだ局名
+        const channels = page.getByTestId('channel-list');
+        await expect(channels.getByTestId('channel-row').first()).toBeVisible();
+        await expect(channels).toContainText('TOKYO MX');
     });
 });

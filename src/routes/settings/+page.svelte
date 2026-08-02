@@ -37,55 +37,6 @@
 -->
 <div class="grid items-start gap-6 xl:grid-cols-2">
     <div class="flex flex-col gap-6">
-        <section class="card bg-base-100 shadow" data-testid="status-card">
-            <div class="card-body">
-                <h2 class="card-title">つながり具合</h2>
-                <p class="text-base-content/70 text-sm">
-                    録画に必要なものが揃っているかを出します。カードリーダーを見失っていると、
-                    録画は成功したように見えるのに中身が全部スクランブルされたまま、という
-                    気づきにくい壊れ方をします。
-                </p>
-                <dl class="mt-2 space-y-3">
-                    <div class="flex flex-wrap items-center gap-2">
-                        <dt class="w-28 text-sm font-medium">Mirakurun</dt>
-                        <!-- 相手待ちなので後から流れてくる。場所だけ先に確保しておく -->
-                        {#await data.mirakurun}
-                            <dd class="badge badge-ghost" data-testid="status-mirakurun">確認中</dd>
-                        {:then mirakurun}
-                            <dd
-                                class="badge {mirakurun.ok ? 'badge-success' : 'badge-error'}"
-                                data-testid="status-mirakurun"
-                            >
-                                {mirakurun.ok ? (mirakurun.version ?? 'OK') : 'NG'}
-                            </dd>
-                            {#if !mirakurun.ok}
-                                <dd class="text-error w-full text-xs break-all">{mirakurun.error}</dd>
-                            {/if}
-                        {/await}
-                    </div>
-                    <div class="flex flex-wrap items-center gap-2">
-                        <dt class="w-28 text-sm font-medium">カードリーダー</dt>
-                        {#await data.card}
-                            <dd class="badge badge-ghost" data-testid="status-card-reader">確認中</dd>
-                        {:then card}
-                            <dd
-                                class="badge {card.ok ? 'badge-success' : 'badge-error'}"
-                                data-testid="status-card-reader"
-                            >
-                                {card.ok ? 'OK' : 'NG'}
-                            </dd>
-                            <dd class="text-base-content/60 w-full text-xs">{card.message}</dd>
-                            {#each card.readers as reader (reader)}
-                                <dd class="text-base-content/60 w-full font-mono text-xs break-all">
-                                    {reader}
-                                </dd>
-                            {/each}
-                        {/await}
-                    </div>
-                </dl>
-            </div>
-        </section>
-
         <section class="card bg-base-100 shadow">
             <div class="card-body">
                 <h2 class="card-title">録画のしかた</h2>

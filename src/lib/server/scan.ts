@@ -6,144 +6,128 @@ import { emit } from './events';
 /**
  * チャンネルスキャン。
  *
- * 実際に走らせるのは Mirakurun で、denpa は開始を投げて進み具合を読むだけ。
- * 結果は Mirakurun が自分の `channels.yml` に書き戻す(PVCに置いてある)ので、
- * denpa 側で持つ必要はない。終わったら EPG を取り直して番組表に反映する。
+ * 実際に選局するのはチューナー側のエージェント (mirakc/agent.ts)。mirakc には
+ * 走査APIが無く、設定も起動時にしか読まれないので、あちらが mirakc を止めて
+ * 総当たりし、結果を config.yml に書いてから起動し直す。
  *
- * 数分かかるうえチューナーを全部使うので、開始だけ受けて裏で進める。
+ * denpa は開始を投げて、進み具合を読み、終わったら番組表を取り直すだけ。
  */
 
 export interface ScanState {
     state: 'idle' | 'running' | 'done' | 'failed';
-    type: ChannelType | null;
-    /** Mirakurun が返す進捗の行。そのまま画面に出す */
+    /** いま何をしているか。そのまま画面に出す */
+    phase: string;
     log: string[];
-    /** 見つかったチャンネル数。ログから拾う */
-    found: number;
+    /** 選局し終えた物理チャンネル数と、その総数。進捗バーに使う */
+    scanned: number;
+    total: number;
+    /** 見つかったチャンネル数 */
+    channels: number;
     error: string | null;
     startedAt: number | null;
     finishedAt: number | null;
+    /** mirakc が動いているか。スキャンの間は止まっている */
+    mirakc: boolean;
 }
 
-const LOG_LIMIT = 400;
-
-let current: ScanState = {
+const IDLE: ScanState = {
     state: 'idle',
-    type: null,
+    phase: '',
     log: [],
-    found: 0,
+    scanned: 0,
+    total: 0,
+    channels: 0,
     error: null,
     startedAt: null,
     finishedAt: null,
+    mirakc: true,
 };
 
-let running: AbortController | null = null;
-
-export function status(): ScanState {
-    return current;
-}
-
-/** ログの行から「見つけた」ものだけ数える。Mirakurun は1件ごとに1行出す */
-export function countFound(lines: string[]): number {
-    return lines.filter((line) => /channel:.*found|-> found/i.test(line)).length;
-}
+/** 最後に読んだ状態。画面はこれを見る */
+let current: ScanState = IDLE;
+let watching = false;
 
 export interface ScanOptions {
-    type: ChannelType;
+    types: ChannelType[];
     min?: number;
     max?: number;
-    /** 既にある一覧を更新する形にする。既定はそうする(消してしまわないため) */
-    refresh?: boolean;
+}
+
+async function fetchStatus(): Promise<ScanState> {
+    const res = await fetch(`${config.tunerAgentUrl}/denpa/scan`, { signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) throw new Error(`チューナー側が ${res.status} を返しました`);
+    return (await res.json()) as ScanState;
 }
 
 /**
- * Mirakurun のスキャンURL。
+ * 終わるまで見張る。
  *
- * recisdb はチャンネルの指定形式が Mirakurun の既定と違うので、
- * 名前の形も一緒に渡す(GRなら T13、CSなら CS16。BSは既定のまま)。
+ * 状態を持っているのはエージェントのほうなので、denpa は読みに行く。
+ * 終わったら番組表を取り直す。スキャンで局が入れ替わっても、denpa のDBは
+ * 自分では気づけないため。
  */
-export function scanUrl(base: string, options: ScanOptions): string {
-    const params = new URLSearchParams({ type: options.type });
-    if (options.min !== undefined) params.set('minCh', String(options.min));
-    if (options.max !== undefined) params.set('maxCh', String(options.max));
-    params.set('refresh', String(options.refresh ?? true));
-
-    const format = { GR: 'T{ch}', CS: 'CS{ch}', BS: '', SKY: '' }[options.type];
-    if (format !== '') {
-        params.set('useChannelNameFormat', 'true');
-        params.set('channelNameFormat', format);
-    }
-    return `${base}/api/config/channels/scan?${params}`;
-}
-
-export function start(options: ScanOptions): { started: boolean; message: string } {
-    if (current.state === 'running') return { started: false, message: '既に実行中です' };
-
-    running = new AbortController();
-    current = {
-        state: 'running',
-        type: options.type,
-        log: [],
-        found: 0,
-        error: null,
-        startedAt: Date.now(),
-        finishedAt: null,
-    };
-    emit('scan');
-
-    void run(options, running.signal);
-    return { started: true, message: `${options.type} のスキャンを始めました` };
-}
-
-export function cancel(): void {
-    running?.abort();
-}
-
-function push(line: string): void {
-    const trimmed = line.trimEnd();
-    if (trimmed === '') return;
-    current.log = [...current.log, trimmed].slice(-LOG_LIMIT);
-    current.found = countFound(current.log);
-}
-
-async function run(options: ScanOptions, signal: AbortSignal): Promise<void> {
+async function watch(): Promise<void> {
+    if (watching) return;
+    watching = true;
     try {
-        const res = await fetch(scanUrl(config.mirakurunUrl, options), { method: 'PUT', signal });
-        if (!res.ok || res.body === null) {
-            throw new Error(`Mirakurun がスキャンを受け付けませんでした (${res.status})`);
-        }
-
-        // 進み具合は改行区切りのテキストで流れてくる
-        const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
-        let buffer = '';
-        let lastEmit = 0;
         for (;;) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += value;
-            const lines = buffer.split('\n');
-            buffer = lines.pop() ?? '';
-            for (const line of lines) push(line);
-
-            // 1行ごとに知らせると画面が忙しいので間引く
-            const at = Date.now();
-            if (at - lastEmit >= 1000) {
-                lastEmit = at;
-                emit('scan');
+            await Bun.sleep(2000);
+            try {
+                current = await fetchStatus();
+            } catch (error) {
+                current = { ...current, state: 'failed', error: String(error) };
             }
+            emit('scan');
+            if (current.state !== 'running') break;
         }
-        push(buffer);
 
-        current = { ...current, state: 'done', finishedAt: Date.now() };
-        emit('scan');
-
-        // 見つけたチャンネルを番組表に出すには取り込みが要る
-        await sync();
-    } catch (error) {
-        const message = signal.aborted ? '中止しました' : String(error);
-        current = { ...current, state: 'failed', error: message, finishedAt: Date.now() };
-        emit('scan');
+        if (current.state === 'done') {
+            // mirakc が新しい設定で起動し終わるまで待つ
+            await Bun.sleep(5000);
+            await sync();
+        }
     } finally {
-        running = null;
+        watching = false;
     }
+}
+
+export async function start(options: ScanOptions): Promise<{ started: boolean; message: string }> {
+    let result: { started: boolean; message: string };
+    try {
+        const res = await fetch(`${config.tunerAgentUrl}/denpa/scan`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(options),
+        });
+        result = (await res.json()) as { started: boolean; message: string };
+    } catch (error) {
+        return { started: false, message: `チューナー側に繋がりません: ${error}` };
+    }
+    if (!result.started) return result;
+
+    try {
+        current = await fetchStatus();
+    } catch {
+        // 開始は受け付けられている。状態は見張りが拾い直す
+    }
+    emit('scan');
+    void watch();
+    return result;
+}
+
+/**
+ * 実際の状況を取りに行く。
+ *
+ * 状態を持っているのはエージェント側なので、denpa を入れ替えても、画面を
+ * 開き直せば正しい状況が出る。以前は denpa 側で持っていて、Pod が入れ替わると
+ * 「スキャン中」の表示が消えなくなっていた。
+ */
+export async function refresh(): Promise<ScanState> {
+    try {
+        current = await fetchStatus();
+        if (current.state === 'running') void watch();
+    } catch {
+        current = IDLE;
+    }
+    return current;
 }

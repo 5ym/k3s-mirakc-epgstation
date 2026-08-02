@@ -12,10 +12,10 @@ import { config } from './config';
  * 録画そのものは止めない(電波は二度と戻ってこないので、暗号のままでも残す)。
  * 代わりにエンコードの前に見て、掛かったままならその場で解く。
  *
- * 解くのは Mirakurun 側。カードは pcscd 経由でしか読めず、その pcscd は
- * Mirakurun のコンテナに居る。socket を共有して denpa から直接読ませていたが
+ * 解くのは mirakc 側。カードは pcscd 経由でしか読めず、その pcscd は
+ * mirakc のコンテナに居る。socket を共有して denpa から直接読ませていたが
  * カードを開けないままだったので、カードを持っている側に頼む形にしてある
- * (mirakurun/descrambler.mjs)。生TSの置き場は両方のコンテナに見せてあり、
+ * (mirakc/descrambler.mjs)。生TSの置き場は両方のコンテナに見せてあり、
  * やり取りするのはパスだけ。
  */
 
@@ -85,7 +85,7 @@ export interface CardStatus {
  */
 export async function cardStatus(): Promise<CardStatus> {
     try {
-        const res = await fetch(`${config.descramblerUrl}/denpa/card`, {
+        const res = await fetch(`${config.tunerAgentUrl}/denpa/card`, {
             signal: AbortSignal.timeout(10_000),
         });
         if (!res.ok) {
@@ -105,7 +105,7 @@ export async function cardStatus(): Promise<CardStatus> {
 /**
  * スクランブルを解く。成功したら output に解けたTSが出来ている。
  *
- * 渡すのはパスだけで、TS そのものは流さない。生TSの置き場は Mirakurun 側にも
+ * 渡すのはパスだけで、TS そのものは流さない。生TSの置き場は mirakc 側にも
  * 見せてあるので、読むのも書くのも向こうが直接やる。数十GBになることがあり、
  * HTTP で往復させる意味が無い(そもそも Bun の fetch は送りながら受け取れず、
  * 大きいものを投げると詰まる)。
@@ -122,7 +122,7 @@ export async function descramble(input: string, output: string): Promise<{ ok: b
     }
 
     try {
-        const res = await fetch(`${config.descramblerUrl}/denpa/decode`, {
+        const res = await fetch(`${config.tunerAgentUrl}/denpa/decode`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ input: from, output: to }),

@@ -1,0 +1,14 @@
+<!-- PWA のアイコン。丸く切り抜かれても電波塔が欠けないよう、内側に寄せてある -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+    <rect width="32" height="32" fill="#1d232a" />
+    <g transform="translate(16 16) scale(0.76) translate(-16 -16)">
+        <g fill="none" stroke="#7dd3fc" stroke-width="2" stroke-linecap="round">
+            <path d="M11 9a8 8 0 0 0 0 10" />
+            <path d="M21 9a8 8 0 0 1 0 10" />
+            <path d="M7.5 5.5a13 13 0 0 0 0 17" />
+            <path d="M24.5 5.5a13 13 0 0 1 0 17" />
+        </g>
+        <circle cx="16" cy="14" r="2.5" fill="#7dd3fc" />
+        <path d="M16 16.5 13 27h6z" fill="#7dd3fc" />
+    </g>
+</svg>

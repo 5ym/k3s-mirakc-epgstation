@@ -8,8 +8,9 @@ import { enqueue } from './encoder';
 import { emit } from './events';
 import { moveFile } from './fsx';
 import { libraryPath, recordedPath } from './library';
+import { watch as watchLogo } from './logo';
 import { writeNfo, writeThumbnail } from './metadata';
-import { openServiceStream } from './mirakurun';
+import { openServiceStream } from './mirakc';
 import { chunks } from './stream';
 import { parseTitle } from './title';
 import { notify } from './webhook';
@@ -129,7 +130,7 @@ export async function startRecording(reservation: Reservation): Promise<Recordin
 /**
  * チューナーが空くのを少し待つ。
  *
- * 前の番組の録画が終わってから Mirakurun がチューナーを手放すまでには間があり、
+ * 前の番組の録画が終わってから mirakc がチューナーを手放すまでには間があり、
  * 直後に始まる番組がそこで弾かれることがある。番組の頭を数秒落としてでも
  * 録れたほうがいいので、すぐには諦めない。
  */
@@ -174,9 +175,12 @@ async function pump(recording: Recording, controller: AbortController): Promise<
         // 途中で止めたときや掴むのに手間取ったときは実物と合わない。
         // 再開したときは足していく(ファイルも追記なので合計が実物になる)
         const from = Date.now();
+        // 局ロゴのために別途チューナーを開かずに済む (logo.ts)
+        const collectLogo = watchLogo(recording.service_id);
         try {
             for await (const chunk of chunks(stream)) {
                 written += chunk.byteLength;
+                collectLogo(chunk);
                 if (!sink.write(chunk)) await once(sink, 'drain');
             }
         } finally {

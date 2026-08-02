@@ -1,11 +1,11 @@
 import { defineConfig } from '@playwright/test';
 
 const APP_PORT = 4173;
-const MIRAKURUN_PORT = 40772;
+const MIRAKC_PORT = 40772;
 const WEBHOOK_PORT = 8096;
 
 /** テスト用の作業領域。global-setup で毎回まっさらにする */
-export const MIRAKURUN_URL = `http://127.0.0.1:${MIRAKURUN_PORT}`;
+export const MIRAKC_URL = `http://127.0.0.1:${MIRAKC_PORT}`;
 export const TEST_ROOT = '/tmp/denpa-e2e';
 export const EPGSTATION_DIR = `${TEST_ROOT}/epgstation-recorded`;
 export const LIBRARY_DIR = `${TEST_ROOT}/library`;
@@ -29,17 +29,17 @@ export default defineConfig({
     },
     webServer: [
         {
-            command: `bun tests/fake/mirakurun.ts`,
-            url: `http://127.0.0.1:${MIRAKURUN_PORT}/api/version`,
+            command: `bun tests/fake/mirakc.ts`,
+            url: `http://127.0.0.1:${MIRAKC_PORT}/api/version`,
             reuseExistingServer: false,
             stdout: 'pipe',
             stderr: 'pipe',
             env: {
-                FAKE_MIRAKURUN_PORT: String(MIRAKURUN_PORT),
+                FAKE_MIRAKC_PORT: String(MIRAKC_PORT),
                 // 尺は tests/fake/services.ts で局ごとに決めている
                 FAKE_SLOTS: '30',
                 // スクランブル解除はパスだけ受け取って直接ファイルを触る。
-                // 本物でも denpa と Mirakurun の両方に同じ置き場を見せている
+                // 本物でも denpa と mirakc の両方に同じ置き場を見せている
                 RECORDED_DIR: `${TEST_ROOT}/recorded`,
             },
         },
@@ -66,15 +66,15 @@ export default defineConfig({
                 RECORDED_DIR: `${TEST_ROOT}/recorded`,
                 LIBRARY_DIR,
                 FFMPEG: './tests/fake/ffmpeg.sh',
-                // スクランブル解除の受け口。本物では Mirakurun と同じコンテナの
-                // 別プロセスだが、偽 Mirakurun が同じ口を兼ねている
-                DESCRAMBLER_URL: MIRAKURUN_URL,
+                // スクランブル解除の受け口。本物では mirakc と同じコンテナの
+                // 別プロセスだが、偽 mirakc が同じ口を兼ねている
+                TUNER_AGENT_URL: MIRAKC_URL,
                 // 引き継ぎ画面。何も待ち受けていない先を指して、失敗したときの見え方も試す
                 EPGSTATION_RECORDED_DIR: EPGSTATION_DIR,
                 EPGSTATION_DB_HOST: '127.0.0.1',
                 EPGSTATION_DB_PORT: '1',
                 FAKE_FFMPEG_FAIL_FILE: `${TEST_ROOT}/fail-encode`,
-                MIRAKURUN_URL,
+                MIRAKC_URL,
                 // 定期処理は止め、テストからボタン/APIで明示的に走らせる(タイミング依存を避ける)
                 RECONCILE_INTERVAL: '86400000',
                 EPG_SYNC_INTERVAL: '86400000',

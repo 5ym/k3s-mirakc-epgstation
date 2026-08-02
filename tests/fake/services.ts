@@ -1,4 +1,4 @@
-/** 偽Mirakurunが返す局。テスト側からもIDを参照するのでここに置く */
+/** 偽mirakcが返す局。テスト側からもIDを参照するのでここに置く */
 export interface FakeService {
     id: number;
     serviceId: number;

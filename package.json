@@ -7,8 +7,8 @@
         "build": "bunx --bun vite build",
         "start": "bun ./build/index.js",
         "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-        "test": "bun run lint && bun run check && bun test src && playwright test",
-        "test:unit": "bun test src",
+        "test": "bun run lint && bun run check && bun run test:unit && playwright test",
+        "test:unit": "bun test src mirakc",
         "test:e2e": "playwright test",
         "lint": "biome check . && prettier --check \"src/**/*.svelte\"",
         "format": "biome check --write . && prettier --write \"src/**/*.svelte\""

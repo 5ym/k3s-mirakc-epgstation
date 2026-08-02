@@ -1,5 +1,5 @@
 /**
- * 設定は全て環境変数から読む。テスト(E2E)では偽の Mirakurun / ffmpeg を
+ * 設定は全て環境変数から読む。テスト(E2E)では偽の mirakc / ffmpeg を
  * 指すよう差し替えて同じコードパスを通せるようにするため、パスや間隔も含めて
  * ハードコードせず全部ここに集約する。
  */
@@ -28,15 +28,17 @@ const SEC = 1000;
 const MIN = 60 * SEC;
 
 export const config = {
-    mirakurunUrl: str('MIRAKURUN_URL', 'http://mirakurun:40772').replace(/\/+$/, ''),
+    mirakcUrl: str('MIRAKC_URL', 'http://mirakc:40772').replace(/\/+$/, ''),
     /**
-     * スクランブル解除の受け口。Mirakurun と同じコンテナに居る。
+     * スクランブル解除の受け口。mirakc と同じコンテナに居る。
      * B-CASカードは pcscd 経由でしか読めず、その pcscd は向こう側にしか無いので、
      * 掛かったまま録れたTSは投げて解いてもらう
      */
-    descramblerUrl: str('DESCRAMBLER_URL', 'http://mirakurun:40773').replace(/\/+$/, ''),
+    tunerAgentUrl: str('TUNER_AGENT_URL', 'http://mirakc:40773').replace(/\/+$/, ''),
 
     dbPath: str('DENPA_DB', '/app/data/denpa.db'),
+    /** DBと並べて置くもの。いまは局ロゴだけ */
+    dataDir: str('DENPA_DATA_DIR', ''),
     /** 生TSの置き場。エンコード後は(keep_original でなければ)消える作業領域 */
     recordedDir: str('RECORDED_DIR', '/app/recorded'),
     /** エンコード済みの置き場。プレイヤーにはここのファイルを配る */
@@ -96,6 +98,8 @@ export const config = {
     schedulerTick: num('SCHEDULER_TICK', 5 * SEC),
     /** 保存先の実体とDBを突き合わせる間隔。外から消されたものをここで拾う */
     reconcileInterval: num('RECONCILE_INTERVAL', 5 * MIN),
+    /** 局ロゴを取りに行く間隔。放送波に流れてくるのを待つので、急いでも取れない */
+    logoSweepInterval: num('LOGO_SWEEP_INTERVAL', 30 * MIN),
     /** 終了した番組情報をDBに残しておく期間。番組表の遡り表示にしか使わないので短くてよい */
     programRetention: num('PROGRAM_RETENTION', 24 * 60 * MIN),
 
@@ -118,5 +122,8 @@ export const config = {
     /** 0 にすると EPG 取得・スケジューラ・エンコーダを起動しない (単体テスト用) */
     autostart: bool('DENPA_AUTOSTART', true),
 };
+
+/** 指定が無ければDBの隣。運用でいちいち2つ指す意味が無い */
+if (config.dataDir === '') config.dataDir = config.dbPath.replace(/\/[^/]*$/, '') || '.';
 
 export type Config = typeof config;

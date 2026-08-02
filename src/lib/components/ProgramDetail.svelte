@@ -18,7 +18,7 @@
         actions,
     }: { program: ProgramDetail; onclose: () => void; error?: string | null; actions?: Snippet } = $props();
 
-    /** 詳細情報。Mirakurun が拾った「出演者」などの見出し付きテキスト */
+    /** 詳細情報。mirakc が拾った「出演者」などの見出し付きテキスト */
     function extended(json: string | null): [string, string][] {
         if (json === null || json === '') return [];
         try {

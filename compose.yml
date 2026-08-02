@@ -1,7 +1,7 @@
 # 開発環境。ホストに bun を入れずに済むよう、全部コンテナの中で完結させる。
 #
-#   docker compose up            … 開発サーバ + 偽Mirakurun
-#   docker compose run --rm e2e  … E2E (中で偽Mirakurun/偽通知先/アプリを起動する)
+#   docker compose up            … 開発サーバ + 偽mirakc
+#   docker compose run --rm e2e  … E2E (中で偽mirakc/偽通知先/アプリを起動する)
 #   docker compose run --rm unit … 単体テスト
 #
 # 実チューナーもロゴデータも要らず、ffmpeg も偽物を使うので、
@@ -22,7 +22,7 @@ services:
             # 開発では本物の ffmpeg (ビルドに数十分) の代わりに偽物を使う。
             # 実エンコードを試したいときだけ FFMPEG=/usr/local/bin/ffmpeg にして runtime ステージで動かす
             FFMPEG: /app/tests/fake/ffmpeg.sh
-            MIRAKURUN_URL: http://mirakurun:40772
+            MIRAKC_URL: http://mirakc:40772
             RECONCILE_INTERVAL: '60000'
             EPG_SYNC_INTERVAL: '60000'
             SCHEDULER_TICK: '2000'
@@ -39,17 +39,17 @@ services:
             # ホスト側で5173が埋まっていることがあるので上書きできるようにしておく
             - '${DENPA_PORT:-5173}:5173'
         depends_on:
-            - mirakurun
+            - mirakc
 
     # 実チューナーの代わり。番組表も録画ストリームもここが返す
-    mirakurun:
+    mirakc:
         build:
             context: .
             target: dev
-        command: bun tests/fake/mirakurun.ts
+        command: bun tests/fake/mirakc.ts
         environment:
             TZ: Asia/Tokyo
-            FAKE_MIRAKURUN_PORT: '40772'
+            FAKE_MIRAKC_PORT: '40772'
             # 開発中に録画完了まで見届けられるよう、1番組60秒にしておく
             FAKE_SLOT_MS: '60000'
             FAKE_SLOTS: '120'

@@ -370,7 +370,7 @@ async function importRules(connection: mysql.Connection, options: MigrateOptions
  * 手で入れた予約だけ引き継ぐ。
  *
  * ルール由来の予約は、ルールを取り込んだあとに denpa が自分で立て直すので触らない。
- * EPGStation の programId は Mirakurun の番組IDそのままなので、こちらの番組表と直に照合できる。
+ * EPGStation の programId は mirakc の番組IDそのままなので、こちらの番組表と直に照合できる。
  */
 async function importReservations(connection: mysql.Connection, options: MigrateOptions): Promise<void> {
     const [rows] = await connection.query<(ReserveRow & mysql.RowDataPacket)[]>(

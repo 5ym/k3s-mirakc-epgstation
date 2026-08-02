@@ -5,14 +5,12 @@ on:
     branches: [main]
     paths-ignore:
       - 'k3s/**'
-      - 'mirakurun/**'
       - 'windows/**'
       - 'docs/**'
       - '**.md'
   pull_request:
     paths-ignore:
       - 'k3s/**'
-      - 'mirakurun/**'
       - 'windows/**'
       - 'docs/**'
       - '**.md'
@@ -56,13 +54,14 @@ jobs:
       - name: Type check
         run: bun run check
 
+      # denpa 本体と、チューナー側エージェント (mirakc/) の両方
       - name: Unit tests
         run: bun run test:unit
 
       - name: Install Playwright browser
         run: bunx playwright install --with-deps chromium
 
-      # 偽Mirakurun・偽通知先・偽ffmpeg は playwright.config.ts の webServer が
+      # 偽mirakc・偽通知先・偽ffmpeg は playwright.config.ts の webServer が
       # まとめて起動する
       - name: E2E tests
         run: bun run test:e2e
