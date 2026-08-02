@@ -161,20 +161,20 @@ ccid_usb.c:899:WriteUSB() write failed (4/3): LIBUSB_ERROR_TIMEOUT
 `/sys/bus/usb/devices` から引く)。
 
 ```sh
-kubectl -n epg exec deploy/mirakc -- pkill pcscd
+kubectl -n denpa exec deploy/mirakc -- pkill pcscd
 echo 4-11 | sudo tee /sys/bus/usb/drivers/usb/unbind
 sleep 2
 echo 4-11 | sudo tee /sys/bus/usb/drivers/usb/bind
-kubectl -n epg exec deploy/mirakc -- bash -c 'pcscd; sleep 2; pcsc_scan -r'
+kubectl -n denpa exec deploy/mirakc -- bash -c 'pcscd; sleep 2; pcsc_scan -r'
 ```
 
 確認は次の3つ。リーダーが見えるか、カードが読めるか(B-CAS なら ATR が返る)、
 実際に復号できているか(0% なら正常、壊れていると 98〜99%)。
 
 ```sh
-kubectl -n epg exec deploy/mirakc -- pcsc_scan -r
-kubectl -n epg exec deploy/mirakc -- bash -c 'timeout 8 pcsc_scan -n | head -12'
-kubectl -n epg exec deploy/mirakc -- bash -c '
+kubectl -n denpa exec deploy/mirakc -- pcsc_scan -r
+kubectl -n denpa exec deploy/mirakc -- bash -c 'timeout 8 pcsc_scan -n | head -12'
+kubectl -n denpa exec deploy/mirakc -- bash -c '
   curl -s --max-time 10 "http://localhost:40772/api/services/<id>/stream?decode=1" > /tmp/s.ts
   perl -e "binmode STDIN; my (\$t,\$s)=(0,0);
     while (read(STDIN,\$b,188)==188) { last if substr(\$b,0,1) ne \"\x47\";
@@ -361,7 +361,7 @@ denpa 側に作るとしたらどうするか、なぜ外のメディアサー�
 
 ## クラスタ側の前提条件
 
-このリポジトリには `epg` namespace のアプリ本体しか入っていません。k3sホストの初期構築や
+このリポジトリには `denpa` namespace のアプリ本体しか入っていません。k3sホストの初期構築や
 共通アドオンは別の(プライベートな) bootstrap リポジトリ側です。適用前に以下が要ります。
 
 - **StorageClass `local-path-retain`** — `reclaimPolicy: Retain` の local-path

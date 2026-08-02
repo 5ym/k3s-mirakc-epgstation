@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: mirakc
-  namespace: epg
+  namespace: denpa
 spec:
   replicas: 1
   strategy:
@@ -70,7 +70,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: denpa
-  namespace: epg
+  namespace: denpa
 spec:
   replicas: 1
   # 録画とエンコードを抱えるので、新旧2Podが同時に走らないようにする

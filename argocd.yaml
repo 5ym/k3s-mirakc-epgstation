@@ -2,8 +2,8 @@
 # (argocd/appsets/repos.yaml) scans the org for this file and builds this
 # repo's Application from it -- so everything about how this repo gets
 # deployed is decided here, not in the cluster or in bootstrap.
-name: epg
-namespace: epg
+name: denpa
+namespace: denpa
 
 # Directory holding the manifests, relative to the repo root.
 sourcePath: k3s

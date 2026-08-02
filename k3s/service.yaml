@@ -2,7 +2,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: mirakc
-  namespace: epg
+  namespace: denpa
 spec:
   selector:
     app: mirakc
@@ -19,7 +19,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: denpa
-  namespace: epg
+  namespace: denpa
 spec:
   selector:
     app: denpa

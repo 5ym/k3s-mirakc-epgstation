@@ -2,7 +2,7 @@ apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
   name: https-redirect
-  namespace: epg
+  namespace: denpa
 spec:
   redirectScheme:
     scheme: https
@@ -12,7 +12,7 @@ apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
   name: denpa
-  namespace: epg
+  namespace: denpa
 spec:
   entryPoints:
     - websecure
@@ -54,7 +54,7 @@ apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
   name: denpa-home-arpa
-  namespace: epg
+  namespace: denpa
 spec:
   entryPoints:
     - web
