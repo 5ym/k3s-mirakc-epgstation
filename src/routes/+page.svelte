@@ -141,8 +141,12 @@
             </div>
         </div>
 
-        <div class="overflow-x-auto rounded-box bg-base-100 shadow">
-            <table class="table table-zebra">
+        <!--
+            画面の高さに収めて、中だけスクロールさせる。2つ並べたときに、
+            片方が長いともう片方が下に置いていかれるため
+        -->
+        <div class="overflow-auto rounded-box bg-base-100 max-h-[calc(100vh-14rem)] shadow">
+            <table class="table-pin-rows table table-zebra">
                 <thead>
                     <tr>
                         <th class="whitespace-nowrap">放送日時</th>
@@ -289,8 +293,12 @@
             </div>
         {/if}
 
-        <div class="overflow-x-auto rounded-box bg-base-100 shadow">
-            <table class="table table-zebra">
+        <!--
+            画面の高さに収めて、中だけスクロールさせる。2つ並べたときに、
+            片方が長いともう片方が下に置いていかれるため
+        -->
+        <div class="overflow-auto rounded-box bg-base-100 max-h-[calc(100vh-14rem)] shadow">
+            <table class="table-pin-rows table table-zebra">
                 <thead>
                     <tr>
                         <th class="whitespace-nowrap">放送日時</th>

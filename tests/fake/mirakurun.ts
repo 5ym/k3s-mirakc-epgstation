@@ -121,6 +121,30 @@ Bun.serve({
             scrambled = new URL(request.url).searchParams.get('on') === '1';
             return json({ scrambled });
         }
+        // チャンネルスキャン。本物は進み具合を改行区切りのテキストで流し続ける
+        if (url.pathname === '/api/config/channels/scan' && request.method === 'PUT') {
+            const type = url.searchParams.get('type') ?? 'GR';
+            const lines = [
+                `Scanning ${type} ...`,
+                `channel: \`${type}1\` found`,
+                'no signal',
+                `channel: \`${type}2\` found`,
+                'scan finished',
+            ];
+            return new Response(
+                new ReadableStream({
+                    async start(controller) {
+                        const encoder = new TextEncoder();
+                        for (const line of lines) {
+                            controller.enqueue(encoder.encode(`${line}\n`));
+                            await Bun.sleep(50);
+                        }
+                        controller.close();
+                    },
+                }),
+                { headers: { 'Content-Type': 'text/plain; charset=utf-8' } },
+            );
+        }
         if (url.pathname === '/api/version') return json({ current: '3.9.0-fake', latest: '3.9.0-fake' });
         if (url.pathname === '/api/services') {
             return json(

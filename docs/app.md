@@ -24,6 +24,8 @@ Mirakurun から EPG と TS を受け取り、予約・録画・エンコード�
 | `src/lib/server/files.ts` | 録画の削除と、実体とDBの突き合わせ |
 | `src/lib/server/serve.ts` | ファイルの配信 (Range 対応) |
 | `src/lib/server/scramble.ts` | スクランブルの検出と、recisdb での解除 |
+| `src/lib/server/scan.ts` | チャンネルスキャン (Mirakurun に投げて進み具合を読む) |
+| `src/lib/server/migrate.ts` | EPGStation からの引き継ぎ |
 | `src/lib/server/dav.ts` | WebDAV (Kodi 向け) |
 | `src/lib/server/auth.ts` | ベーシック認証 |
 | `src/lib/server/events.ts` | 画面へ変化を知らせる (SSE。ポーリングの代わり) |
@@ -91,9 +93,9 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 | 画面 | 役割 |
 | --- | --- |
 | `/` | **予約と録画**を2ペインで並べる。予約の取消/競合再計算、再生リンク・再エンコード・削除 |
-| `/guide` | 番組表(グリッド)と番組検索、EPG取得。検索はルールと同じ条件で絞り込め、そのままルールにできる |
+| `/guide` | 番組表(グリッド)と番組検索、EPG取得、チャンネルスキャン。検索はルールと同じ条件で絞り込め、そのままルールにできる |
 | `/rules` | 自動予約ルールの一覧と作成 |
-| `/settings` | 録画のしかた(コーデック/CM)、通知先(Webhook)、ベーシック認証 |
+| `/settings` | 録画のしかた(コーデック/CM)、通知先(Webhook)、ベーシック認証、EPGStation からの引き継ぎ |
 | `/api/recordings/<id>/file` | 録画ファイル。Range 対応 |
 | `/dav` | WebDAV (PROPFIND / GET / HEAD)。Kodi 用。書き込みは受けない |
 

@@ -1,3 +1,21 @@
+# Mirakurun の設定 (server.yml / tuners.yml / channels.yml)。
+# チャンネルスキャンの結果を Mirakurun 自身がここへ書き戻すので、
+# イメージに焼かずPVCに置く。初回だけ entrypoint が雛形を写す
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mirakurun-config
+  namespace: epg
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path-retain
+  resources:
+    requests:
+      storage: 128Mi
+---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

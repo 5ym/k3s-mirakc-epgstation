@@ -8,7 +8,13 @@
             "!test-results",
             "!playwright-report",
             "!**/*.svelte",
-            "!static"
+            "!static",
+            "!k3s",
+            "!mirakurun",
+            "!windows",
+            "!docs",
+            "!.github",
+            "!renovate.json"
         ]
     },
     "formatter": {

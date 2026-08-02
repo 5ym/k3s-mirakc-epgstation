@@ -1,6 +1,6 @@
 import { fail } from '@sveltejs/kit';
 import { enabled as authEnabled } from '$lib/server/auth';
-import { database, now, queryAll, queryOne } from '$lib/server/db';
+import { database, queryAll, queryOne } from '$lib/server/db';
 import { cancel as cancelEncode, encodeSource, enqueue, pump } from '$lib/server/encoder';
 import { deleteRecordingFiles, reconcile } from '$lib/server/files';
 import { cancel } from '$lib/server/reservations';

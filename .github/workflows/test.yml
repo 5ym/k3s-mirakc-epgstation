@@ -3,13 +3,19 @@ name: Test denpa
 on:
   push:
     branches: [main]
-    paths:
-      - 'app/**'
-      - '.github/workflows/test.yml'
+    paths-ignore:
+      - 'k3s/**'
+      - 'mirakurun/**'
+      - 'windows/**'
+      - 'docs/**'
+      - '**.md'
   pull_request:
-    paths:
-      - 'app/**'
-      - '.github/workflows/test.yml'
+    paths-ignore:
+      - 'k3s/**'
+      - 'mirakurun/**'
+      - 'windows/**'
+      - 'docs/**'
+      - '**.md'
   workflow_dispatch: {}
 
 concurrency:
@@ -20,10 +26,6 @@ concurrency:
 # 組み立てるので、ランナー既定のUTCのままだとテストが本番と違う値を見ることになる
 env:
   TZ: Asia/Tokyo
-
-defaults:
-  run:
-    working-directory: app
 
 jobs:
   test:
@@ -60,7 +62,7 @@ jobs:
       - name: Install Playwright browser
         run: bunx playwright install --with-deps chromium
 
-      # 偽Mirakurun・偽Jellyfin・偽ffmpeg は playwright.config.ts の webServer が
+      # 偽Mirakurun・偽通知先・偽ffmpeg は playwright.config.ts の webServer が
       # まとめて起動する
       - name: E2E tests
         run: bun run test:e2e
@@ -70,5 +72,5 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: playwright-report
-          path: app/playwright-report
+          path: playwright-report
           retention-days: 7

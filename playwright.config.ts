@@ -7,6 +7,7 @@ const WEBHOOK_PORT = 8096;
 /** テスト用の作業領域。global-setup で毎回まっさらにする */
 export const MIRAKURUN_URL = `http://127.0.0.1:${MIRAKURUN_PORT}`;
 export const TEST_ROOT = '/tmp/denpa-e2e';
+export const EPGSTATION_DIR = `${TEST_ROOT}/epgstation-recorded`;
 export const LIBRARY_DIR = `${TEST_ROOT}/library`;
 /** EPGStation の引き継ぎ元。マウント前後の見え方を試すので、あえて作らずに始める */
 export const WEBHOOK_URL = `http://127.0.0.1:${WEBHOOK_PORT}`;
@@ -63,6 +64,10 @@ export default defineConfig({
                 LIBRARY_DIR,
                 FFMPEG: './tests/fake/ffmpeg.sh',
                 RECISDB: './tests/fake/recisdb.sh',
+                // 引き継ぎ画面。何も待ち受けていない先を指して、失敗したときの見え方も試す
+                EPGSTATION_RECORDED_DIR: EPGSTATION_DIR,
+                EPGSTATION_DB_HOST: '127.0.0.1',
+                EPGSTATION_DB_PORT: '1',
                 FAKE_FFMPEG_FAIL_FILE: `${TEST_ROOT}/fail-encode`,
                 MIRAKURUN_URL,
                 // 定期処理は止め、テストからボタン/APIで明示的に走らせる(タイミング依存を避ける)

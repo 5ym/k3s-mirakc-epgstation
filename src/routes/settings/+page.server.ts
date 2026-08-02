@@ -3,6 +3,7 @@ import { isCmMode } from '$lib/server/cm';
 import { config } from '$lib/server/config';
 import { database, now, queryAll, queryOne } from '$lib/server/db';
 import { isVideoCodec } from '$lib/server/encoder';
+import { available as migrateAvailable, source, start, status } from '$lib/server/migrate';
 import { isStored, saveSettings, settings } from '$lib/server/settings';
 import { send, type Webhook } from '$lib/server/webhook';
 import { EVENTS } from '$lib/webhook-events';
@@ -21,6 +22,11 @@ export function load() {
         fromEnv: { codec: !isStored('codec'), cmCut: !isStored('cmCut') },
         webhooks: queryAll<Webhook>('SELECT * FROM webhooks ORDER BY id'),
         events: EVENTS,
+        migrate: {
+            available: migrateAvailable(),
+            source: source.recordedDir,
+            status: status(),
+        },
     };
 }
 
@@ -105,5 +111,17 @@ export const actions = {
             text: 'denpa からのテスト送信です',
         });
         return { success: true, tested: status };
+    },
+
+    /**
+     * EPGStation からの引き継ぎ。数百GBのコピーになるので開始だけ受けて裏で進める。
+     * 進捗は SSE で降ってくる。
+     */
+    migrate: async ({ request }) => {
+        const form = await request.formData();
+        const options = { apply: form.get('apply') === 'on', move: form.get('move') === 'on' };
+        const result = start(options);
+        if (!result.started) return fail(409, { message: result.message });
+        return { success: true, migrate: result.message };
     },
 };

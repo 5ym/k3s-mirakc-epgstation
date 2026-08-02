@@ -10,7 +10,10 @@ RUN apt-get update && apt-get -y install curl procps && \
     rm -rf /var/lib/apt/lists/* && \
     rm -rf /tmp/*
 
-COPY server.yml channels.yml tuners.yml /app-config/
+# 設定は PVC (/app-config) に置く。チャンネルスキャンの結果が残るようにするため。
+# イメージには「初回に入れる雛形」として別の場所に持たせ、
+# entrypoint が /app-config に無いものだけ写す
+COPY server.yml channels.yml tuners.yml /app-config-defaults/
 
 # B-CASカードを読めるようにしてから Mirakurun を起動する
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh

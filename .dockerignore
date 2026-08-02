@@ -7,3 +7,8 @@ playwright-report
 *.db-wal
 *.db-shm
 .git
+.github
+k3s
+mirakurun
+windows
+docs

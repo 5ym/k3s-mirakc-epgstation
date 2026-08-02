@@ -11,7 +11,7 @@ name: denpa
 services:
     app:
         build:
-            context: ./app
+            context: .
             target: dev
         command: bun run dev --host 0.0.0.0 --port 5173
         environment:
@@ -30,7 +30,7 @@ services:
             CM_CUT_DEFAULT: chapter
             CM_DETECTOR: silence
         volumes:
-            - ./app:/app
+            - .:/app
             - app-node-modules:/app/node_modules
             - denpa-data:/data
             - denpa-recorded:/recorded
@@ -44,7 +44,7 @@ services:
     # 実チューナーの代わり。番組表も録画ストリームもここが返す
     mirakurun:
         build:
-            context: ./app
+            context: .
             target: dev
         command: bun tests/fake/mirakurun.ts
         environment:
@@ -54,7 +54,7 @@ services:
             FAKE_SLOT_MS: '60000'
             FAKE_SLOTS: '120'
         volumes:
-            - ./app:/app
+            - .:/app
             - app-node-modules:/app/node_modules
         ports:
             - '40772:40772'
@@ -62,7 +62,7 @@ services:
 
     e2e:
         build:
-            context: ./app
+            context: .
             target: test
         profiles: ['test']
         command: bun run test:e2e
@@ -70,12 +70,12 @@ services:
             TZ: Asia/Tokyo
             CI: '1'
         volumes:
-            - ./app:/app
+            - .:/app
             - app-node-modules:/app/node_modules
 
     unit:
         build:
-            context: ./app
+            context: .
             target: dev
         profiles: ['test']
         command: bun run test:unit
@@ -83,7 +83,7 @@ services:
             TZ: Asia/Tokyo
             DENPA_DB: /tmp/denpa-unit.db
         volumes:
-            - ./app:/app
+            - .:/app
             - app-node-modules:/app/node_modules
 
 volumes:

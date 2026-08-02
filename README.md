@@ -21,7 +21,7 @@ OIDC のリダイレクトを扱えないためです。**平文の http で出�
 (`.arpa` は ACME で証明書を取れず、自己署名だとプレイヤーが弾くことがある)。
 そのため http→https のリダイレクトは Traefik 側で `doany.io` 系だけにかけてあります。
 
-denpa 自体の詳細(状態遷移・環境変数・テスト)は [app/README.md](app/README.md)。
+denpa 自体の詳細(状態遷移・環境変数・テスト)は [docs/app.md](docs/app.md)。
 
 EPGStation からは移行済みで、マニフェストもコードも消してあります。PVC には
 `Prune=false,Delete=false` が付いていたので、`epgstation-*` / `epg-db` のデータは
@@ -32,9 +32,6 @@ EPGStation からは移行済みで、マニフェストもコードも消して
 上から順に。最後の mirakc 移行は、その前の3つが揃わないと Mirakurun を外せません。
 
 - **ライブ視聴と追っかけ録画**(下記)
-- **チャンネルスキャン** — いまは Mirakurun の Web UI でスキャンして
-  `mirakurun/channels.yml` を `kubectl cp` で吸い出している(下記)。これを denpa の
-  画面からやれるようにする
 - **視聴のついでに局ロゴと番組表を貯める** — Mirakurun がやっている「ストリームを
   流している間に EIT と局ロゴを拾う」を denpa 側でも行う。ロゴは番組表に出すほか、
   CM検出を `join_logo_scp` に切り替えるときの元にもなる
@@ -55,9 +52,9 @@ docker compose run --rm unit bun run format # フォーマット適用
 ```
 
 実チューナーも ffmpeg も要りません。偽Mirakurun が番組表も録画ストリームも返し
-(1番組60秒)、ffmpeg も既定では偽物(`app/tests/fake/ffmpeg.sh`)を使います。
+(1番組60秒)、ffmpeg も既定では偽物(`tests/fake/ffmpeg.sh`)を使います。
 本物の ffmpeg はビルドに数十分かかるので、実エンコードを試したいときだけ
-`app/Dockerfile` の `runtime` ステージを使ってください。
+`Dockerfile` の `runtime` ステージを使ってください。
 
 - `node_modules` は名前付きボリュームなので、**依存を足したら
   `docker compose run --rm unit bun install` を一度**回す(イメージの焼き直しは不要)
@@ -68,7 +65,7 @@ docker compose run --rm unit bun run format # フォーマット適用
   `biome.json` の `files.includes` で分けてあり、取り合いません
 - **CI では Docker を使わず**ランナーに直接 bun を入れます(イメージのビルドが遅く、
   テストは ffmpeg も実チューナーも使わないため)。bun のバージョンは
-  `app/Dockerfile` の `FROM oven/bun:` から読むのでズレません
+  `Dockerfile` の `FROM oven/bun:` から読むのでズレません
 
 ## 録画の置き場と視聴
 
@@ -204,7 +201,7 @@ Amatsukaze ほどの精度は出ません。
 消えるので無音だけより格段に確かです。本体は Windows + AviSynth+ 前提ですが検出核には
 [Linux 移植](https://github.com/tobitti0/JoinLogoScpTrialSetLinux)があり、denpa は
 その成果物 (`Trim()` の並んだ avs) を読むだけなのでエンコードは ffmpeg のままです
-(`app/src/lib/server/cm-jls.ts`)。使うにはイメージに `chapter_exe` / `logoframe` /
+(`src/lib/server/cm-jls.ts`)。使うにはイメージに `chapter_exe` / `logoframe` /
 `join_logo_scp` と AviSynth+ 3.5.x、**局ごとのロゴデータ (`.lgd`)**、`CM_DETECTOR=jls` と
 `CM_JLS_COMMAND` が要ります。移植は 2020 年で止まっていてロゴの用意も手間なため既定は
 `silence` です。検出できなければ無音検出に落ちます。
@@ -271,7 +268,7 @@ Incoming Webhook の URL をそのまま入れられます)。
   (ベースイメージに入っているが起動されない)
 - **録画は止めません。** 電波は二度と戻ってこないので、スクランブルされたままでも
   録っておきます。denpa がエンコードの前に見て、掛かったままならその場で `recisdb decode`
-  で解きます (`app/src/lib/server/scramble.ts`)
+  で解きます (`src/lib/server/scramble.ts`)
 - カードは Mirakurun 側の pcscd が握っています。denpa はその socket を
   `/run/denpa-pcscd` 経由で借りるだけで、チューナーには触りません
 
@@ -313,19 +310,19 @@ kubectl -n epg exec deploy/mirakurun -- bash -c '
 
 ## チャンネルスキャン
 
-Mirakurun の Web UI (`http://<host>:40772/`) → 「チャンネル設定」右上の **Channel Scan**。
-`Channel Type`(GR/BS/CS) と `Min/Max Channel` を指定します。既存の一覧を更新する形に
-するため **Refresh (Update existing channels)** を有効にしてください。
+**番組表の「チャンネルスキャン」から実行できます。** 走らせるのは Mirakurun で、denpa は
+開始を投げて進み具合を見せるだけです。結果は Mirakurun が自分の `channels.yml` に
+書き戻し、終わると番組表も取り直します。
 
-recisdb はチャンネルの指定形式が違うので、**Use Channel Name Format** を有効にし、
-**Channel Name Format** に GRなら `T{ch}`、CSなら `CS{ch}` を入れてから実行します
-(BSは既定の `BS{ch00}_{subch}` のまま)。
+- 種別 (GR/BS/CS) と、必要なら範囲を指定します。範囲を空にすると Mirakurun の既定
+- 既存の一覧を**更新する形**で走ります。スキャンできなかった局を消してしまわないため
+- recisdb はチャンネルの指定形式が違うので、名前の形も一緒に渡します
+  (GRなら `T{ch}`、CSなら `CS{ch}`。BS は Mirakurun の既定のまま)
+- **数分かかり、その間はチューナーを全部使います。** 録画の予定が無いときに
 
-目視の転記はミスの元なので、そのまま吸い出してリポジトリに上書きするのが確実です。
+Mirakurun の設定 (`server.yml` / `tuners.yml` / `channels.yml`) は
+**PVC (`mirakurun-config`) に置いてあります。** イメージに焼くとスキャン結果が
+Pod の作り直しで消えるためです。`mirakurun/` にあるものは初回に写す雛形で、
+`/app-config` に無いものだけ entrypoint がコピーします。既にあるものは触りません。
 
-```sh
-kubectl -n epg exec deploy/mirakurun -- cat /app-config/channels.yml > ./mirakurun/channels.yml
-```
-
-`git diff` で意図しない変更が無いか確認してから push してください。
-`build-and-deploy.yml` が `mirakurun/*.yml` の変更を検知して再ビルド・再デプロイします。
+`channels.yml` の雛形は**空**です。初回起動後にスキャンしてください。
