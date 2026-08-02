@@ -1,17 +1,17 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: mirakurun
+  name: mirakc
   namespace: epg
 spec:
   selector:
-    app: mirakurun
+    app: mirakc
   ports:
     - name: http
       port: 40772
       targetPort: 40772
-    # スクランブル解除の受け口 (mirakurun/descrambler.mjs)
-    - name: descrambler
+    # チューナー側エージェント (mirakc/agent.py)
+    - name: agent
       port: 40773
       targetPort: 40773
 ---

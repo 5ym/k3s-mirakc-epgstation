@@ -1,0 +1,14 @@
+# mirakc の初期設定。初回起動のときだけ PVC に写される(entrypoint.sh)。
+#
+# チャンネルとチューナーは**空のまま**でよい。mirakc は空でも起動でき、
+# 画面の「チューナー」からチャンネルスキャンを実行すると、
+# ISDBScanner が見つけたものをここへ書き込む(agent.py)。
+epg:
+    cache-dir: /var/lib/mirakc/epg
+
+server:
+    addrs:
+        - http: '0.0.0.0:40772'
+
+channels: []
+tuners: []

@@ -1,10 +1,9 @@
-# Mirakurun の設定 (server.yml / tuners.yml / channels.yml)。
-# チャンネルスキャンの結果を Mirakurun 自身がここへ書き戻すので、
-# イメージに焼かずPVCに置く。初回だけ entrypoint が雛形を写す
+# mirakc の設定 (config.yml)。チャンネルスキャンの結果がここへ書き戻されるので、
+# イメージに焼かずPVCに置く。初回だけエージェントが空の雛形を写す
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: mirakurun-config
+  name: mirakc-config
   namespace: epg
   annotations:
     argocd.argoproj.io/sync-options: Prune=false,Delete=false
@@ -19,7 +18,7 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: mirakurun-data
+  name: mirakc-epg
   namespace: epg
   annotations:
     argocd.argoproj.io/sync-options: Prune=false,Delete=false

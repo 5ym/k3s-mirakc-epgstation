@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'mirakurun/**'
+      - 'mirakc/**'
       - 'Dockerfile'
       - 'src/**'
       - 'static/**'
@@ -39,15 +39,15 @@ jobs:
           fetch-depth: 0
 
       # イメージごとに「そのイメージの中身を最後に変えたコミット」でタグを付ける。
-      # 全部を HEAD で揃えると、denpa を直しただけの push で mirakurun の
-      # タグまで変わって再起動し、Mirakurun が集めたEPGが飛ぶ。
+      # 全部を HEAD で揃えると、denpa を直しただけの push で mirakc の
+      # タグまで変わって再起動し、mirakc が集めたEPGが飛ぶ。
       - name: Compute image tags
         id: tag
         run: |
           set -eu
-          # denpa はリポジトリ直下なので、mirakurun など別物のパスを除いて見る
+          # denpa はリポジトリ直下なので、mirakc など別物のパスを除いて見る
           denpa_paths="Dockerfile src static package.json bun.lock svelte.config.js vite.config.ts"
-          echo "mirakurun=sha-$(git log -1 --format=%H -- mirakurun | cut -c1-12)" >> "$GITHUB_OUTPUT"
+          echo "mirakc=sha-$(git log -1 --format=%H -- mirakc | cut -c1-12)" >> "$GITHUB_OUTPUT"
           echo "denpa=sha-$(git log -1 --format=%H -- $denpa_paths | cut -c1-12)" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
@@ -60,18 +60,18 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Build and push mirakurun image
+      - name: Build and push mirakc image
         uses: docker/build-push-action@v7
         with:
-          context: ./mirakurun
+          context: ./mirakc
           platforms: linux/amd64
           push: true
           pull: true
-          cache-from: type=gha,scope=mirakurun
-          cache-to: type=gha,mode=max,scope=mirakurun
+          cache-from: type=gha,scope=mirakc
+          cache-to: type=gha,mode=max,scope=mirakc
           tags: |
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/mirakurun:${{ steps.tag.outputs.mirakurun }}
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/mirakurun:latest
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/mirakc:${{ steps.tag.outputs.mirakc }}
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/mirakc:latest
 
 
       - name: Build and push denpa image
@@ -106,9 +106,9 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
-            for image in mirakurun denpa; do
+            for image in mirakc denpa; do
               case "$image" in
-                mirakurun) tag="${{ steps.tag.outputs.mirakurun }}" ;;
+                mirakc) tag="${{ steps.tag.outputs.mirakc }}" ;;
                 denpa) tag="${{ steps.tag.outputs.denpa }}" ;;
               esac
               sed -i -E "s#image: [^[:space:]]*/${image}:[^[:space:]]*#image: ${{ env.REGISTRY }}/${OWNER}/${image}:${tag}#g" ${FILES}
