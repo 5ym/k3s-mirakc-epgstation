@@ -97,7 +97,6 @@ export function watch(serviceId: number): (chunk: Uint8Array) => void {
 
             let saved = 0;
             for (const { serviceIds, logo } of found) {
-                // biome-ignore lint/style/noNonNullAssertion: done で弾いてある
                 saved += store(service!.network_id, serviceIds, logo.data);
             }
             // 1本の録画で何度も書きに行かない。ロゴは滅多に変わらない

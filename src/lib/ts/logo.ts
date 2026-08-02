@@ -156,7 +156,6 @@ export class LogoCollector {
         }
         return [...byLogo.entries()].map(([logoId, serviceIds]) => ({
             serviceIds,
-            // biome-ignore lint/style/noNonNullAssertion: 上で has を見ている
             logo: this.logos.get(logoId)!,
         }));
     }
