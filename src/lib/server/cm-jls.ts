@@ -98,8 +98,20 @@ export async function detectWithJls(
     input: string,
     duration: number,
     signal?: AbortSignal,
+    channel = '',
 ): Promise<{ cm: Range[]; note: string }> {
-    const command = config.cmJlsCommand.replaceAll('{input}', input);
+    /*
+     * 局名を渡すと、logoframe が**その局のロゴデータを自分で作って覚える**。
+     * 1本目は作るぶん遅く、2本目からは使い回す。渡さないとロゴ無しの判定になり、
+     * 無音検出より少しましな程度まで精度が落ちる。
+     *
+     * 埋める値は単引用符でくくられる前提 (既定のコマンド)。番組名由来のパスにも
+     * 局名にも空白は入るので、くくらないと引数が割れる。中の ' だけ落とす
+     */
+    const quote = (value: string) => value.replaceAll("'", '');
+    const command = config.cmJlsCommand
+        .replaceAll('{input}', quote(input))
+        .replaceAll('{channel}', quote(channel));
     const proc = Bun.spawn(['sh', '-c', command], { stdout: 'pipe', stderr: 'pipe' });
 
     const timer = setTimeout(() => proc.kill(), config.cmDetectTimeout);

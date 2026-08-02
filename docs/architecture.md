@@ -277,13 +277,34 @@ Amatsukaze ほどの精度は出ません。
 
 **`jls`** — Amatsukaze と同じ考え方。無音・シーンチェンジ (`chapter_exe`) に加えて
 **局ロゴが出ているか** (`logoframe`) を見て `join_logo_scp` が判定します。CM 中はロゴが
-消えるので無音だけより格段に確かです。本体は Windows + AviSynth+ 前提ですが検出核には
-[Linux 移植](https://github.com/tobitti0/JoinLogoScpTrialSetLinux)があり、denpa は
-その成果物 (`Trim()` の並んだ avs) を読むだけなのでエンコードは ffmpeg のままです
-(`src/lib/server/cm-jls.ts`)。使うにはイメージに `chapter_exe` / `logoframe` /
-`join_logo_scp` と AviSynth+ 3.5.x、**局ごとのロゴデータ (`.lgd`)**、`CM_DETECTOR=jls` と
-`CM_JLS_COMMAND` が要ります。移植は 2020 年で止まっていてロゴの用意も手間なため既定は
-`silence` です。検出できなければ無音検出に落ちます。
+消えるので無音だけより格段に確かです。
+
+**一式はイメージに入っています** (`/opt/jls`)。`CM_DETECTOR=jls` にすれば動きます。
+
+かつてこの移植は AviSynth+ と L-SMASH Works と Node の上に載っていて、丸ごと
+抱えるのは重すぎました。いまの [tobitti0 版](https://github.com/tobitti0/logoframe)は
+**dtvindex (FFmpeg) で TS を直接読める**ので、そのどれも要りません
+(`WITH_AVISYNTH=no` で組んで30秒ほど)。実行役の Node アプリも、やっているのは
+3つのコマンドを順に呼ぶだけなので `jls/detect.sh` に置き換えてあります。
+
+```text
+chapter_exe    無音とシーンチェンジを拾う
+logoframe      局ロゴが出ているコマを拾う
+join_logo_scp  その2つを突き合わせて本編とCMに分ける → Trim() の並んだ avs
+```
+
+denpa はその avs を読んで秒の区間に直すだけで、エンコードは ffmpeg のままです
+(`src/lib/server/cm-jls.ts`)。
+
+**ロゴデータ (`.lgd`) は logoframe が自分で作ります。** 局名を渡すと
+(`CM_JLS_COMMAND` の `{channel}`)、初めて見る局ならその場でロゴを覚え、
+2本目からは使い回し、合致率が落ちたら作り直します。置き場は
+`data/logos/jls` (`JLS_LOGO_DIR`)。
+
+自動で位置を見つけられないときは
+`Automatic logo position detection found no persistent edge` で止まるので、
+`JLS_LOGO_AREA=x,y,w,h` で範囲を教えます。既定は `silence` のままです
+(jls は録画1本あたり数分かかるため)。検出できなければ無音検出に落ちます。
 
 
 ## 通知

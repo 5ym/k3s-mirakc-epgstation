@@ -231,12 +231,12 @@ export interface CmDetection {
  * jls を選んでいても、ロゴデータ未整備などで結果が空なら無音ベースに落とす
  * (何も検出できないよりは、チャプターだけでも付いたほうが使えるため)。
  */
-export async function detectCm(input: string, signal?: AbortSignal): Promise<CmDetection> {
+export async function detectCm(input: string, signal?: AbortSignal, channel = ''): Promise<CmDetection> {
     if (config.cmDetector === 'jls') {
         const duration = await probeDuration(input);
         if (Number.isFinite(duration)) {
             const { detectWithJls } = await import('./cm-jls');
-            const result = await detectWithJls(input, duration, signal);
+            const result = await detectWithJls(input, duration, signal, channel);
             if (result.cm.length > 0) return { cm: result.cm, duration, note: result.note };
             console.warn(`[cm] jls で検出できなかったため無音検出に切り替えます: ${result.note}`);
         }

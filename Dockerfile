@@ -64,6 +64,41 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
 # ---------------------------------------------------------------------------
+# join_logo_scp 一式 (CM_DETECTOR=jls 用)
+#
+# Amatsukaze と同じ考え方で CM を判定する道具。無音とシーンチェンジ
+# (chapter_exe) に加えて**局ロゴが出ているか** (logoframe) を見て、
+# join_logo_scp が本編とCMを分ける。
+#
+# 本家は Windows + AviSynth+ 前提で、Linux 移植も AviSynth+ と
+# L-SMASH Works と Node の上に載っていた。いまの tobitti0 版は
+# **dtvindex (FFmpeg) で TS を直接読める**ので、そのどれも要らない。
+# WITH_AVISYNTH=no で組んで、ビルドは30秒ほどで終わる。
+# ---------------------------------------------------------------------------
+FROM docker.io/library/debian:trixie-slim AS jls
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && \
+    apt-get -y --no-install-recommends install \
+      git ca-certificates build-essential pkg-config \
+      libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+RUN git clone --depth 1 https://github.com/tobitti0/dtvindex.git && \
+    git clone --depth 1 https://github.com/tobitti0/chapter_exe.git && \
+    git clone --depth 1 https://github.com/tobitti0/logoframe.git && \
+    git clone --depth 1 https://github.com/tobitti0/join_logo_scp.git && \
+    git clone --depth 1 https://github.com/tobitti0/join_logo_scp_trial.git
+
+RUN make -C dtvindex build/libdtvindex.a && \
+    make -C chapter_exe/src WITH_AVISYNTH=no DTVINDEX_DIR=/src/dtvindex && \
+    make -C logoframe/src WITH_AVISYNTH=no DTVINDEX_DIR=/src/dtvindex && \
+    make -C join_logo_scp/src && \
+    mkdir -p /opt/jls/bin && \
+    cp chapter_exe/src/chapter_exe logoframe/src/logoframe join_logo_scp/src/join_logo_scp /opt/jls/bin/ && \
+    cp -r join_logo_scp_trial/JL /opt/jls/JL
+
+# ---------------------------------------------------------------------------
 # 本番ビルド
 # ---------------------------------------------------------------------------
 FROM deps AS build
@@ -83,9 +118,12 @@ ENV NODE_ENV=production \
 
 # B-CASカードは触らない。掛かったまま録れたTSの解除は Mirakurun 側の
 # 受け口に投げる(あちらにしか pcscd が居ないため)。recisdb も libpcsclite も要らない
+# libav* は join_logo_scp 一式のため。あちらは Debian の共有ライブラリに繋いである
+# (denpa 自身の ffmpeg は下で入れる自前ビルド)
 RUN apt-get update && \
     apt-get -y --no-install-recommends install \
       libopus0 libsvtav1enc2 libx264-164 libdav1d7 libfontconfig1 libfreetype6 \
+      libavformat61 libavcodec61 libavutil59 libswscale8 libswresample5 \
       fontconfig ca-certificates tzdata && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -96,6 +134,12 @@ COPY --from=ffmpeg /usr/local/bin/ffmpeg /usr/local/bin/ffprobe /usr/local/bin/
 COPY --from=ffmpeg /usr/local/lib/libaribcaption.* /usr/local/lib/
 COPY --from=ffmpeg /usr/share/fonts/truetype/rounded-mplus-arib /usr/share/fonts/truetype/rounded-mplus-arib
 RUN ldconfig && fc-cache -f
+
+# CM検出を join_logo_scp に切り替えるための一式 (CM_DETECTOR=jls)。
+# 既定では使わないので、入っていても何も起きない
+COPY --from=jls /opt/jls /opt/jls
+COPY jls/detect.sh /opt/jls/detect.sh
+RUN chmod +x /opt/jls/detect.sh
 
 COPY --from=build /app/build ./build
 COPY --from=build /app/node_modules ./node_modules

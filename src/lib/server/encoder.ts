@@ -414,7 +414,7 @@ async function prepareCm(
 
     let detection: CmDetection;
     try {
-        detection = await detectCm(input, signal);
+        detection = await detectCm(input, signal, recording.service_name);
     } catch (error) {
         console.error(`[cm] 検出に失敗したためCM処理をスキップします: ${error}`);
         return none;
