@@ -7,6 +7,13 @@ import { goto, reserveSoon, syncEpg, upcoming } from './helpers';
  * 録画→エンコード→保存先に入るまでを通しで確認する。
  * 進行はサーバ側のタイマー任せなので、ページを読み直しながら状態が変わるのを待つ。
  */
+/**
+ * 状態が変わるのを待つ。
+ *
+ * 以前は数百msごとに開き直していたが、画面はサーバからの知らせで自分で
+ * 書き換わるので (liveUpdates)、1回開いて待てば足りる。開き直しをやめたぶん、
+ * 裏で走っている録画とエンコードにCPUを回せる。
+ */
 async function waitForRowState(
     page: Page,
     url: string,
@@ -15,18 +22,10 @@ async function waitForRowState(
     expected: string,
     timeoutMs = 90_000,
 ): Promise<void> {
-    const deadline = Date.now() + timeoutMs;
-    let last = '(行なし)';
-    while (Date.now() < deadline) {
-        await goto(page, url);
-        const badge = page.locator(selector).getByTestId(stateTestId).first();
-        if ((await badge.count()) > 0) {
-            last = ((await badge.textContent()) ?? '').trim();
-            if (last === expected) return;
-        }
-        await page.waitForTimeout(250);
-    }
-    throw new Error(`${selector} が「${expected}」にならなかった (最後の状態: ${last})`);
+    await goto(page, url);
+    await expect(page.locator(selector).getByTestId(stateTestId).first()).toHaveText(expected, {
+        timeout: timeoutMs,
+    });
 }
 
 test.describe('録画とエンコード', () => {

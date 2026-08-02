@@ -5,19 +5,10 @@ import { goto, reserveSoon, syncEpg } from './helpers';
 
 const FAIL_MARKER = `${TEST_ROOT}/fail-encode`;
 
+/** 状態が変わるのを待つ。画面は知らせで自分で書き換わるので、開き直さない */
 async function waitForRow(page: Page, selector: string, expected: string, timeoutMs = 90_000) {
-    const deadline = Date.now() + timeoutMs;
-    let last = '(なし)';
-    while (Date.now() < deadline) {
-        await goto(page, '/');
-        const badge = page.locator(selector).first();
-        if ((await badge.count()) > 0) {
-            last = ((await badge.textContent()) ?? '').trim();
-            if (last.includes(expected)) return;
-        }
-        await page.waitForTimeout(250);
-    }
-    throw new Error(`${selector} が「${expected}」にならなかった (最後: ${last})`);
+    await goto(page, '/');
+    await expect(page.locator(selector).first()).toContainText(expected, { timeout: timeoutMs });
 }
 
 /**

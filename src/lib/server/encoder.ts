@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } fr
 import { dirname } from 'node:path';
 import { encodeSource } from '../source';
 import type { EncodeJob, EncodePhase, Recording, VideoCodec } from '../types';
-import { type CmDetection, chapterMetadata, detectCm, keepRanges, type Range } from './cm';
+import { type CmDetection, chapterMetadata, detectCm, keepRanges, probeVideo, type Range } from './cm';
 import { config } from './config';
 import { database, now, queryOne } from './db';
 import { emit } from './events';
@@ -245,6 +245,24 @@ function setPhase(jobId: number, phase: EncodePhase, log: string): void {
     emit('recordings');
 }
 
+/**
+ * 段階の中の進み具合。エンコード以外の段階でも出せるところは出す。
+ *
+ * 書き戻しはエンコード中と同じ間隔まで。細かく書くと WAL が膨らむだけで、
+ * 画面のほうも追いつかない。
+ */
+function progressReporter(jobId: number): (percent: number) => void {
+    const update = database().prepare('UPDATE encode_jobs SET percent = ? WHERE id = ?');
+    let lastWrite = 0;
+    return (percent) => {
+        const at = Date.now();
+        if (at - lastWrite < PROGRESS_INTERVAL) return;
+        lastWrite = at;
+        update.run(Math.min(1, Math.max(0, percent)), jobId);
+        emit('recordings');
+    };
+}
+
 interface Progress {
     percent: number;
     /** 残り時間の見込み(ms)。速さが読めないうちは null */
@@ -254,12 +272,20 @@ interface Progress {
 
 /**
  * `-progress pipe:1` が吐く key=value ブロックを1ブロック分解釈する。
- * out_time_us が N/A になる瞬間(バッファflush中)は percent を更新せず直前値を保つ。
+ *
+ * **`out_time_us` は当てにならない。** AV1 (libsvtav1) は先読みを溜めてから
+ * 出し始めるので、その間ずっと `N/A` が返る。実機の30分番組では最初の数分が
+ * まるごと N/A で、割合が 0% のまま動かなかった。
+ *
+ * そこで、時刻が読めない間は **`frame=`** で見る。こちらは最初から increment
+ * するので、少なくとも止まって見えることはない。総フレーム数は尺×出力fps
+ * (インタレ解除で倍になる) の見積もりなので、時刻が読めたらそちらへ切り替える。
  */
 export function parseProgressBlock(
     block: Record<string, string>,
     durationSec: number,
     prev: number,
+    totalFrames = NaN,
 ): Progress {
     const outTimeUs = parseFloat(block.out_time_us);
     let percent = prev;
@@ -268,6 +294,12 @@ export function parseProgressBlock(
     } else if (Number.isFinite(outTimeUs) && Number.isFinite(durationSec) && durationSec > 0) {
         // percent は NaN 汚染を防ぐガードが要る (JSON上 typeof NaN === 'number' で素通りするため)
         percent = Math.min(1, outTimeUs / 1e6 / durationSec);
+    } else {
+        const frame = parseFloat(block.frame);
+        if (Number.isFinite(frame) && Number.isFinite(totalFrames) && totalFrames > 0) {
+            // 見積もりなので、時刻が読めたときに巻き戻らないよう前の値より下げない
+            percent = Math.max(prev, Math.min(1, frame / totalFrames));
+        }
     }
     /*
      * 残り時間。ffmpeg が出す speed (実時間比。"0.85x" のような形) で、
@@ -322,6 +354,8 @@ async function runFfmpeg(
     seek: number | null,
     codec: VideoCodec,
     options: EncodeOptions = {},
+    /** 先に測っておいた入力の尺と fps。進み具合の分母になる */
+    measured: { duration: number; fps: number } = { duration: NaN, fps: NaN },
 ) {
     const proc = Bun.spawn([config.ffmpeg, ...buildArgs(input, output, audioType, seek, codec, options)], {
         stdout: 'pipe',
@@ -329,7 +363,13 @@ async function runFfmpeg(
     });
     procs.set(job.id, proc);
 
-    let durationSec = NaN;
+    // ffmpeg の stderr から拾えるとは限らないので、測った値を先に入れておく
+    let durationSec = measured.duration;
+    /*
+     * 出力フレーム数の見積もり。インタレ解除 (bwdif) はフィールドごとに1枚出すので、
+     * 出てくるフレームは入力の倍になる
+     */
+    const totalFrames = measured.duration * measured.fps * 2;
     // 出力し終えた時点の位置。CMを切ると入力より短くなるので、出来上がりの長さはこちら
     let outTimeUs = NaN;
     let percent = 0;
@@ -374,7 +414,7 @@ async function runFfmpeg(
                 const at = Number(block.out_time_us);
                 if (Number.isFinite(at) && at > 0) outTimeUs = at;
 
-                const p = parseProgressBlock(block, durationSec, percent);
+                const p = parseProgressBlock(block, durationSec, percent, totalFrames);
                 percent = p.percent;
                 etaMs = p.etaMs;
                 log = p.log;
@@ -414,7 +454,7 @@ async function prepareCm(
 
     let detection: CmDetection;
     try {
-        detection = await detectCm(input, signal, recording.service_name);
+        detection = await detectCm(input, signal, recording.service_name, progressReporter(jobId));
     } catch (error) {
         console.error(`[cm] 検出に失敗したためCM処理をスキップします: ${error}`);
         return none;
@@ -460,11 +500,14 @@ async function trimCm(
     signal: AbortSignal,
 ): Promise<string | null> {
     setPhase(jobId, 'cut', 'CMを切っています');
+    // 切るのは区間ごとなので、消化した本数がそのまま進み具合になる
+    const report = progressReporter(jobId);
 
     const parts: string[] = [];
     try {
         for (const [i, range] of keep.entries()) {
             if (signal.aborted) throw new Error('中止されました');
+            report(i / (keep.length + 1));
             const part = `${input}.part${i}.ts`;
             const code = await runOnce(buildSegmentArgs(input, part, range), signal);
             if (code !== 0 || !existsSync(part)) throw new Error(`区間 ${i} の切り出しに失敗しました`);
@@ -617,6 +660,12 @@ async function runJob(jobId: number): Promise<void> {
 
     setPhase(jobId, 'encode', '');
 
+    /*
+     * 尺と fps を先に測っておく。ffmpeg の stderr に出る Duration を当てにしていた頃は、
+     * 拾えない TS だと割合が最後まで 0% のままだった
+     */
+    const measured = await probeVideo(source);
+
     let result = await runFfmpeg(
         job,
         source,
@@ -625,6 +674,7 @@ async function runJob(jobId: number): Promise<void> {
         null,
         recording.codec,
         encodeOptions,
+        measured,
     );
     if (result.code !== 0 && !canceled.has(jobId)) {
         // 録画開始直後の頭数百msだけ壊れているケースをここで拾う(詳細は buildArgs のコメント参照)。
@@ -638,6 +688,7 @@ async function runJob(jobId: number): Promise<void> {
             config.encodeRetrySeek,
             recording.codec,
             encodeOptions,
+            measured,
         );
     }
 

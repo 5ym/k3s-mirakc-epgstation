@@ -43,9 +43,14 @@ function seed(): void {
     recording.run(2, '最近の削除済み', now - DAY, now - DAY, now - DAY, now, now);
     recording.run(3, '残っている録画', now - 30 * DAY, now - 30 * DAY, null, now, now);
 
-    db.prepare(`INSERT INTO encode_jobs (id, recording_id, state, created_at) VALUES (1, 1, 'done', ?)`).run(
-        now,
+    const job = db.prepare(
+        `INSERT INTO encode_jobs (id, recording_id, state, created_at, finished_at) VALUES (?, ?, ?, ?, ?)`,
     );
+    // 消える録画にぶら下がっているもの
+    job.run(1, 1, 'done', now, now);
+    // 残る録画の、古い失敗と新しい成功。古いほうだけ消えて、最新は残る
+    job.run(2, 3, 'failed', now - 30 * DAY, now - 30 * DAY);
+    job.run(3, 3, 'done', now - 30 * DAY, now - 30 * DAY);
 }
 
 const ids = (table: string) =>
@@ -54,7 +59,7 @@ const ids = (table: string) =>
 describe('古い履歴の片付け', () => {
     test('2週間より古い「終わったもの」だけ消える', () => {
         seed();
-        expect(pruneHistory()).toEqual({ reservations: 2, recordings: 1 });
+        expect(pruneHistory()).toEqual({ reservations: 2, recordings: 1, jobs: 1 });
         // 残るのは「これから」と最近のもの
         expect(ids('reservations')).toEqual([3, 4]);
         // ファイルが残っている録画は、古くても消さない
@@ -64,12 +69,14 @@ describe('古い履歴の片付け', () => {
     test('録画の行と一緒にエンコードの記録も消える', () => {
         seed();
         pruneHistory();
-        expect(ids('encode_jobs')).toEqual([]);
+        // 1 は録画ごと消えた。2 は古い失敗なので消える。
+        // 3 はその録画の最新なので、古くても残す (一覧の状態表示がこれを見ている)
+        expect(ids('encode_jobs')).toEqual([3]);
     });
 
     test('何度やっても同じ', () => {
         seed();
         pruneHistory();
-        expect(pruneHistory()).toEqual({ reservations: 0, recordings: 0 });
+        expect(pruneHistory()).toEqual({ reservations: 0, recordings: 0, jobs: 0 });
     });
 });

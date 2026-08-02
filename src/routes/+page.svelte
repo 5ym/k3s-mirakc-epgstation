@@ -333,7 +333,7 @@
                                 data-program-id={rec.program_id}
                                 data-library-path={rec.library_path}
                                 data-duration-ms={rec.duration_ms}
-                                class="hover cursor-pointer"
+                                class="hover relative cursor-pointer"
                                 tabindex="0"
                                 onclick={(event) =>
                                     rowClick(event, rec.program_id, rec, rec.encode_error, rec.cm_ranges)}
@@ -353,12 +353,14 @@
                                     <!-- ファイルの置き場所は普段は見ないので出さない。
                                      必要なときは data-library-path を見る -->
                                     <div class="text-base-content/60 text-sm">{rec.service_name}</div>
-                                    {#if rec.error}
-                                        <!--
-                                        失敗したことはこの行に出し、理由は行を押して詳細で見せる。
-                                        ffmpeg の出力は長いので一覧に貼ると読みづらい。
-                                        削除済みの行では error 列に削除理由が入る。失敗ではないので赤くしない
+                                    <!--
+                                        いま失敗している行にだけ理由を出す。
+                                        「エラーが残っているかどうか」を error 列だけで決めていた頃は、
+                                        一度失敗した録画を録り直して成功しても赤い文字が残っていた。
+                                        いまの状態から決めれば、消し忘れた列があっても嘘にならない。
+                                        削除済みの行では error に削除理由が入る。失敗ではないので赤くしない
                                     -->
+                                    {#if rec.error && (rec.state === 'failed' || rec.deleted_at !== null)}
                                         <div
                                             class="line-clamp-2 text-sm {rec.deleted_at === null
                                                 ? 'text-error'
@@ -509,28 +511,30 @@
                                             </span>
                                         {/if}
                                     </div>
-                                </td>
-                            </tr>
-                            {#if rec.job_id !== null}
-                                <!--
-                                    進み具合は行の下に幅いっぱいで敷く。状態の列に押し込むと
-                                    細くて動きが読めないし、その列だけ縦に伸びて行が歪む。
-                                    ffmpeg が回っていない段階は割合が出せないので、
-                                    動いていることだけ分かるバーにする
-                                -->
-                                <tr data-testid="encode-bar-row" data-job-id={rec.job_id}>
-                                    <td colspan="5" class="border-t-0 px-4 py-0 pb-2">
+                                    <!--
+                                        進み具合は行の下端いっぱいに敷く。
+
+                                        別の行 (colspan) に分けていた頃は、行と行の間に
+                                        隙間ができて、どの録画のものか分かりにくかった。
+                                        `tr` を relative にして、その中で絶対配置する。
+                                        セルの中に置くとその列の幅までしか伸びない。
+
+                                        ffmpeg が回っていない段階でも割合を出すようにしたが、
+                                        取れないものもあるので、そのときは動いているだけの
+                                        バーにする (value を渡さない)
+                                    -->
+                                    {#if rec.job_id !== null}
                                         <progress
-                                            class="progress progress-primary block h-1 w-full"
-                                            value={rec.job_phase === 'encode' && rec.job_state === 'running'
-                                                ? (rec.job_percent ?? 0)
+                                            class="progress progress-primary absolute inset-x-0 bottom-0 h-1 w-full rounded-none"
+                                            value={rec.job_state === 'running' && (rec.job_percent ?? 0) > 0
+                                                ? rec.job_percent
                                                 : undefined}
                                             max="1"
                                             data-testid="encode-bar"
                                         ></progress>
-                                    </td>
-                                </tr>
-                            {/if}
+                                    {/if}
+                                </td>
+                            </tr>
                         {:else}
                             <tr><td colspan="5" class="text-base-content/60">録画はありません</td></tr>
                         {/each}

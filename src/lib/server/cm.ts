@@ -1,6 +1,6 @@
 import type { CmMode } from '../types';
 import { config } from './config';
-import { text } from './stream';
+import { lines as readLines, text } from './stream';
 
 /**
  * CM検出。
@@ -55,10 +55,17 @@ export function parseSilences(stderr: string): { silences: Silence[]; duration: 
     return { silences, duration };
 }
 
-/** ffmpeg を1パス流して無音位置を取る。映像はデコードしないので実時間の数十分の一で終わる */
+/**
+ * ffmpeg を1パス流して無音位置を取る。映像はデコードしないので実時間の数十分の一で終わる。
+ *
+ * 長い録画では数分かかるので、進み具合を呼ぶ側へ渡す。「CM検出中」とだけ出して
+ * 何分も動かないと、止まっているのか進んでいるのか分からない。
+ */
 export async function detectSilences(
     input: string,
     signal?: AbortSignal,
+    onProgress?: (percent: number) => void,
+    total = NaN,
 ): Promise<{ silences: Silence[]; duration: number }> {
     const proc = Bun.spawn(
         [
@@ -72,18 +79,32 @@ export async function detectSilences(
             '0:a:0',
             '-af',
             `silencedetect=noise=${config.cmSilenceNoise}:d=${config.cmSilenceDuration}`,
+            // どこまで読んだかを機械が読める形で出させる
+            '-progress',
+            'pipe:1',
             '-f',
             'null',
             '-',
         ],
-        { stdout: 'ignore', stderr: 'pipe' },
+        { stdout: 'pipe', stderr: 'pipe' },
     );
 
     // 長い録画だと数分かかる。中止を押されたら ffmpeg ごと止める
     const kill = () => proc.kill();
     signal?.addEventListener('abort', kill, { once: true });
+
+    const readProgress = (async () => {
+        if (onProgress === undefined || !Number.isFinite(total) || total <= 0) return;
+        for await (const line of readLines(proc.stdout as ReadableStream<Uint8Array>)) {
+            // 音声だけなので out_time は素直に進む (映像と違って溜め込まない)
+            if (!line.startsWith('out_time_us=')) continue;
+            const at = Number(line.slice('out_time_us='.length));
+            if (Number.isFinite(at)) onProgress(Math.min(1, at / 1e6 / total));
+        }
+    })();
+
     try {
-        const stderr = await text(proc.stderr as ReadableStream<Uint8Array>);
+        const [stderr] = await Promise.all([text(proc.stderr as ReadableStream<Uint8Array>), readProgress]);
         await proc.exited;
         return parseSilences(stderr);
     } finally {
@@ -194,30 +215,53 @@ export function selectExpression(keep: Range[]): string {
     return keep.map((r) => `between(t,${r.start.toFixed(3)},${r.end.toFixed(3)})`).join('+');
 }
 
-/** 尺だけを軽く取る。CM区間を秒で扱うために必要 */
-export async function probeDuration(input: string): Promise<number> {
-    try {
-        const proc = Bun.spawn(
-            [
-                config.ffprobe,
-                '-v',
-                'error',
-                '-show_entries',
-                'format=duration',
-                '-of',
-                'default=nw=1:nk=1',
-                input,
-            ],
-            { stdout: 'pipe', stderr: 'ignore' },
-        );
+/**
+ * 尺とフレームレートを先に取る。
+ *
+ * ffmpeg の stderr に出る `Duration:` を当てにしていた頃は、TS によっては
+ * 拾えず、進み具合が最後まで 0% のままになっていた。先に ffprobe で押さえる。
+ */
+export async function probeVideo(input: string): Promise<{ duration: number; fps: number }> {
+    const read = async (args: string[]): Promise<string> => {
+        const proc = Bun.spawn([config.ffprobe, '-v', 'error', ...args, input], {
+            stdout: 'pipe',
+            stderr: 'ignore',
+        });
         const out = (await text(proc.stdout as ReadableStream<Uint8Array>)).trim();
         await proc.exited;
-        const seconds = Number(out);
-        if (Number.isFinite(seconds) && seconds > 0) return seconds;
+        return out;
+    };
+
+    let duration = NaN;
+    let fps = NaN;
+    try {
+        duration = Number(await read(['-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1']));
+        // "30000/1001" の形で返る
+        const [num, den] = (
+            await read([
+                '-select_streams',
+                'v:0',
+                '-show_entries',
+                'stream=avg_frame_rate',
+                '-of',
+                'default=nw=1:nk=1',
+            ])
+        )
+            .split('/')
+            .map(Number);
+        fps = den ? num / den : num;
     } catch {
-        // ffprobe が使えない環境では silencedetect のログから取る
+        // ffprobe が使えない環境。呼ぶ側が NaN を見て諦める
     }
-    return NaN;
+    return {
+        duration: Number.isFinite(duration) && duration > 0 ? duration : NaN,
+        fps: Number.isFinite(fps) && fps > 0 ? fps : NaN,
+    };
+}
+
+/** 尺だけを軽く取る。CM区間を秒で扱うために必要 */
+export async function probeDuration(input: string): Promise<number> {
+    return (await probeVideo(input)).duration;
 }
 
 export interface CmDetection {
@@ -231,7 +275,12 @@ export interface CmDetection {
  * jls を選んでいても、ロゴデータ未整備などで結果が空なら無音ベースに落とす
  * (何も検出できないよりは、チャプターだけでも付いたほうが使えるため)。
  */
-export async function detectCm(input: string, signal?: AbortSignal, channel = ''): Promise<CmDetection> {
+export async function detectCm(
+    input: string,
+    signal?: AbortSignal,
+    channel = '',
+    onProgress?: (percent: number) => void,
+): Promise<CmDetection> {
     if (config.cmDetector === 'jls') {
         const duration = await probeDuration(input);
         if (Number.isFinite(duration)) {
@@ -242,7 +291,12 @@ export async function detectCm(input: string, signal?: AbortSignal, channel = ''
         }
     }
 
-    const { silences, duration } = await detectSilences(input, signal);
+    /*
+     * 尺は先に測る。silencedetect の出力からも拾えるが、それだと終わるまで
+     * 分母が分からず、進み具合を出せない
+     */
+    const measured = await probeDuration(input);
+    const { silences, duration } = await detectSilences(input, signal, onProgress, measured);
     return {
         cm: detectCmRanges(silences, duration),
         duration,

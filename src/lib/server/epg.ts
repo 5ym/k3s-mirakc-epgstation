@@ -18,6 +18,21 @@ const CHANNEL_TYPES = new Set(['GR', 'BS', 'CS', 'SKY']);
  */
 const DIGITAL_TV = 1;
 
+/**
+ * 「いま mirakc が知っている局」だけに絞る条件。
+ *
+ * 局の行は消さない。消すと、その局で録った録画や過去の予約が辿れなくなるため
+ * ([data.md](../../../docs/data.md))。代わりに、**直近の取り込みで見かけなかった
+ * 局は画面に出さない**。
+ *
+ * 取り込みでは同じ時刻を全件に入れるので、いちばん新しい `updated_at` が
+ * 「最後に取り込んだ時刻」になる。それに満たないものが取り残しにあたる。
+ *
+ * 実機では、スキャンをやり直した結果 mirakc が知っているのは32局なのに
+ * denpa 側には120局が残っていて、番組表に空の列が並んでいた。
+ */
+export const CURRENT_SERVICES = 'updated_at >= (SELECT MAX(updated_at) FROM services)';
+
 export function syncServices(services: mirakc.MirakcService[]): number {
     const stmt = database().prepare(`
         INSERT INTO services (id, service_id, network_id, name, type, service_type, channel,

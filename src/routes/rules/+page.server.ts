@@ -2,6 +2,7 @@ import { fail, redirect } from '@sveltejs/kit';
 import { genreName } from '$lib/arib';
 import { parseSearchFields } from '$lib/search';
 import { database, now, queryAll, queryOne } from '$lib/server/db';
+import { CURRENT_SERVICES } from '$lib/server/epg';
 import { cancel } from '$lib/server/reservations';
 import { applyRules, compile, haystack, matchesCompiled } from '$lib/server/rules';
 import { resolveConflicts } from '$lib/server/scheduler';
@@ -110,7 +111,10 @@ export function load({ url }) {
              FROM rules r ORDER BY r.id DESC`,
         )
         .all() as Row[];
-    const services = database().prepare('SELECT * FROM services ORDER BY type, channel').all() as Service[];
+    // 取り残しの局は選ばせない (CURRENT_SERVICES)。もう録れない局が並ぶだけ
+    const services = database()
+        .prepare(`SELECT * FROM services WHERE ${CURRENT_SERVICES} ORDER BY type, channel`)
+        .all() as Service[];
     /*
      * 編集中のルールがこれから録る予定の件数。
      *

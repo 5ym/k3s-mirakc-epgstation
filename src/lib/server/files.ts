@@ -60,7 +60,7 @@ export function reconcile(): { checked: number; removed: number } {
  * 対象は**終わった予約**と**消した録画の行**だけ。ファイルが残っているものには
  * 触らない(消すかどうかはユーザーが決めること)。
  */
-export function pruneHistory(): { reservations: number; recordings: number } {
+export function pruneHistory(): { reservations: number; recordings: number; jobs: number } {
     const cutoff = now() - config.historyRetention;
 
     // 録画中や予約中のものは、いつ立てたかに関係なく残す
@@ -79,8 +79,26 @@ export function pruneHistory(): { reservations: number; recordings: number } {
     // 録画の行を消したら、ぶら下がっていたエンコードの記録も要らない
     database().prepare('DELETE FROM encode_jobs WHERE recording_id NOT IN (SELECT id FROM recordings)').run();
 
-    if (reservations > 0 || recordings > 0) {
-        console.log(`[files] 古い履歴を片付けました: 予約 ${reservations} 件 / 録画 ${recordings} 件`);
+    /*
+     * 終わったエンコードの記録も期限を切る。
+     *
+     * 録画の行が残っている限り消していなかったので、失敗のたびに1行ずつ積もり続けていた
+     * (実機で失敗22件)。**いちばん新しい1件だけは残す。** 一覧はそれを見て
+     * 「いま失敗しているか」を決めているため、消してしまうと状態が読めなくなる。
+     */
+    const jobs = database()
+        .prepare(
+            `DELETE FROM encode_jobs
+             WHERE state IN ('done', 'failed', 'canceled')
+               AND COALESCE(finished_at, created_at) < ?
+               AND id NOT IN (SELECT MAX(id) FROM encode_jobs GROUP BY recording_id)`,
+        )
+        .run(cutoff).changes;
+
+    if (reservations > 0 || recordings > 0 || jobs > 0) {
+        console.log(
+            `[files] 古い履歴を片付けました: 予約 ${reservations} 件 / 録画 ${recordings} 件 / エンコード ${jobs} 件`,
+        );
     }
-    return { reservations, recordings };
+    return { reservations, recordings, jobs };
 }

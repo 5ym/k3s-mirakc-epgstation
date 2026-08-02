@@ -89,7 +89,7 @@ export default defineConfig({
                  * 保険の定期実行にすり替わっていないことまで確かめられる
                  */
                 ONAIR_POLL_INTERVAL: '3600000',
-                ONAIR_FALLBACK_WAIT: '3000',
+                ONAIR_FALLBACK_WAIT: '1500',
                 EPG_EVENT_DEBOUNCE: '200',
                 // 録画が終わるまで待たれるとテストが終わらない
                 SHUTDOWN_WAIT: '0',

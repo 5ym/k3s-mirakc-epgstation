@@ -1,5 +1,6 @@
 import { fail } from '@sveltejs/kit';
 import { queryAll, queryOne } from '$lib/server/db';
+import { CURRENT_SERVICES } from '$lib/server/epg';
 import { cancel, reserve } from '$lib/server/reservations';
 import { settings } from '$lib/server/settings';
 import type { ChannelType, Program, Service } from '$lib/types';
@@ -40,8 +41,9 @@ export async function load({ url }) {
 
     // テレビと同じ並びにする。リモコン番号を持つのは地上波だけなので、
     // 持たない局は物理チャンネル順で後ろに続ける
+    // 取り残しの局は出さない (CURRENT_SERVICES)。出すと番組表に空の列が並ぶ
     const services = queryAll<Service>(
-        `SELECT * FROM services WHERE type = ?
+        `SELECT * FROM services WHERE type = ? AND ${CURRENT_SERVICES}
          ORDER BY remote_control_key IS NULL, remote_control_key, channel, service_id`,
         type,
     );
