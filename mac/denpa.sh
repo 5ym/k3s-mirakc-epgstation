@@ -7,6 +7,9 @@
 #   sh denpa.sh --show     登録されている中身を見る
 #   sh denpa.sh --remove   解除
 #
+# 落としながら実行してもよい (README のワンライナー)。
+# その場合このファイルは手元に残らないので、控えは配布元から取り直す。
+#
 # macOS では URL スキームを名乗れるのは**アプリケーションバンドルだけ**なので、
 # 受け口になる小さなアプレットを作る。中身は「届いたリンクをこのスクリプト自身に
 # 渡す」だけ。osacompile は macOS に最初から入っているので、入れるものは無い。
@@ -27,8 +30,24 @@ VLC=${DENPA_VLC:-/Applications/VLC.app/Contents/MacOS/VLC}
 # 確認なしで開くことを許す denpa の origin
 ORIGINS=${DENPA_ORIGINS:-'http://dp.home.arpa,https://dp.doany.io'}
 
+# 自分自身の取得元。パイプで流し込まれたときは $0 が使えないのでここから取り直す
+SOURCE_URL=${DENPA_SOURCE_URL:-https://raw.githubusercontent.com/DAnything/denpa/main/mac/denpa.sh}
+
+# パイプ (curl ... | sh) だと $0 は sh になり、中身を読めない
+self() {
+    case $0 in
+        */*) [ -f "$0" ] && printf %s "$0" ;;
+        *) [ -f "./$0" ] && printf %s "./$0" ;;
+    esac
+}
+
 usage() {
-    sed -n '3,10p' "$0" | sed 's/^# \{0,1\}//'
+    file=$(self)
+    if [ -n "$file" ]; then
+        sed -n '3,10p' "$file" | sed 's/^# \{0,1\}//'
+    else
+        echo 'denpa.sh [--test|--show|--remove]'
+    fi
 }
 
 # 黙って終わると「押しても何も起きない」になる。必ず見えるようにする
@@ -144,9 +163,20 @@ allow_origins() {
 install_scheme() {
     command -v osacompile >/dev/null 2>&1 || { echo 'macOS でのみ登録できます。' >&2; exit 1; }
 
-    # 自分自身を控えておく。配布物を消したり移したりしても壊れないように
+    <<'NOTE' true
+自分自身を控えておく。配布物を消したり移したりしても壊れないように。
+
+curl から直接流し込まれた場合は手元にファイルが無いので、同じものを配布元から
+取り直す。ここで諦めると、アプレットだけ出来て中身が無い状態になる。
+NOTE
     mkdir -p "$SUPPORT"
-    cp "$0" "$HANDLER"
+    file=$(self)
+    if [ -n "$file" ]; then
+        cp "$file" "$HANDLER"
+    else
+        echo "渡し役を $SOURCE_URL から取ります"
+        curl -fsSL "$SOURCE_URL" -o "$HANDLER" || fail "渡し役を取れませんでした: $SOURCE_URL"
+    fi
     chmod +x "$HANDLER"
 
     script=$(mktemp -t denpa)

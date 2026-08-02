@@ -51,6 +51,20 @@ grep -qxF -- "--meta-title=$title" "$work/vlc.args" || { echo 'タイトルが�
 grep -qxF -- "$url" "$work/vlc.args" || { echo 'URLを復元できていない' >&2; exit 1; }
 echo '=> 復号して VLC に渡せている'
 
+# --- パイプから流し込んでも動くこと ---------------------------------------
+#
+# README のワンライナー (curl ... | sh) では $0 がファイルにならない。
+# 自分の場所を当てにしている箇所があると、そこで黙って壊れる
+
+rm -f "$work/vlc.args"
+DENPA_VLC="$work/vlc" sh -s -- --play "$link" <"$here/denpa.sh"
+for _ in 1 2 3 4 5; do
+    [ -f "$work/vlc.args" ] && break
+    sleep 0.2
+done
+[ -f "$work/vlc.args" ] || { echo 'パイプから流し込むと VLC が呼ばれない' >&2; exit 1; }
+echo '=> パイプから流し込んでも渡せている'
+
 # --- 通してはいけないリンク -----------------------------------------------
 
 bad_link() {

@@ -22,6 +22,9 @@
 .PARAMETER NoPause
     終わったあとに Enter を待たない。自動実行やパイプから使うとき用。
 
+.PARAMETER NoElevate
+    管理者に上げ直さない。確認ダイアログの抑止だけ諦めて、そのまま進む。
+
 .PARAMETER Origins
     確認なしで開くことを許す denpa の origin。既定は dp.home.arpa と dp.doany.io。
     Edge と Chrome のポリシー (AutoLaunchProtocolsFromOrigins) に書く。
@@ -41,6 +44,10 @@
     .\denpa.ps1 -PlayerPath "C:\Program Files\VideoLAN\VLC\vlc.exe"
     .\denpa.ps1 -Test https://dp.home.arpa/api/recordings/12/file
     .\denpa.ps1 -Remove
+
+.EXAMPLE
+    # 落としてそのまま実行する (README のワンライナー)
+    $s="$env:TEMP\denpa.ps1"; irm https://raw.githubusercontent.com/DAnything/denpa/main/windows/denpa.ps1 -OutFile $s; & $s
 #>
 
 [CmdletBinding()]
@@ -48,6 +55,7 @@ param(
     [string] $PlayerPath,
     [string[]] $Origins = @('http://dp.home.arpa', 'https://dp.doany.io'),
     [switch] $NoPause,
+    [switch] $NoElevate,
     [switch] $Remove,
     [switch] $Show,
     [string] $Test
@@ -139,6 +147,41 @@ function Test-Elevated {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     return ([Security.Principal.WindowsPrincipal]$identity).IsInRole(
         [Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+<#
+    自分を管理者として起動し直す。
+
+    確認ダイアログの抑止 (AutoLaunchProtocolsFromOrigins) は HKCU\Software\Policies に
+    書くが、ここは普通のユーザーには書けない。「管理者として実行し直してください」と
+    言うだけだと、たいていそのまま毎回確認が出る側で使われる。UAC を1回出して済ませる。
+
+    断られても再生自体はできるので、そのまま先へ進む。
+    上げた先は別の窓なので、-NoPause は渡さない (読めないまま閉じてしまう)。
+#>
+function Invoke-Elevated {
+    # iex でパイプから流し込まれた場合は自分の場所が無い。上げ直しようがない
+    if (-not $PSCommandPath) {
+        Write-Host '確認ダイアログの抑止には管理者権限が要ります。'
+        Write-Host '  いったんファイルに保存してから実行してください (README のワンライナー参照)。'
+        return $false
+    }
+
+    $argv = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"", '-NoElevate')
+    if ($PlayerPath) { $argv += @('-PlayerPath', "`"$PlayerPath`"") }
+    if ($Origins) { $argv += @('-Origins', (($Origins | ForEach-Object { "`"$_`"" }) -join ',')) }
+    if ($Remove) { $argv += '-Remove' }
+
+    try {
+        Write-Host '管理者の窓で続けます (UAC の確認が出ます)。'
+        Start-Process -FilePath (Get-Command powershell.exe).Source -ArgumentList $argv -Verb RunAs -Wait
+        return $true
+    }
+    catch {
+        Write-Host '管理者にはなりませんでした。このまま続けます。' -ForegroundColor Yellow
+        Write-Host '  (毎回の確認は出たままになります)'
+        return $false
+    }
 }
 
 function Remove-AutoLaunchPolicy {
@@ -283,12 +326,36 @@ function Build-Command([string] $exe) {
     レジストリに実際に書く1行。組み立てを1か所にまとめて、verify.ps1 からも
     同じものを確かめられるようにしてある。
 #>
-function Build-RegistryCommand([string] $exe, [string] $powershell) {
-    # -WindowStyle Hidden で窓を出さない。既定の実行ポリシーは Restricted なので Bypass が要る
-    return '"{0}" -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -Command "{1}"' `
-        -f $powershell, (Build-Command $exe)
+function Build-RegistryCommand([string] $exe, [string] $powershell, [string] $conhost) {
+    <#
+        conhost.exe を頭に噛ませる。
+
+        Windows 11 の既定の端末は Windows Terminal で、コンソールを持つプログラムを
+        起動すると**まず Terminal が立ち上がってから**中身が動く。この立ち上がりが
+        再生ボタンを押してから VLC が出るまでの間になる (EPGStation の頃は素の cmd
+        だったので速かった、というのはこの差)。しかも Terminal は
+        -WindowStyle Hidden を無視するので、一瞬窓も出る。
+
+        conhost.exe を明示すると昔のコンソールホストで動くので、Terminal の
+        立ち上がりが丸ごと無くなり、Hidden も効く。
+        残るのは PowerShell 自身の起動 (0.3 秒ほど) だけ。
+
+        既定の実行ポリシーは Restricted なので Bypass が要る。
+    #>
+    return '"{0}" "{1}" -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -Command "{2}"' `
+        -f $conhost, $powershell, (Build-Command $exe)
 }
 
+
+# --- 管理者に上げ直す -----------------------------------------------------
+
+# 見るだけ・試すだけなら要らない。書くとき (登録・解除) だけ上げる
+if (-not $NoElevate -and -not $Show -and -not $PSBoundParameters.ContainsKey('Test') -and -not (Test-Elevated)) {
+    if (Invoke-Elevated) {
+        # 上げた先で全部やり終えている。こちらは黙って終わる
+        return
+    }
+}
 
 # --- 解除 -----------------------------------------------------------------
 
@@ -325,24 +392,26 @@ if ($PSBoundParameters.ContainsKey('Test')) {
 
 # --- 登録 -----------------------------------------------------------------
 
-# ブラウザのポリシーは何度書いても同じなので、スキームが登録済みでも必ず通す。
-# ここを飛ばすと、入れ直すまで確認が出続ける
-Set-AutoLaunchPolicy $Origins
+<#
+    入っていたら黙って入れ直す。
 
+    以前はここで「登録し直しますか?」と聞いて、はいと答えると解除して**終わって**
+    いた。入れ直したつもりが外れているうえ、消しているだけなのに
+    「確認を出さずに開くには…」という案内まで出ていた。
+    もう一度実行するのは新しくするためなので、そのまま最後まで通す。
+
+    先に消してから書く。Remove-Registration はブラウザのポリシーも消すので、
+    順番を逆にすると、書いたばかりの許可を自分で消してしまう。
+#>
 $existing = Get-RegisteredCommand
 if ($existing) {
-    Write-Host ''
-    Write-Host 'denpa:// は既に登録されています。'
+    Write-Host '既に登録されているので、入れ直します。'
     Write-Host "  $existing"
-    Write-Host ''
-    Write-Host '確認を出さずに開くには、ブラウザを一度終了してから開き直してください。'
-    Write-Host ''
-    $answer = Read-Host '登録し直しますか? (解除します) [y/N]'
-    if ($answer -match '^[yY]') { Remove-Registration }
-    else { Write-Host 'そのままにします。' }
-    Wait-Enter
-    return
+    Remove-Registration
 }
+
+# ブラウザのポリシーは何度書いても同じなので、毎回通す
+Set-AutoLaunchPolicy $Origins
 
 $exe = Find-Player
 Write-Host "VLC: $exe"
@@ -353,7 +422,9 @@ Set-ItemProperty -Path $Root -Name '(default)' -Value 'URL:denpa Protocol'
 Set-ItemProperty -Path $Root -Name 'URL Protocol' -Value ''
 
 New-Item -Path $CommandKey -Force | Out-Null
-$command = Build-RegistryCommand $exe (Get-Command powershell.exe).Source
+$conhost = (Get-Command conhost.exe -ErrorAction SilentlyContinue).Source
+if (-not $conhost) { $conhost = Join-Path $env:SystemRoot 'System32\conhost.exe' }
+$command = Build-RegistryCommand $exe (Get-Command powershell.exe).Source $conhost
 Set-ItemProperty -Path $CommandKey -Name '(default)' -Value $command
 
 # 書けたことを読み返して確かめる。黙って失敗すると原因が分からなくなる

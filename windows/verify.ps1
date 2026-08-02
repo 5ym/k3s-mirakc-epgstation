@@ -83,8 +83,16 @@ function Split-CommandLine([string] $line) {
     return $args_
 }
 
-$registry = Build-RegistryCommand $exe 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+$conhost = 'C:\Windows\System32\conhost.exe'
+$powershell = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+$registry = Build-RegistryCommand $exe $powershell $conhost
 $parts = Split-CommandLine $registry
+
+# 頭は conhost。Windows Terminal を経由させないためにここに居る (立ち上がりが遅く、
+# -WindowStyle Hidden も無視されるため)。順番が入れ替わると素通しで遅いままになる
+if ($parts[0] -ne $conhost) { throw "先頭が conhost ではない: $($parts[0])" }
+if ($parts[1] -ne $powershell) { throw "conhost の次が powershell ではない: $($parts[1])" }
+
 $commandAt = $parts.IndexOf('-Command')
 if ($commandAt -lt 0) { throw '-Command が渡っていない' }
 if ($parts.Count - $commandAt - 1 -ne 1) {
