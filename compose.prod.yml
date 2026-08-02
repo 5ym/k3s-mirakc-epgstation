@@ -39,6 +39,10 @@ services:
     denpa:
         image: ghcr.io/danything/denpa:latest
         restart: unless-stopped
+        # 録画中に止めようとしたら、終わるまで居座ってから止まる (SHUTDOWN_WAIT)。
+        # ここを伸ばしておかないと、待っている途中で殺されて意味が無くなる。
+        # 録画していないときは即座に止まる
+        stop_grace_period: 6h5m
         depends_on:
             - mirakc
         environment:

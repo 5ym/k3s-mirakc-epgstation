@@ -82,9 +82,17 @@ export default defineConfig({
                 SCHEDULER_TICK: '500',
                 START_MARGIN: '0',
                 END_MARGIN: '500',
-                // 放送の延長への追従。テストでは短い周期で見に行かせる
-                ONAIR_POLL_INTERVAL: '500',
+                /*
+                 * 放送の延長への追従。
+                 * 見に行く周期は**わざと長くしてある**。こうしておくと、延長に
+                 * 気付けるのは mirakc からの知らせ (/events) を拾えたときだけになり、
+                 * 保険の定期実行にすり替わっていないことまで確かめられる
+                 */
+                ONAIR_POLL_INTERVAL: '3600000',
                 ONAIR_FALLBACK_WAIT: '3000',
+                EPG_EVENT_DEBOUNCE: '200',
+                // 録画が終わるまで待たれるとテストが終わらない
+                SHUTDOWN_WAIT: '0',
                 ENCODE_CONCURRENCY: '2',
                 // 何も待ち受けていない先。引き継ぎが失敗したときの見え方を試す
                 // ベーシック認証は設定画面から入れる。env は初期値として使えることの確認用

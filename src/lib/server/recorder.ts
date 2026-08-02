@@ -156,51 +156,72 @@ async function openWithRetry(
     throw new Error(`チューナーを ${OPEN_RETRIES} 回試して掴めませんでした: ${last}`);
 }
 
+/** いま放送の延長を見ている録画。mirakc からの知らせを配るために持つ */
+const following = new Map<number, Recording>();
+
 /**
- * 放送の延長に追い付く。
+ * mirakc の番組情報を読み直して、終わりが後ろへ動いていたら合わせる。
  *
  * 番組単位で録っている間、mirakc の番組情報は EIT[p/f] で書き換わる。
- * 終わりが後ろへ動いたら、こちらの予定も合わせておく。合わせないと
- * スケジューラが元の時刻で止めてしまい、延長したところで切れる。
+ * 合わせないとスケジューラが元の時刻で止めてしまい、延長したところで切れる。
  *
  * 縮む方向には追わない。番組表が短くなったからといって録画を早く切ると、
  * 実際にはまだ流れていたときに取り返しがつかない。
  */
+async function syncEndTime(recording: Recording): Promise<void> {
+    if (recording.program_id === null) return;
+    try {
+        const program = await getProgram(recording.program_id);
+        const endAt = program.startAt + program.duration;
+        const current = queryOne<{ end_at: number }>(
+            'SELECT end_at FROM recordings WHERE id = ?',
+            recording.id,
+        );
+        if (current === undefined || endAt <= current.end_at) return;
+
+        const at = now();
+        database()
+            .prepare('UPDATE recordings SET end_at = ?, updated_at = ? WHERE id = ?')
+            .run(endAt, at, recording.id);
+        if (recording.reservation_id !== null) {
+            database()
+                .prepare('UPDATE reservations SET end_at = ?, updated_at = ? WHERE id = ?')
+                .run(endAt, at, recording.reservation_id);
+        }
+        const minutes = Math.round((endAt - current.end_at) / 60000);
+        console.log(`[rec] 放送が延びました: ${recording.name} (+${minutes}分)`);
+        emit('recordings');
+        emit('reservations');
+    } catch {
+        // 取れなくてもそのまま録り続ける。番組表が引けないだけで録画とは別
+    }
+}
+
+/**
+ * mirakc から「この局のいま流れている番組が変わった」と知らせが来たとき。
+ *
+ * 延長はここで拾うのが本筋で、下の定期実行は知らせが途切れたときの保険。
+ */
+export function onOnairChanged(serviceId: number): void {
+    for (const recording of following.values()) {
+        if (recording.service_id !== serviceId) continue;
+        void syncEndTime(recording);
+    }
+}
+
+/** 録画している間だけ、延長を見張る */
 function followEndTime(recording: Recording): () => void {
     if (recording.program_id === null) return () => {};
+    following.set(recording.id, recording);
 
-    const timer = setInterval(() => {
-        void (async () => {
-            try {
-                const program = await getProgram(recording.program_id!);
-                const endAt = program.startAt + program.duration;
-                const current = queryOne<{ end_at: number }>(
-                    'SELECT end_at FROM recordings WHERE id = ?',
-                    recording.id,
-                );
-                if (current === undefined || endAt <= current.end_at) return;
-
-                const at = now();
-                database()
-                    .prepare('UPDATE recordings SET end_at = ?, updated_at = ? WHERE id = ?')
-                    .run(endAt, at, recording.id);
-                if (recording.reservation_id !== null) {
-                    database()
-                        .prepare('UPDATE reservations SET end_at = ?, updated_at = ? WHERE id = ?')
-                        .run(endAt, at, recording.reservation_id);
-                }
-                const minutes = Math.round((endAt - current.end_at) / 60000);
-                console.log(`[rec] 放送が延びました: ${recording.name} (+${minutes}分)`);
-                emit('recordings');
-                emit('reservations');
-            } catch {
-                // 取れなくてもそのまま録り続ける。番組表が引けないだけで録画とは別
-            }
-        })();
-    }, config.onairPollInterval);
+    // 知らせで足りるはずだが、黙って途切れることまでは防げない
+    const timer = setInterval(() => void syncEndTime(recording), config.onairPollInterval);
     timer.unref?.();
 
-    return () => clearInterval(timer);
+    return () => {
+        following.delete(recording.id);
+        clearInterval(timer);
+    };
 }
 
 /** 実際に録れた長さを足す。再開したぶんも合算するので加算にする */

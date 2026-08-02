@@ -15,6 +15,15 @@ test.describe('放送の延長', () => {
         await request.post(`${MIRAKC_URL}/__control/onair?silent=0`);
     });
 
+    test('mirakc の知らせを聞いている', async ({ request }) => {
+        /*
+         * 番組表の取り直しも延長への追従も、これを聞いて動く。
+         * 繋がっていないと定期実行の保険だけになり、気付くのが分単位まで遅れる
+         */
+        const status = await (await request.get(`${MIRAKC_URL}/__control/listeners`)).json();
+        expect(status.listeners, 'denpa が /events に繋いでいない').toBeGreaterThan(0);
+    });
+
     test('番組単位で開き、mirakc に追従役を立てさせる', async ({ page, request }) => {
         test.setTimeout(90_000);
         await syncEpg(request);

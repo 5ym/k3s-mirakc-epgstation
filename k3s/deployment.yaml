@@ -84,6 +84,10 @@ spec:
       labels:
         app: denpa
     spec:
+      # 録画中に入れ替えが来たら、終わるまで居座ってから止まる (SHUTDOWN_WAIT)。
+      # ここを伸ばしておかないと、待っている途中で SIGKILL されて意味が無くなる。
+      # 録画していないときは即座に止まるので、普段の入れ替えは今までどおり速い
+      terminationGracePeriodSeconds: 21900
       containers:
         - name: denpa
           image: ghcr.io/danything/denpa:sha-a7f3e6316725

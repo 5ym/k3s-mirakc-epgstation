@@ -15,6 +15,7 @@ EPGStation の置き換えとして作ったもので、エンコード設定は
 | ファイル | 役割 |
 | --- | --- |
 | `src/lib/server/mirakc.ts` | mirakc の API クライアント |
+| `src/lib/server/mirakc-events.ts` | mirakc からの知らせ (`/events`) の購読 |
 | `src/lib/server/epg.ts` | 番組表の取り込みと予約時刻の追従 |
 | `src/lib/server/rules.ts` | ルール(キーワード/チャンネル/ジャンル)から予約を作る |
 | `src/lib/server/reservations.ts` | 手動予約と取り消し |
@@ -88,9 +89,11 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 | `ENCODE_RETRY_SEEK` | `0.2` | 頭が壊れていて失敗したとき、捨てて再試行する秒数 |
 | `START_MARGIN` / `END_MARGIN` | `10000` / `15000` | 録画の前後マージン(ms)。放送に追従しているときは mirakc 側が切れ目を決める |
 | `FOLLOW_ONAIR` | `1` | 放送の延長に追従する。`0` で番組表の時刻どおりに開いて閉じる |
-| `ONAIR_POLL_INTERVAL` | `30000` | 追従中に終了時刻を見に行く間隔(ms) |
+| `ONAIR_POLL_INTERVAL` | `300000` | 終了時刻を見に行く間隔(ms)。普段は mirakc の知らせで拾うので**保険** |
 | `ONAIR_FALLBACK_WAIT` | `90000` | 番組単位で開いても何も来ないとき、サービス単位に落とすまで(ms) |
-| `EPG_SYNC_INTERVAL` | `600000` | EPG取得の間隔(ms) |
+| `EPG_SYNC_INTERVAL` | `600000` | EPG取得の間隔(ms)。こちらも保険 (合図は mirakc の `/events`) |
+| `EPG_EVENT_DEBOUNCE` | `10000` | 知らせが来てから取り直すまで(ms)。局の数だけ連続で飛んでくるため |
+| `SHUTDOWN_WAIT` | `21600000` | 止められたとき、録画が終わるまで待つ上限(ms)。`0` で待たない |
 | `SCHEDULER_TICK` | `5000` | 予約チェックの間隔(ms) |
 | `CM_CUT_DEFAULT` | `chapter` | `off` / `chapter` / `cut` の**初期値**。設定画面で変えられる |
 | `CM_DETECTOR` | `silence` | `silence` / `jls` |

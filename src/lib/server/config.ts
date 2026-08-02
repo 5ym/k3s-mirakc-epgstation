@@ -104,15 +104,37 @@ export const config = {
      * 0 にすると番組表の時刻で開いて閉じる、前のやり方に戻る。
      */
     followOnair: bool('FOLLOW_ONAIR', true),
-    /** 追従中に終了時刻を見に行く間隔。ここで延びたぶんを予約表にも反映する */
-    onairPollInterval: num('ONAIR_POLL_INTERVAL', 30 * SEC),
+    /**
+     * 延長を見に行く間隔。
+     * 普段は mirakc からの知らせ (`/events` の `onair.program-changed`) で拾うので、
+     * これは**知らせが途切れたときの保険**。短くしても得は無い
+     */
+    onairPollInterval: num('ONAIR_POLL_INTERVAL', 5 * MIN),
     /**
      * 番組単位で開いたのに何も流れてこないとき、サービス単位に切り替えるまでの待ち時間。
      * mirakc は番組が始まるまで1バイトも出さないので、開いた直後は空でも正常
      */
     onairFallbackWait: num('ONAIR_FALLBACK_WAIT', 90 * SEC),
 
+    /**
+     * 番組表を取り直す間隔。
+     * 普段は mirakc からの知らせ (`/events` の `epg.programs-updated`) で取り直すので、
+     * これも保険。知らせが黙って止まっても、ここで必ず追い付く
+     */
     epgSyncInterval: num('EPG_SYNC_INTERVAL', 10 * MIN),
+    /**
+     * 知らせが来てから取り直すまでの間。
+     * 番組表が更新されると局の数だけ知らせが飛んでくる (実機で30件ほど連続) ので、
+     * 静まるのを待ってから1回だけ取り直す
+     */
+    epgEventDebounce: num('EPG_EVENT_DEBOUNCE', 10 * SEC),
+    /**
+     * 止められたとき、録画が終わるまで待つ上限。
+     *
+     * 0 で待たずに止まる。**Kubernetes の terminationGracePeriodSeconds と
+     * docker compose の stop_grace_period をこれ以上にしておくこと** (runtime.ts)
+     */
+    shutdownWait: num('SHUTDOWN_WAIT', 6 * 60 * MIN),
     schedulerTick: num('SCHEDULER_TICK', 5 * SEC),
     /** 保存先の実体とDBを突き合わせる間隔。外から消されたものをここで拾う */
     reconcileInterval: num('RECONCILE_INTERVAL', 5 * MIN),

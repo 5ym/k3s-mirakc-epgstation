@@ -304,6 +304,42 @@ const channelOf = (service: FakeService) => ({
 const json = (body: unknown) =>
     new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
 
+/*
+ * 起きたことを教える口 (SSE)。本物では `/events`。**`/api` の下ではない。**
+ *
+ * denpa はこれを聞いて番組表を取り直し、放送の延長にも追い付く。
+ * 定期実行の保険も残っているが、そちらは分単位なので、
+ * ここが動いていることはテストからしか確かめられない。
+ */
+const listeners = new Set<ReadableStreamDefaultController<Uint8Array>>();
+
+function push(name: string, data: unknown): void {
+    const chunk = new TextEncoder().encode(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`);
+    for (const listener of listeners) {
+        try {
+            listener.enqueue(chunk);
+        } catch {
+            // 既に閉じている購読者。次の cancel で片付く
+        }
+    }
+}
+
+function eventStream(): Response {
+    let self: ReadableStreamDefaultController<Uint8Array>;
+    const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+            self = controller;
+            listeners.add(controller);
+        },
+        cancel() {
+            listeners.delete(self);
+        },
+    });
+    return new Response(stream, {
+        headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' },
+    });
+}
+
 Bun.serve({
     port: PORT,
     hostname: '0.0.0.0',
@@ -322,7 +358,17 @@ Bun.serve({
          */
         if (url.pathname === '/__control/extend' && request.method === 'POST') {
             extendedMs = Number(url.searchParams.get('ms') ?? 0);
+            // 本物は EIT[p/f] が変わった時点でこれを流す。denpa はこれで気付く
+            for (const service of SERVICES) push('onair.program-changed', { serviceId: service.id });
             return json({ ok: true, extendedMs });
+        }
+        // テスト用。番組表が更新されたことにする
+        if (url.pathname === '/__control/epg-updated' && request.method === 'POST') {
+            for (const service of SERVICES) push('epg.programs-updated', { serviceId: service.id });
+            return json({ ok: true, listeners: listeners.size });
+        }
+        if (url.pathname === '/__control/listeners') {
+            return json({ listeners: listeners.size });
         }
         if (url.pathname === '/__control/onair' && request.method === 'POST') {
             programStreamSilent = url.searchParams.get('silent') === '1';
@@ -389,6 +435,8 @@ Bun.serve({
             });
         }
         if (url.pathname === '/denpa/scan') return json(scanState);
+
+        if (url.pathname === '/events') return eventStream();
 
         if (url.pathname === '/api/version') return json({ current: '3.9.0-fake', latest: '3.9.0-fake' });
         if (url.pathname === '/api/services') {

@@ -5,6 +5,7 @@ import { database, now, queryOne } from './db';
 import { emit } from './events';
 import * as mirakc from './mirakc';
 import { activeRecordingIds, startRecording, stopRecording } from './recorder';
+import { isDraining } from './shutdown';
 
 interface Candidate extends Reservation {
     type: string;
@@ -95,6 +96,13 @@ export async function tick(): Promise<void> {
         )
         .run(at, at);
     if (expired.changes > 0) emit('reservations');
+
+    /*
+     * 止められている最中は新しく始めない。始めてしまうと、
+     * 「録画が終わるまで待つ」がいつまでも終わらない (shutdown.ts)。
+     * 始めそこねた予約は、次の Pod が起動した直後の tick が拾う
+     */
+    if (isDraining()) return;
 
     const due = database()
         .prepare(
