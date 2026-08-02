@@ -219,14 +219,26 @@ function loadTuners(): Tuner[] {
     return parseConfig(readFileSync(CONFIG, 'utf8')).tuners ?? [];
 }
 
+/** 並べ替えの順。設定を読むときに種別ごとにまとまっているほうが分かりやすい */
+const TYPE_ORDER: Record<string, number> = { GR: 0, BS: 1, CS: 2 };
+
 /**
  * 見つけたチャンネルだけ差し替える。
  *
  * チューナーの定義はハードウェアの話で、スキャンで分かるものではない。
  * epg やサーバの設定ごと書き換えると、スキャンのたびに設定が飛ぶ。
+ *
+ * **探した種別だけ**を入れ替え、他はそのまま残す。地上波だけスキャンしたときに
+ * 全部を置き換えると、BS と CS が設定から消える(実際に消して、BSの予約が
+ * 録れなくなった)。
  */
-function saveChannels(channels: ChannelEntry[]): void {
-    const text = replaceChannels(readFileSync(CONFIG, 'utf8'), channels);
+function saveChannels(channels: ChannelEntry[], scanned: ChannelType[]): void {
+    const source = readFileSync(CONFIG, 'utf8');
+    const kept = (parseConfig(source).channels ?? []).filter((channel) => !scanned.includes(channel.type));
+    const merged = [...kept, ...channels].sort(
+        (a, b) => (TYPE_ORDER[a.type] ?? 9) - (TYPE_ORDER[b.type] ?? 9) || a.channel.localeCompare(b.channel),
+    );
+    const text = replaceChannels(source, merged);
 
     // 書きかけを読ませない。mirakc は起動時にしか読まないので、壊れたものを
     // 掴むと起動しなくなる
@@ -273,7 +285,10 @@ async function runScan(targets: [ChannelType, string[]][]): Promise<void> {
         }
 
         push('設定を書き込んでいます...', {}, { phase: '設定を反映' });
-        saveChannels(found);
+        saveChannels(
+            found,
+            targets.map(([type]) => type),
+        );
         clearEpgCache();
         push('mirakc を起動しています...', {}, { state: 'done', phase: '完了', finishedAt: Date.now() });
     } catch (error) {

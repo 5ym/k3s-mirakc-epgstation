@@ -80,3 +80,42 @@ describe('設定の差し替え', () => {
         expect(parseConfig(updated).channels).toHaveLength(2);
     });
 });
+
+describe('探した種別だけ入れ替える', () => {
+    /*
+     * 地上波だけスキャンしたときに全部を置き換えると、BS と CS が設定から消える。
+     * 実際に消して、BSの予約が録れなくなった。agent.ts の saveChannels と同じ
+     * 組み立てをここで確かめる (mirakc を起こさずに見られるのはこの形まで)
+     */
+    const before = `channels:
+    - name: T16
+      type: GR
+      channel: T16
+      services: [23608]
+    - name: BS15_0
+      type: BS
+      channel: BS15_0
+      services: [211]
+
+tuners:
+    - name: adapter0
+      types: [GR, BS]
+      command: recisdb tune --channel {{{channel}}} -
+`;
+
+    test('地上波を探し直しても BS は残る', () => {
+        const kept = (parseConfig(before).channels ?? []).filter((c) => !['GR'].includes(c.type));
+        const found = [{ name: 'T21', type: 'GR' as const, channel: 'T21', services: [1064] }];
+        const after = replaceChannels(before, [...kept, ...found]);
+
+        const channels = parseConfig(after).channels ?? [];
+        expect(channels.map((c) => c.channel)).toEqual(['BS15_0', 'T21']);
+        // チューナーの定義は触らない
+        expect(parseConfig(after).tuners).toHaveLength(1);
+    });
+
+    test('同じ種別は入れ替わる', () => {
+        const kept = (parseConfig(before).channels ?? []).filter((c) => !['GR', 'BS'].includes(c.type));
+        expect(kept).toHaveLength(0);
+    });
+});
