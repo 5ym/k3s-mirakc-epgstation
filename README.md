@@ -69,8 +69,10 @@ AV1+Opus の mkv も素直には再生できないためです。
 | Kodi | `/dav` を WebDAV サーバーとして追加。Android TV・Fire TV も同じ |
 
 初回だけブラウザが「denpa を開こうとしています」と聞いてきます。
-**「常に許可」にチェック**を入れれば以後は出ません
-(チェックが出ないときは [docs/player.md](docs/player.md#常に許可が出ないとき))。
+**「常に許可」にチェック**を入れれば以後は出ません。
+**チェックが出ないときは平文 (http) で開いています** — Chrome も Edge も、
+この覚えさせ方を https のページからしか許しません
+([docs/player.md](docs/player.md#常に許可が出ないとき))。
 
 **CM はチャプターとして入っています。** VLC なら `Shift`+`N` で次の章、
 `Shift`+`P` で前の章へ飛べます (Windows・Mac 共通。`N` / `P` だけだと

@@ -79,8 +79,8 @@ spec:
 # forward-auth は通しません。LAN 内 (10.10.0.0/16) からだけ通し、
 # ファイルの口は denpa 自身のベーシック認証で守ります。
 #
-# 使うには DNS で `dp.lan.doany.io` を Traefik の LAN アドレスに
-# 向けてください (AdGuard Home の書き換え、または A レコード)。
+# `*.l.doany.io` は LAN 内の DNS が Traefik のアドレスに向けてあります
+# (bootstrap 側の AdGuard Home)。外からは引けません。
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -92,7 +92,7 @@ spec:
   tls:
     certResolver: mydnschallenge
   routes:
-    - match: Host(`dp.lan.doany.io`) && ClientIP(`10.10.0.0/16`)
+    - match: Host(`dp.l.doany.io`) && ClientIP(`10.10.0.0/16`)
       kind: Rule
       services:
         - name: denpa
