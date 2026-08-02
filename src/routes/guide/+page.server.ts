@@ -2,7 +2,6 @@ import { fail } from '@sveltejs/kit';
 import { queryAll, queryOne } from '$lib/server/db';
 import { sync } from '$lib/server/epg';
 import { cancel, reserve } from '$lib/server/reservations';
-import { status as scanStatus, start as startScan } from '$lib/server/scan';
 import { settings } from '$lib/server/settings';
 import type { ChannelType, Program, Service } from '$lib/types';
 
@@ -67,7 +66,6 @@ export async function load({ url }) {
         services,
         // 予約の詳細で初期値として出す
         defaults: settings(),
-        scan: scanStatus(),
         counts: queryOne<{ programs: number; services: number }>(
             'SELECT (SELECT COUNT(*) FROM programs) AS programs, (SELECT COUNT(*) FROM services) AS services',
         )!,
@@ -78,24 +76,6 @@ export const actions = {
     /** 番組表が古いときに取り直す。番組表の追従と新規予約もここで走る */
     sync: async () => {
         return { success: true, sync: await sync() };
-    },
-
-    /**
-     * チャンネルスキャン。走らせるのは Mirakurun で、結果も Mirakurun が
-     * 自分の channels.yml に書き戻す。数分かかるので開始だけ受ける
-     */
-    scan: async ({ request }) => {
-        const form = await request.formData();
-        const type = TYPES.find((t) => t === form.get('type'));
-        if (type === undefined) return fail(400, { message: 'チャンネル種別が不正です' });
-
-        const range = (name: string) => {
-            const value = Number(form.get(name));
-            return Number.isFinite(value) && value > 0 ? value : undefined;
-        };
-        const result = startScan({ type, min: range('min'), max: range('max') });
-        if (!result.started) return fail(409, { message: result.message });
-        return { success: true, scan: result.message };
     },
 
     /** 番組表から予約を止める。予約一覧まで行かずに済むように */

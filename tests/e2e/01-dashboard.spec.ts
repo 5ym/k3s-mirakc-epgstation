@@ -20,6 +20,7 @@ test.describe('ダッシュボードと画面遷移', () => {
         for (const [name, heading] of [
             ['nav-guide', '番組表'],
             ['nav-rules', '自動予約ルール'],
+            ['nav-tuners', 'チューナー'],
             ['nav-settings', '設定'],
             ['nav-home', '予約と録画'],
         ] as const) {
@@ -28,10 +29,10 @@ test.describe('ダッシュボードと画面遷移', () => {
         }
     });
 
-    test('設定画面に Mirakurun とカードリーダーの状態が出る', async ({ page }) => {
-        await goto(page, '/settings');
+    test('チューナー画面に mirakc とカードリーダーの状態が出る', async ({ page }) => {
+        await goto(page, '/tuners');
         // どちらも相手待ちなので後から流れてくる
-        await expect(page.getByTestId('status-mirakurun')).toHaveText('3.9.0-fake');
+        await expect(page.getByTestId('status-mirakc')).toHaveText('3.9.0-fake');
         await expect(page.getByTestId('status-card-reader')).toHaveText('OK');
         await expect(page.getByTestId('status-card')).toContainText('Fake Card Reader');
     });

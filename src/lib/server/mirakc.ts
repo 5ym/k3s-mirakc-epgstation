@@ -1,7 +1,7 @@
 import type { ChannelType } from '../types';
 import { config } from './config';
 
-export interface MirakurunService {
+export interface MirakcService {
     id: number;
     serviceId: number;
     networkId: number;
@@ -12,7 +12,7 @@ export interface MirakurunService {
     channel?: { type: ChannelType; channel: string };
 }
 
-export interface MirakurunProgram {
+export interface MirakcProgram {
     id: number;
     eventId: number;
     serviceId: number;
@@ -29,71 +29,90 @@ export interface MirakurunProgram {
     video?: { type?: string; resolution?: string };
 }
 
-export interface MirakurunTuner {
+export interface MirakcTuner {
     index: number;
     name: string;
     types: ChannelType[];
+    /** 実際に動かしている選局コマンド。空なら開いていない */
+    command?: string;
+    pid?: number | null;
+    /** いま掴んでいる相手。録画中なら denpa が入っている */
+    users?: { id: string; priority: number; agent?: string }[];
     isAvailable: boolean;
+    isFree?: boolean;
+    isUsing?: boolean;
     isFault: boolean;
 }
 
+export interface MirakcChannel {
+    type: ChannelType;
+    channel: string;
+    name: string;
+    services?: { id: number; serviceId: number; name: string }[];
+}
+
 async function get<T>(path: string): Promise<T> {
-    const res = await fetch(`${config.mirakurunUrl}${path}`, {
+    const res = await fetch(`${config.mirakcUrl}${path}`, {
         headers: { Accept: 'application/json' },
     });
     if (!res.ok) {
-        throw new Error(`mirakurun ${path} -> ${res.status} ${await res.text()}`);
+        throw new Error(`mirakc ${path} -> ${res.status} ${await res.text()}`);
     }
     return (await res.json()) as T;
 }
 
-export function getServices(): Promise<MirakurunService[]> {
-    return get<MirakurunService[]>('/api/services');
+export function getServices(): Promise<MirakcService[]> {
+    return get<MirakcService[]>('/api/services');
 }
 
-export function getPrograms(): Promise<MirakurunProgram[]> {
-    return get<MirakurunProgram[]>('/api/programs');
+export function getPrograms(): Promise<MirakcProgram[]> {
+    return get<MirakcProgram[]>('/api/programs');
 }
 
-export function getTuners(): Promise<MirakurunTuner[]> {
-    return get<MirakurunTuner[]>('/api/tuners');
+export function getTuners(): Promise<MirakcTuner[]> {
+    return get<MirakcTuner[]>('/api/tuners');
+}
+
+/** 設定に入っている物理チャンネル。チャンネルスキャンの結果がそのまま出る */
+export function getChannels(): Promise<MirakcChannel[]> {
+    return get<MirakcChannel[]>('/api/channels');
 }
 
 /**
  * サービス単位のTSストリームを開く。番組単位の `/api/programs/:id/stream` は
- * Mirakurun 側が終了判定を持ってしまい前後マージンを自分で決められないため使わない。
+ * mirakc 側が終了判定を持ってしまい前後マージンを自分で決められないため使わない。
  */
 export async function openServiceStream(
     serviceId: number,
     signal: AbortSignal,
     priority = 2,
 ): Promise<ReadableStream<Uint8Array>> {
-    const url = `${config.mirakurunUrl}/api/services/${serviceId}/stream?decode=1`;
+    const url = `${config.mirakcUrl}/api/services/${serviceId}/stream?decode=1`;
     const res = await fetch(url, {
         signal,
         headers: {
-            // 録画は2。チューナーが足りなくなったら Mirakurun が
+            // 録画は2。チューナーが足りなくなったら mirakc が
             // 優先度の低いものを切り、録画を通す
-            'X-Mirakurun-Priority': String(priority),
+            'X-mirakc-Priority': String(priority),
         },
     });
     if (!res.ok || res.body === null) {
-        throw new Error(`mirakurun stream ${serviceId} -> ${res.status}`);
+        throw new Error(`mirakc stream ${serviceId} -> ${res.status}`);
     }
     return res.body;
 }
 
 /**
- * 局ロゴ。Mirakurun が放送波から拾ったものをそのまま中継する。
+ * 局ロゴ。mirakc が放送波から拾ったものをそのまま中継する。
  * ロゴを持たない局もあるので、無いときは null を返して呼び出し側で出し分ける。
  */
 export async function fetchLogo(serviceId: number): Promise<Response | null> {
-    const res = await fetch(`${config.mirakurunUrl}/api/services/${serviceId}/logo`);
+    const res = await fetch(`${config.mirakcUrl}/api/services/${serviceId}/logo`);
     if (!res.ok || res.body === null) return null;
     return res;
 }
 
-/** Mirakurun が生きているか。ダッシュボードの表示用 */
+/** mirakc が生きているか。ダッシュボードの表示用 */
 export async function ping(): Promise<{ ok: boolean; version?: string; error?: string }> {
     try {
         const v = await get<{ current: string }>('/api/version');

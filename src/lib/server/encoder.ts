@@ -493,7 +493,7 @@ async function runJob(jobId: number): Promise<void> {
      *
      * カードが読めないとき録画を止めてしまうと電波は二度と戻ってこないので、
      * 録画自体は暗号のままでも残す方針にしてある。解くのはこの時点でよい。
-     * 解くのは Mirakurun 側(カードを持っているのはあちら)。
+     * 解くのは mirakc 側(カードを持っているのはあちら)。
      */
     /** 後始末で消す作業ファイル。生TSを置き換えたときは残す側になるので null のまま */
     let decoded: string | null = null;

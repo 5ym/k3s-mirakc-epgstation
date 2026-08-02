@@ -1,5 +1,5 @@
 /**
- * 設定は全て環境変数から読む。テスト(E2E)では偽の Mirakurun / ffmpeg を
+ * 設定は全て環境変数から読む。テスト(E2E)では偽の mirakc / ffmpeg を
  * 指すよう差し替えて同じコードパスを通せるようにするため、パスや間隔も含めて
  * ハードコードせず全部ここに集約する。
  */
@@ -28,13 +28,13 @@ const SEC = 1000;
 const MIN = 60 * SEC;
 
 export const config = {
-    mirakurunUrl: str('MIRAKURUN_URL', 'http://mirakurun:40772').replace(/\/+$/, ''),
+    mirakcUrl: str('MIRAKC_URL', 'http://mirakc:40772').replace(/\/+$/, ''),
     /**
-     * スクランブル解除の受け口。Mirakurun と同じコンテナに居る。
+     * スクランブル解除の受け口。mirakc と同じコンテナに居る。
      * B-CASカードは pcscd 経由でしか読めず、その pcscd は向こう側にしか無いので、
      * 掛かったまま録れたTSは投げて解いてもらう
      */
-    descramblerUrl: str('DESCRAMBLER_URL', 'http://mirakurun:40773').replace(/\/+$/, ''),
+    tunerAgentUrl: str('TUNER_AGENT_URL', 'http://mirakc:40773').replace(/\/+$/, ''),
 
     dbPath: str('DENPA_DB', '/app/data/denpa.db'),
     /** 生TSの置き場。エンコード後は(keep_original でなければ)消える作業領域 */

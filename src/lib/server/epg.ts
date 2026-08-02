@@ -1,7 +1,7 @@
 import type { Service } from '../types';
 import { config } from './config';
 import { database, now, queryAll } from './db';
-import * as mirakurun from './mirakurun';
+import * as mirakc from './mirakc';
 import { applyRules } from './rules';
 import { resolveConflicts } from './scheduler';
 import { toHalfWidth } from './title';
@@ -11,14 +11,14 @@ const CHANNEL_TYPES = new Set(['GR', 'BS', 'CS', 'SKY']);
 /**
  * 録画できるサービスかどうか。ARIB のサービス種別 (STD-B10) で決める。
  *
- * Mirakurun はデータ放送(NHKデータ1、Gガイド)もワンセグ(tvkワンセグ1)も
+ * mirakc はデータ放送(NHKデータ1、Gガイド)もワンセグ(tvkワンセグ1)も
  * ラジオも同じ一覧で返す。これらを録っても映像は入っておらず、
  * データ放送は番組表上「24時間ぶんの1番組」になっていたりする。
  * ルールが引っかけて録画が失敗するので、取り込む時点で落とす。
  */
 const DIGITAL_TV = 1;
 
-export function syncServices(services: mirakurun.MirakurunService[]): number {
+export function syncServices(services: mirakc.MirakcService[]): number {
     const stmt = database().prepare(`
         INSERT INTO services (id, service_id, network_id, name, type, service_type, channel,
                               remote_control_key, has_logo, updated_at)
@@ -77,7 +77,7 @@ export function syncServices(services: mirakurun.MirakurunService[]): number {
 }
 
 /** デュアルモノ判定に使う componentType。enc.js が AUDIOCOMPONENTTYPE を見ているのと同じ値 */
-function audioType(p: mirakurun.MirakurunProgram): number | null {
+function audioType(p: mirakc.MirakcProgram): number | null {
     if (p.audio?.componentType !== undefined) return p.audio.componentType;
     if (p.audios !== undefined && p.audios.length > 0) return p.audios[0].componentType;
     return null;
@@ -86,7 +86,7 @@ function audioType(p: mirakurun.MirakurunProgram): number | null {
 /**
  * 番組の serviceId を services.id に読み替える表を作る。
  *
- * Mirakurun の `Program.serviceId` は **ARIB のサービスID**(例: 23608)で、
+ * mirakc の `Program.serviceId` は **ARIB のサービスID**(例: 23608)で、
  * `Service.id` の内部ID(例: 3239123608)とは別物。そのまま入れると番組表の
  * JOIN が1件も当たらず、番組が丸ごと出なくなる。networkId と合わせて引き直す。
  */
@@ -95,7 +95,7 @@ function serviceIdIndex(): Map<string, number> {
     return new Map(services.map((s) => [`${s.network_id}:${s.service_id}`, s.id]));
 }
 
-export function syncPrograms(programs: mirakurun.MirakurunProgram[]): number {
+export function syncPrograms(programs: mirakc.MirakcProgram[]): number {
     const index = serviceIdIndex();
     const stmt = database().prepare(`
         INSERT INTO programs (id, service_id, network_id, event_id, start_at, end_at,
@@ -194,7 +194,7 @@ export interface SyncResult {
 }
 
 export async function sync(): Promise<SyncResult> {
-    const [services, programs] = await Promise.all([mirakurun.getServices(), mirakurun.getPrograms()]);
+    const [services, programs] = await Promise.all([mirakc.getServices(), mirakc.getPrograms()]);
     const result: SyncResult = {
         services: syncServices(services),
         programs: syncPrograms(programs),

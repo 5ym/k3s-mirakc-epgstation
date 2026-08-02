@@ -5,14 +5,12 @@ on:
     branches: [main]
     paths-ignore:
       - 'k3s/**'
-      - 'mirakurun/**'
       - 'windows/**'
       - 'docs/**'
       - '**.md'
   pull_request:
     paths-ignore:
       - 'k3s/**'
-      - 'mirakurun/**'
       - 'windows/**'
       - 'docs/**'
       - '**.md'
@@ -59,10 +57,15 @@ jobs:
       - name: Unit tests
         run: bun run test:unit
 
+      # チューナー側エージェント (mirakc/) の分。TSの解析とスキャンの駆動は
+      # あちらに置いてあるので、ここで回さないと誰も回さない
+      - name: Agent tests
+        run: bun run test:agent
+
       - name: Install Playwright browser
         run: bunx playwright install --with-deps chromium
 
-      # 偽Mirakurun・偽通知先・偽ffmpeg は playwright.config.ts の webServer が
+      # 偽mirakc・偽通知先・偽ffmpeg は playwright.config.ts の webServer が
       # まとめて起動する
       - name: E2E tests
         run: bun run test:e2e

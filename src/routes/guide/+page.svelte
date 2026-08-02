@@ -6,13 +6,6 @@
 
     let { data, form } = $props();
 
-    // スキャンは数分かかる。進み具合はサーバから push される
-    liveUpdates(['scan']);
-    const scan = $derived(data.scan);
-
-    /** スキャンの窓。開いている間だけ条件を出す */
-    let scanning = $state(false);
-
     // 検索条件はURLに持たせる。そのままルールにできるようにするため
 
     /** クリックした番組。詳細を出してから予約するかどうか決める */
@@ -111,7 +104,7 @@
     <div class="flex flex-wrap items-center gap-2">
         <h1 class="text-2xl font-bold">番組表</h1>
         <!-- 番組表が古いことに気づくのはこの画面なので、いま何件あるかは出す。
-             Mirakurun 自体の状態は設定画面にまとめてある -->
+             mirakc 自体の状態は設定画面にまとめてある -->
         <div class="badge badge-lg badge-ghost" data-testid="counts">
             番組 {data.counts.programs} / 局 {data.counts.services}
         </div>
@@ -119,14 +112,6 @@
         <form method="POST" action="?/sync" use:submitting>
             <button class="btn btn-sm" data-testid="sync-button">EPGを今すぐ取得</button>
         </form>
-        <button class="btn btn-sm" onclick={() => (scanning = true)} data-testid="scan-open">
-            チャンネルスキャン
-        </button>
-        {#if scan.state === 'running'}
-            <span class="badge badge-warning badge-lg" data-testid="scan-running">
-                スキャン中 ({scan.found})
-            </span>
-        {/if}
         {#if form?.sync}
             <span class="text-sm" data-testid="sync-result">
                 局 {form.sync.services} / 番組 {form.sync.programs} / 新規予約 {form.sync.reserved}
@@ -292,88 +277,6 @@
                 </div>
             {/each}
         </div>
-    </div>
-{/if}
-
-{#if scanning}
-    <!--
-        走らせるのは Mirakurun 側。結果も Mirakurun が自分の channels.yml に
-        書き戻すので、denpa は開始を投げて進み具合を見るだけ
-    -->
-    <div class="modal modal-open" role="dialog" data-testid="scan-dialog">
-        <div class="modal-box max-w-2xl">
-            <h3 class="text-lg font-bold">チャンネルスキャン</h3>
-            <p class="text-base-content/60 mt-1 text-sm">
-                受信できるチャンネルを実際に選局して探します。<strong
-                    >数分かかり、その間は チューナーを全部使う</strong
-                >ので、録画の予定が無いときに実行してください。 結果は Mirakurun
-                の設定に保存され、終わると番組表も取り直します。
-            </p>
-
-            <form method="POST" action="?/scan" class="mt-4 flex flex-wrap items-end gap-3" use:submitting>
-                <label class="flex flex-col gap-1">
-                    <span class="text-sm font-medium">種別</span>
-                    <select name="type" class="select select-bordered" data-testid="scan-type">
-                        <option value="GR">地上波</option>
-                        <option value="BS">BS</option>
-                        <option value="CS">CS</option>
-                    </select>
-                </label>
-                <!-- 空なら Mirakurun の既定の範囲。狭めると速く終わる -->
-                <label class="flex flex-col gap-1">
-                    <span class="text-sm font-medium">最小ch</span>
-                    <input
-                        type="number"
-                        name="min"
-                        class="input input-bordered w-24"
-                        data-testid="scan-min"
-                    />
-                </label>
-                <label class="flex flex-col gap-1">
-                    <span class="text-sm font-medium">最大ch</span>
-                    <input
-                        type="number"
-                        name="max"
-                        class="input input-bordered w-24"
-                        data-testid="scan-max"
-                    />
-                </label>
-                <button class="btn btn-primary" disabled={scan.state === 'running'} data-testid="scan-start">
-                    {scan.state === 'running' ? '実行中…' : '開始する'}
-                </button>
-            </form>
-
-            {#if form?.message}
-                <div class="alert alert-error mt-4" data-testid="scan-error">{form.message}</div>
-            {/if}
-
-            {#if scan.state !== 'idle'}
-                <div class="mt-4" data-testid="scan-progress" data-state={scan.state}>
-                    <div class="flex flex-wrap items-center gap-2 text-sm">
-                        <span class="badge" data-testid="scan-state">
-                            {scan.state === 'running' ? '実行中' : scan.state === 'done' ? '完了' : '失敗'}
-                        </span>
-                        <span class="badge badge-ghost">{scan.type}</span>
-                        <span data-testid="scan-found">見つかったチャンネル {scan.found}</span>
-                    </div>
-                    {#if scan.error}
-                        <div class="alert alert-error mt-2" data-testid="scan-failed">{scan.error}</div>
-                    {/if}
-                    {#if scan.log.length > 0}
-                        <pre
-                            class="bg-base-200 mt-2 max-h-64 overflow-auto rounded p-2 font-mono text-xs whitespace-pre-wrap"
-                            data-testid="scan-log">{scan.log.join('\n')}</pre>
-                    {/if}
-                </div>
-            {/if}
-
-            <div class="modal-action">
-                <button class="btn" onclick={() => (scanning = false)} data-testid="scan-close">
-                    閉じる
-                </button>
-            </div>
-        </div>
-        <button class="modal-backdrop" onclick={() => (scanning = false)} aria-label="閉じる"></button>
     </div>
 {/if}
 

@@ -1,5 +1,5 @@
 /**
- * 偽 Mirakurun。開発とE2Eで実チューナー無しに全体を動かすために使う。
+ * 偽 mirakc。開発とE2Eで実チューナー無しに全体を動かすために使う。
  *
  * 番組は「現在時刻から SLOT_MS ごとの枠」を機械的に生成する。番組IDは枠番号から
  * 決めるので、同じ枠は何度取得しても同じIDになり、予約が別番組に化けない。
@@ -9,8 +9,8 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { type FakeService, SERVICES } from './services';
 
-const PORT = Number(process.env.FAKE_MIRAKURUN_PORT ?? 40772);
-/** 生TSの置き場。本物では denpa と同じものを Mirakurun 側にも見せてある */
+const PORT = Number(process.env.FAKE_MIRAKC_PORT ?? 40772);
+/** 生TSの置き場。本物では denpa と同じものを mirakc 側にも見せてある */
 const RECORDED_DIR = resolve(process.env.RECORDED_DIR ?? '/recorded');
 const SLOTS = Number(process.env.FAKE_SLOTS ?? 60);
 /** 番組表を丸1日ぶん埋めるための追加分。局ごとの尺に応じて増やす */
@@ -40,7 +40,7 @@ function programsFor(service: FakeService) {
             // 枠番号から決めるので取得のたびにIDが変わらない
             id: service.id * 100000 + (slot % 100000),
             eventId: slot % 65536,
-            // 本物の Mirakurun と同じく ARIB のサービスID を返す。
+            // 本物の mirakc と同じく ARIB のサービスID を返す。
             // ここに内部IDを返していたせいで、番組表が出ないバグを長らく見逃した
             serviceId: service.serviceId,
             networkId: service.networkId,
@@ -105,6 +105,88 @@ function unscramble(input: string, output: string): { ok: boolean; error: string
     return { ok: true, error: '' };
 }
 
+/**
+ * チューナー。既定は全部空きにしておく。塞がっていると予約が競合して、
+ * チューナーの見え方と関係ないテストまで落ちる
+ */
+const TUNERS = [
+    {
+        index: 0,
+        name: 'adapter0',
+        types: ['BS', 'CS'],
+        isAvailable: true,
+        isFault: false,
+        isUsing: false,
+        users: [],
+    },
+    {
+        index: 1,
+        name: 'adapter1',
+        types: ['GR'],
+        isAvailable: true,
+        isFault: false,
+        isUsing: false,
+        users: [],
+    },
+    {
+        index: 2,
+        name: 'adapter2',
+        types: ['BS', 'CS'],
+        isAvailable: true,
+        isFault: false,
+        isUsing: false,
+        users: [],
+    },
+    {
+        index: 3,
+        name: 'adapter3',
+        types: ['GR'],
+        isAvailable: true,
+        isFault: false,
+        isUsing: false,
+        users: [],
+    },
+];
+
+/** テストから切り替える。使用中と故障の見え方を確かめるため */
+let busyTuners = false;
+
+/** スキャンの状態。本物はチューナー側のエージェントが持っている */
+let scanState = {
+    state: 'idle',
+    phase: '',
+    log: [] as string[],
+    scanned: 0,
+    total: 0,
+    channels: 0,
+    error: null as string | null,
+    startedAt: null as number | null,
+    finishedAt: null as number | null,
+    mirakc: true,
+};
+
+/** 総当たりの進み方を真似る。1チャンネルずつ進んで、いくつか見つける */
+async function advanceScan(): Promise<void> {
+    for (let i = 0; i < scanState.total; i++) {
+        await Bun.sleep(120);
+        const found = i % 2 === 0;
+        scanState = {
+            ...scanState,
+            scanned: i + 1,
+            channels: scanState.channels + (found ? 1 : 0),
+            log: [...scanState.log, `T${20 + i}: ${found ? '2 サービス' : '受信できませんでした'}`],
+        };
+    }
+    scanState = {
+        ...scanState,
+        state: 'done',
+        phase: '完了',
+        finishedAt: Date.now(),
+        mirakc: true,
+        log: [...scanState.log, 'mirakc を起動しています...'],
+    };
+}
+
 /** テストから切り替える。カードが読めていない状態を作るため */
 let scrambled = process.env.FAKE_SCRAMBLED === '1';
 
@@ -131,6 +213,19 @@ function fakeStream(signal: AbortSignal): ReadableStream<Uint8Array> {
     });
 }
 
+const serviceOf = (service: FakeService) => ({
+    id: service.id,
+    serviceId: service.serviceId,
+    name: service.name,
+});
+
+const channelOf = (service: FakeService) => ({
+    type: service.type,
+    channel: service.channel,
+    name: service.channel,
+    services: [serviceOf(service)],
+});
+
 const json = (body: unknown) =>
     new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
 
@@ -140,6 +235,11 @@ Bun.serve({
     fetch(request) {
         const url = new URL(request.url);
 
+        // テスト用。チューナーが塞がっている状態に切り替える
+        if (url.pathname === '/__control/tuners' && request.method === 'POST') {
+            busyTuners = url.searchParams.get('busy') === '1';
+            return json({ busy: busyTuners });
+        }
         // テスト用。カードが読めていない状態(スクランブルされたまま)に切り替える
         if (url.pathname === '/__control/scrambled' && request.method === 'POST') {
             scrambled = new URL(request.url).searchParams.get('on') === '1';
@@ -147,9 +247,9 @@ Bun.serve({
         }
 
         /*
-         * スクランブル解除の受け口。本物では Mirakurun と同じコンテナに居る別プロセス
-         * (mirakurun/descrambler.mjs) で、B-CASカードを持っているのはそちら側。
-         * ここでは同じ口を偽 Mirakurun が兼ねる。
+         * スクランブル解除の受け口。本物では mirakc と同じコンテナに居る別プロセス
+         * (mirakc/descrambler.mjs) で、B-CASカードを持っているのはそちら側。
+         * ここでは同じ口を偽 mirakc が兼ねる。
          */
         if (url.pathname === '/denpa/card') {
             return json(
@@ -173,30 +273,31 @@ Bun.serve({
                 .json()
                 .then((body: { input: string; output: string }) => json(unscramble(body.input, body.output)));
         }
-        // チャンネルスキャン。本物は進み具合を改行区切りのテキストで流し続ける
-        if (url.pathname === '/api/config/channels/scan' && request.method === 'PUT') {
-            const type = url.searchParams.get('type') ?? 'GR';
-            const lines = [
-                `Scanning ${type} ...`,
-                `channel: \`${type}1\` found`,
-                'no signal',
-                `channel: \`${type}2\` found`,
-                'scan finished',
-            ];
-            return new Response(
-                new ReadableStream({
-                    async start(controller) {
-                        const encoder = new TextEncoder();
-                        for (const line of lines) {
-                            controller.enqueue(encoder.encode(`${line}\n`));
-                            await Bun.sleep(50);
-                        }
-                        controller.close();
-                    },
-                }),
-                { headers: { 'Content-Type': 'text/plain; charset=utf-8' } },
-            );
+        /*
+         * チャンネルスキャン。本物はチューナー側のエージェント (mirakc/agent.py) が
+         * 物理チャンネルを総当たりする。ここでは同じ形の状態を返すだけ
+         */
+        if (url.pathname === '/denpa/scan' && request.method === 'POST') {
+            return request.json().then((body: { types?: string[] }) => {
+                const types = body.types ?? ['GR'];
+                scanState = {
+                    state: 'running',
+                    phase: 'スキャン中',
+                    log: [`${types.join(', ')} を探しています...`],
+                    scanned: 0,
+                    total: types.length * 4,
+                    channels: 0,
+                    error: null,
+                    startedAt: Date.now(),
+                    finishedAt: null,
+                    mirakc: false,
+                };
+                void advanceScan();
+                return json({ started: true, message: 'チャンネルスキャンを始めました' });
+            });
         }
+        if (url.pathname === '/denpa/scan') return json(scanState);
+
         if (url.pathname === '/api/version') return json({ current: '3.9.0-fake', latest: '3.9.0-fake' });
         if (url.pathname === '/api/services') {
             return json(
@@ -212,13 +313,34 @@ Bun.serve({
             );
         }
         if (url.pathname === '/api/programs') return json(SERVICES.flatMap(programsFor));
+        if (url.pathname === '/api/channels') {
+            // 物理チャンネル単位。同じ ch に複数の局が相乗りしている
+            const channels = new Map<string, ReturnType<typeof channelOf>>();
+            for (const service of SERVICES) {
+                const key = `${service.type}:${service.channel}`;
+                const found = channels.get(key) ?? channelOf(service);
+                if (channels.has(key)) {
+                    found.services.push(serviceOf(service));
+                }
+                channels.set(key, found);
+            }
+            return json([...channels.values()]);
+        }
         if (url.pathname === '/api/tuners') {
-            return json([
-                { index: 0, name: 'adapter0', types: ['BS', 'CS'], isAvailable: true, isFault: false },
-                { index: 1, name: 'adapter1', types: ['GR'], isAvailable: true, isFault: false },
-                { index: 2, name: 'adapter2', types: ['BS', 'CS'], isAvailable: true, isFault: false },
-                { index: 3, name: 'adapter3', types: ['GR'], isAvailable: true, isFault: false },
-            ]);
+            return json(
+                TUNERS.map((tuner) => {
+                    if (!busyTuners) return tuner;
+                    if (tuner.index === 1) {
+                        return {
+                            ...tuner,
+                            isUsing: true,
+                            users: [{ id: 'denpa', priority: 2, agent: 'denpa' }],
+                        };
+                    }
+                    if (tuner.index === 3) return { ...tuner, isAvailable: false, isFault: true };
+                    return tuner;
+                }),
+            );
         }
 
         // 局ロゴ。中身は問われないので1x1のPNGを返す
@@ -250,4 +372,4 @@ Bun.serve({
     },
 });
 
-console.log(`fake mirakurun listening on :${PORT}`);
+console.log(`fake mirakc listening on :${PORT}`);

@@ -7,11 +7,12 @@
         "build": "bunx --bun vite build",
         "start": "bun ./build/index.js",
         "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-        "test": "bun run lint && bun run check && bun test src && playwright test",
+        "test": "bun run lint && bun run check && bun test src && bun run test:agent && playwright test",
         "test:unit": "bun test src",
         "test:e2e": "playwright test",
         "lint": "biome check . && prettier --check \"src/**/*.svelte\"",
-        "format": "biome check --write . && prettier --write \"src/**/*.svelte\""
+        "format": "biome check --write . && prettier --write \"src/**/*.svelte\"",
+        "test:agent": "python3 -m unittest discover -s mirakc -p 'test_*.py'"
     },
     "devDependencies": {
         "@biomejs/biome": "^2.5.6",

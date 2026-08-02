@@ -1,10 +1,10 @@
 import { error } from '@sveltejs/kit';
-import { fetchLogo } from '$lib/server/mirakurun';
+import { fetchLogo } from '$lib/server/mirakc';
 
 /**
  * 局ロゴの中継。
  *
- * Mirakurun を直接ブラウザから叩かせると、denpa と Mirakurun の両方を
+ * mirakc を直接ブラウザから叩かせると、denpa と mirakc の両方を
  * 外に出す必要が出てくるので、こちら経由で渡す。
  * ロゴは滅多に変わらないので長めにキャッシュさせる。
  */

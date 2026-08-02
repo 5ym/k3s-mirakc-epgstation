@@ -3,7 +3,7 @@ import { config } from './config';
 import { assign } from './conflict';
 import { database, now, queryOne } from './db';
 import { emit } from './events';
-import * as mirakurun from './mirakurun';
+import * as mirakc from './mirakc';
 import { activeRecordingIds, startRecording, stopRecording } from './recorder';
 
 interface Candidate extends Reservation {
@@ -12,15 +12,15 @@ interface Candidate extends Reservation {
 }
 
 /**
- * チャンネル種別ごとのチューナー本数。Mirakurun が落ちていて取れないときは
+ * チャンネル種別ごとのチューナー本数。mirakc が落ちていて取れないときは
  * 「制限なし」を返し、予約を勝手に conflict にしない(実際に録画が始まるときに
- * Mirakurun 側が弾くので、予約表を壊すより実行時に失敗させるほうが害が小さい)。
+ * mirakc 側が弾くので、予約表を壊すより実行時に失敗させるほうが害が小さい)。
  */
 export async function tunerCapacity(): Promise<Map<string, number>> {
     const capacity = new Map<string, number>();
-    let tuners: mirakurun.MirakurunTuner[];
+    let tuners: mirakc.MirakcTuner[];
     try {
-        tuners = await mirakurun.getTuners();
+        tuners = await mirakc.getTuners();
     } catch {
         return capacity;
     }

@@ -2,17 +2,17 @@
 
 EPG スタックの k3s マニフェストと設定ファイル。
 
-**Mirakurun + denpa(自前の録画/エンコード管理)** の2つだけです。メディアサーバは
+**mirakc + denpa(自前の録画/エンコード管理)** の2つだけです。メディアサーバは
 置きません。denpa がファイルをそのまま配り、再生は端末のプレイヤーに任せます。
 
 ```text
-チューナー ── Mirakurun ── denpa ── 録画(mkv) ─┬─→ VLC / mpv / Infuse (URLスキーム)
+チューナー ── mirakc ── denpa ── 録画(mkv) ─┬─→ VLC / mpv / Infuse (URLスキーム)
                                                └─→ Kodi (WebDAV)
 ```
 
 | コンポーネント | 役割 | URL |
 | --- | --- | --- |
-| Mirakurun | チューナー制御・EPG・TS配信 | `m.doany.io` |
+| mirakc | チューナー制御・EPG・TS配信 | `m.doany.io` |
 | denpa | 予約・録画・CM検出・エンコード・録画の配信 | `dp.doany.io` / `dp.home.arpa` |
 
 `dp.doany.io` は forward-auth を通します。`dp.home.arpa` は LAN 内(`10.10.0.0/16`)
@@ -29,29 +29,29 @@ EPGStation からは移行済みで、マニフェストもコードも消して
 
 ## 実装予定
 
-上から順に。最後の mirakc 移行は、その前の3つが揃わないと Mirakurun を外せません。
+上から順に。最後の mirakc 移行は、その前の3つが揃わないと mirakc を外せません。
 
 - **ライブ視聴と追っかけ録画**(下記)
-- **視聴のついでに局ロゴと番組表を貯める** — Mirakurun がやっている「ストリームを
+- **視聴のついでに局ロゴと番組表を貯める** — mirakc がやっている「ストリームを
   流している間に EIT と局ロゴを拾う」を denpa 側でも行う。ロゴは番組表に出すほか、
   CM検出を `join_logo_scp` に切り替えるときの元にもなる
 - **[mirakc](https://github.com/mirakc/mirakc) に乗り換える** — 上の3つが揃えば
-  Mirakurun に残る役割はチューナー制御とTS配信だけになる。同じAPIなので
-  `MIRAKURUN_URL` の向き先を変えるだけで済むはず
+  mirakc に残る役割はチューナー制御とTS配信だけになる。同じAPIなので
+  `MIRAKC_URL` の向き先を変えるだけで済むはず
 
 ## 開発環境
 
 **ホストに bun は入れません。全部コンテナの中で動かします。**
 
 ```sh
-docker compose up                           # 開発サーバ(:5173) + 偽Mirakurun(:40772)
+docker compose up                           # 開発サーバ(:5173) + 偽mirakc(:40772)
 docker compose run --rm unit                # 単体テスト
 docker compose run --rm e2e                 # E2E (Playwright)
 docker compose run --rm unit bun run lint   # リント + フォーマット確認
 docker compose run --rm unit bun run format # フォーマット適用
 ```
 
-実チューナーも ffmpeg も要りません。偽Mirakurun が番組表も録画ストリームも返し
+実チューナーも ffmpeg も要りません。偽mirakc が番組表も録画ストリームも返し
 (1番組60秒)、ffmpeg も既定では偽物(`tests/fake/ffmpeg.sh`)を使います。
 本物の ffmpeg はビルドに数十分かかるので、実エンコードを試したいときだけ
 `Dockerfile` の `runtime` ステージを使ってください。
@@ -220,7 +220,7 @@ denpa でチャンネルを選ぶ
 ```
 
 視聴中は常に生TSを書くので、途中から「やっぱり録る」と決めても頭から残せます。上限を
-決めて古い側から捨てます(生TSは約6.6GB/時)。同じチャンネルなので Mirakurun 側で
+決めて古い側から捨てます(生TSは約6.6GB/時)。同じチャンネルなので mirakc 側で
 チューナーは共有され、増えるのはディスク書き込みだけです。番組の頭までの余分は
 エンコード時に `-ss` で落とします。
 
@@ -253,9 +253,9 @@ Incoming Webhook の URL をそのまま入れられます)。
   自分の origin を突き合わせるが、adapter-node は `ORIGIN` も `PROTOCOL_HEADER` も
   無いと **https と決め打つ**ため、平文の `dp.home.arpa` からの POST が全部 403 に
   なる(画面上は「押しても何も起きない」に見える)
-- **チューナードライバ** — mirakurun は `privileged: true` かつ `/dev/bus`・`/dev/dvb` を
+- **チューナードライバ** — mirakc は `privileged: true` かつ `/dev/bus`・`/dev/dvb` を
   hostPath でマウントするので、ノード側にドライバが読み込まれていること
-- **GHCR** — `ghcr.io/danything/mirakurun` と `.../denpa` を pull できること
+- **GHCR** — `ghcr.io/danything/mirakc` と `.../denpa` を pull できること
 
 ## B-CASカードとデスクランブル
 
@@ -264,12 +264,12 @@ Incoming Webhook の URL をそのまま入れられます)。
 のに中身が全部スクランブル、という分かりにくい壊れ方をします。ログには音声フィルタの
 エラーしか出ないので原因が見えません。
 
-- `mirakurun/entrypoint.sh` が **`pcscd` を先に起動**します
+- `mirakc/entrypoint.sh` が **`pcscd` を先に起動**します
   (ベースイメージに入っているが起動されない)
 - **録画は止めません。** 電波は二度と戻ってこないので、スクランブルされたままでも
   録っておきます。denpa がエンコードの前に見て、掛かったままならそこで解きます
   (`src/lib/server/scramble.ts`)
-- **解くのは Mirakurun 側です** (`mirakurun/descrambler.mjs`)。カードは pcscd 経由でしか
+- **解くのは mirakc 側です** (`mirakc/descrambler.mjs`)。カードは pcscd 経由でしか
   読めず、その pcscd は向こうのコンテナにしか居ません。socket を共有して denpa から
   直接読ませていた頃は、カードを開けないままでした
 - やり取りするのは**パスだけ**です。生TSの置き場 (`denpa-recorded`) を両方のコンテナに
@@ -277,7 +277,7 @@ Incoming Webhook の URL をそのまま入れられます)。
   (**両方の Pod が同じノードに居ることが前提**です)
 - **生TSを残す設定のときは、残るのは解除済みのTSだけ**です。掛かったままのものを
   取っておいても、あとから解ける保証はありません
-- 状態は**設定画面の「つながり具合」**に出ます (Mirakurun のバージョンと
+- 状態は**設定画面の「つながり具合」**に出ます (mirakc のバージョンと
   カードリーダーが見えているか)
 
 ### 直らないとき
@@ -295,20 +295,20 @@ ccid_usb.c:899:WriteUSB() write failed (4/3): LIBUSB_ERROR_TIMEOUT
 `/sys/bus/usb/devices` から引く)。
 
 ```sh
-kubectl -n epg exec deploy/mirakurun -- pkill pcscd
+kubectl -n epg exec deploy/mirakc -- pkill pcscd
 echo 4-11 | sudo tee /sys/bus/usb/drivers/usb/unbind
 sleep 2
 echo 4-11 | sudo tee /sys/bus/usb/drivers/usb/bind
-kubectl -n epg exec deploy/mirakurun -- bash -c 'pcscd; sleep 2; pcsc_scan -r'
+kubectl -n epg exec deploy/mirakc -- bash -c 'pcscd; sleep 2; pcsc_scan -r'
 ```
 
 確認は次の3つ。リーダーが見えるか、カードが読めるか(B-CAS なら ATR が返る)、
 実際に復号できているか(0% なら正常、壊れていると 98〜99%)。
 
 ```sh
-kubectl -n epg exec deploy/mirakurun -- pcsc_scan -r
-kubectl -n epg exec deploy/mirakurun -- bash -c 'timeout 8 pcsc_scan -n | head -12'
-kubectl -n epg exec deploy/mirakurun -- bash -c '
+kubectl -n epg exec deploy/mirakc -- pcsc_scan -r
+kubectl -n epg exec deploy/mirakc -- bash -c 'timeout 8 pcsc_scan -n | head -12'
+kubectl -n epg exec deploy/mirakc -- bash -c '
   curl -s --max-time 10 "http://localhost:40772/api/services/<id>/stream?decode=1" > /tmp/s.ts
   perl -e "binmode STDIN; my (\$t,\$s)=(0,0);
     while (read(STDIN,\$b,188)==188) { last if substr(\$b,0,1) ne \"\x47\";
@@ -318,19 +318,19 @@ kubectl -n epg exec deploy/mirakurun -- bash -c '
 
 ## チャンネルスキャン
 
-**番組表の「チャンネルスキャン」から実行できます。** 走らせるのは Mirakurun で、denpa は
-開始を投げて進み具合を見せるだけです。結果は Mirakurun が自分の `channels.yml` に
+**番組表の「チャンネルスキャン」から実行できます。** 走らせるのは mirakc で、denpa は
+開始を投げて進み具合を見せるだけです。結果は mirakc が自分の `channels.yml` に
 書き戻し、終わると番組表も取り直します。
 
-- 種別 (GR/BS/CS) と、必要なら範囲を指定します。範囲を空にすると Mirakurun の既定
+- 種別 (GR/BS/CS) と、必要なら範囲を指定します。範囲を空にすると mirakc の既定
 - 既存の一覧を**更新する形**で走ります。スキャンできなかった局を消してしまわないため
 - recisdb はチャンネルの指定形式が違うので、名前の形も一緒に渡します
-  (GRなら `T{ch}`、CSなら `CS{ch}`。BS は Mirakurun の既定のまま)
+  (GRなら `T{ch}`、CSなら `CS{ch}`。BS は mirakc の既定のまま)
 - **数分かかり、その間はチューナーを全部使います。** 録画の予定が無いときに
 
-Mirakurun の設定 (`server.yml` / `tuners.yml` / `channels.yml`) は
-**PVC (`mirakurun-config`) に置いてあります。** イメージに焼くとスキャン結果が
-Pod の作り直しで消えるためです。`mirakurun/` にあるものは初回に写す雛形で、
+mirakc の設定 (`server.yml` / `tuners.yml` / `channels.yml`) は
+**PVC (`mirakc-config`) に置いてあります。** イメージに焼くとスキャン結果が
+Pod の作り直しで消えるためです。`mirakc/` にあるものは初回に写す雛形で、
 `/app-config` に無いものだけ entrypoint がコピーします。既にあるものは触りません。
 
 `channels.yml` の雛形は**空**です。初回起動後にスキャンしてください。

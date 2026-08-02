@@ -100,7 +100,7 @@ spec:
             # kubelet のヘルスチェックは x-forwarded-host を付けないため
             - name: PROTOCOL_HEADER
               value: x-forwarded-proto
-            - name: MIRAKURUN_URL
+            - name: MIRAKC_URL
               value: http://mirakc:40772
             # チューナーに触る仕事はすべて向こうに頼む。カードも tuner デバイスも
             # このコンテナからは開けない

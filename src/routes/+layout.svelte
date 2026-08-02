@@ -47,6 +47,7 @@
         { href: '/', label: '予約と録画' },
         { href: '/guide', label: '番組表' },
         { href: '/rules', label: 'ルール' },
+        { href: '/tuners', label: 'チューナー' },
         { href: '/settings', label: '設定' },
     ];
 

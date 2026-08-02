@@ -9,7 +9,7 @@ import { emit } from './events';
 import { moveFile } from './fsx';
 import { libraryPath, recordedPath } from './library';
 import { writeNfo, writeThumbnail } from './metadata';
-import { openServiceStream } from './mirakurun';
+import { openServiceStream } from './mirakc';
 import { chunks } from './stream';
 import { parseTitle } from './title';
 import { notify } from './webhook';
@@ -129,7 +129,7 @@ export async function startRecording(reservation: Reservation): Promise<Recordin
 /**
  * チューナーが空くのを少し待つ。
  *
- * 前の番組の録画が終わってから Mirakurun がチューナーを手放すまでには間があり、
+ * 前の番組の録画が終わってから mirakc がチューナーを手放すまでには間があり、
  * 直後に始まる番組がそこで弾かれることがある。番組の頭を数秒落としてでも
  * 録れたほうがいいので、すぐには諦めない。
  */
