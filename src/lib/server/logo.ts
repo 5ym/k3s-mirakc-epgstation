@@ -22,17 +22,49 @@ import { chunks } from './stream';
  */
 
 /**
- * 1チャンネルあたりの取得にかける上限。
+ * 地上波を1チャンネル開いておく上限。
  *
  * **ロゴは滅多に流れてこない。** 実機で測ると、地上波 (CDT) を100秒読んで
  * 0〜2セクション。分単位で待つ前提のものなので、数十秒開いて諦めていた頃は
  * 当たるほうが偶然でした。3分でも足りず、6分に伸ばしてあります。
- * 衛星のカルーセルは繰り返し流れてくるので、同じだけ開けば拾えます。
  */
 const SWEEP_TIMEOUT = 6 * 60_000;
+
+/**
+ * 衛星を1チャンネル開いておく上限。**地上波よりずっと長い。**
+ *
+ * 衛星のカルーセルは流しっぱなしではなく、**まとまって来て、あとは無音**。
+ * 実機の `BS15_0` を15分読み続けて測ると、13分間はロゴのESに1パケットも
+ * 流れず、14分目にまとめて来た (BS 2768・CS 8224 パケット)。
+ * 6分で諦めていた頃は、当たるかどうかが運任せでした。
+ *
+ * 当たりの中継はここまで待つ価値がある — 一度当たれば**BS と CS の全局**が
+ * まとめて手に入る。外れの中継は PAT を見た時点 (1秒ほど) で切り上げるので、
+ * この長さを待たされるのは当たりの1中継だけ。
+ */
+const SATELLITE_TIMEOUT = 20 * 60_000;
+
+/**
+ * 衛星で「もう来ない」とみなすまでの静けさ。
+ *
+ * **「この中継ぶんが揃ったら閉じる」では決められない。** カルーセルには BS と CS の
+ * 全局が載っているが、そのうち何局ぶんが載っているのかは開く前には分からない。
+ * 「衛星でまだ持っていない局が0になるまで」で待つと、放送側が流していない局
+ * (実機の CS の一部) が1つでもあると**毎回20分丸ごと待つ**ことになる。
+ *
+ * まとまって来て、あとは無音、という流れ方をするので、**最後に1局拾ってから
+ * これだけ何も来なければ切り上げる**。実測ではカルーセル1回ぶんが同じ1分の中に
+ * 収まっていたので、これだけ空けば取りこぼしはない。
+ */
+const SATELLITE_QUIET = 15_000;
 /**
  * 相乗りのときの上限。向こうの都合でいつ閉じてもおかしくないので短くする。
  * こちらはチューナーを増やさない (同じチャンネルなら mirakc が配っているものへ混ぜる)
+ *
+ * **実際に集めているのはほぼこちら。** 実機では、BS の38局ぶんが mirakc の
+ * 局調べに相乗りした一度で全部揃った (denpa が自分でチューナーを開いた記録は
+ * 残っていない)。mirakc は番組表と局を集めるために全チャンネルを定期的に
+ * 開くので、こちらはそこに乗っているだけで只で埋まる。
  */
 const RIDE_TIMEOUT = 3 * 60_000;
 /**
@@ -45,12 +77,25 @@ const RIDE_TIMEOUT = 3 * 60_000;
  */
 const SWEEP_PRIORITY = 0;
 /**
- * 画面から取りに行くときに同時に開く地上波の数。
+ * 画面から取りに行くときに同時に開く数。
  *
- * 地上波は中継ごとに乗っている局が違うので、1チャンネルずつ3分かけていると
+ * 地上波は中継ごとに乗っている局が違うので、1チャンネルずつ数分かけていると
  * 数十チャンネルぶんが何時間もかかる。全部は使わない (録画に残しておく)。
  */
-const GROUND_TUNERS = 2;
+const SWEEP_TUNERS = 2;
+
+/**
+ * ロゴのカルーセルが載っていない中継を、次に確かめ直すまでの間隔。
+ *
+ * **衛星のロゴは中継1つにしか載っていない。** 実機の BS はネットワーク4の
+ * 26中継のうち `BS15_0` だけで、そこにエンジニアリングサービス (929) が居る。
+ * **CS の12中継には1つも居ません** — CS のロゴもこの BS の中継から降ってきます
+ * (`CS_LOGO-05`)。つまり CS の物理チャンネルは開くだけ無駄。
+ *
+ * 覚えておかないと、見回りのたびに CS の12中継を開き直すことになる。
+ * 放送側の都合はいつか変わるので、間隔を空けて確かめ直す。
+ */
+const RELAY_RETRY = 7 * 24 * 60 * 60_000;
 
 function logoDir(): string {
     return join(config.dataDir, 'logos');
@@ -59,6 +104,61 @@ function logoDir(): string {
 /** サービスIDごとのファイル。mirakc の内部IDをそのまま名前にする */
 function logoPath(serviceId: number): string {
     return join(logoDir(), `${serviceId}.png`);
+}
+
+/**
+ * ロゴを流していないと分かった中継の控え。
+ *
+ * ロゴの置き場に置く。DBに列を足さないのは、ロゴまわりは**ファイルを正**と
+ * 決めてあるため (`reconcile`)。置き場ごと消えたら、また調べ直せばいい。
+ */
+function relayPath(): string {
+    return join(logoDir(), 'no-logo-relays.json');
+}
+
+/**
+ * 読んだ控えを持っておく。
+ *
+ * `missing()` は局の数だけ引くので (実機で124局)、そのたびにファイルを
+ * 読みに行くと、番組表を1回出すだけで何百回も開くことになる。
+ * 書くのはこの1プロセスだけなので、書いたときに入れ替えれば足りる
+ */
+let relays: Record<string, number> | null = null;
+
+function noLogoRelays(): Record<string, number> {
+    if (relays !== null) return relays;
+    try {
+        const parsed: unknown = JSON.parse(readFileSync(relayPath(), 'utf8'));
+        relays = typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, number>) : {};
+    } catch {
+        relays = {};
+    }
+    return relays;
+}
+
+/** その中継は今回は飛ばしてよいか。確かめてから RELAY_RETRY の間だけ */
+function skipRelay(channel: string): boolean {
+    const at = noLogoRelays()[channel];
+    return at !== undefined && Date.now() - at < RELAY_RETRY;
+}
+
+/** 「この中継にロゴは載っていない」/「載っていた」を書き留める */
+function markRelay(channel: string, hasLogo: boolean): void {
+    const known = noLogoRelays();
+    // 何も変わらないなら書きに行かない (1チャンクごとに呼ばれる道がある)
+    if (hasLogo === (known[channel] === undefined)) return;
+    const next = { ...known };
+    if (hasLogo) delete next[channel];
+    else next[channel] = Date.now();
+    relays = next;
+    try {
+        mkdirSync(logoDir(), { recursive: true });
+        const working = `${relayPath()}.writing`;
+        writeFileSync(working, JSON.stringify(next));
+        renameSync(working, relayPath());
+    } catch {
+        // 控えられなくても集めることはできる。次の機会に
+    }
 }
 
 export function readLogo(serviceId: number): Uint8Array | null {
@@ -255,15 +355,17 @@ export function missing(): Target[] {
     const targets = new Map<string, Target>();
     for (const service of currentServices()) {
         if (!needsLogo(service.id)) continue;
+        // ロゴを流していないと分かっている中継は、しばらく見に行かない
+        if (skipRelay(service.channel)) continue;
         const key = `${service.type}:${service.channel}`;
         if (targets.has(key)) continue;
         targets.set(key, { type: service.type, channel: service.channel, network_id: service.network_id });
     }
     /*
-     * 衛星の中継は絞らない。**ロゴが乗っているのは1つだけ**だが、どれなのかは
-     * 開いてみないと分からない (実機の BS はネットワーク4の26中継のうち
-     * `BS15_0` だけ)。外れは PAT を見た時点で1秒ほどで切り上げるので、
-     * 順に当たっても高くつかない (`collect`)
+     * 衛星の中継は前もって絞らない。**ロゴが乗っているのは1つだけ**だが、
+     * どれなのかは開いてみないと分からない (実機の BS はネットワーク4の26中継の
+     * うち `BS15_0` だけ)。外れは PAT を見た時点で1秒ほどで切り上げ、
+     * 書き留めて二度目からは飛ばす (`collect` / `markRelay`)
      */
     return [...targets.values()];
 }
@@ -271,6 +373,21 @@ export function missing(): Target[] {
 /** その物理チャンネルに相乗りしている局のうち、ロゴを取り直したい数 */
 function missingOn(channel: string): number {
     return currentServices().filter((s) => s.channel === channel && needsLogo(s.id)).length;
+}
+
+/**
+ * 衛星でまだ取れていない局の数。
+ *
+ * **衛星のカルーセルは開いた中継の局だけを運ぶのではない。** `BS15_0` の
+ * エンジニアリングサービスには `LOGO-05` と `CS_LOGO-05` が並んで流れていて、
+ * **BS と CS の全局ぶん**が入っている。
+ *
+ * 「開いた中継の局が揃ったら閉じる」で見ていた頃は、先に来る BS のぶんで
+ * 条件が満たされて即座に閉じてしまい、同じカルーセルの後ろに続く CS の
+ * ぶんを毎回取りこぼしていた (実機で CS が 0/54 のままだった)。
+ */
+function missingSatellites(): number {
+    return currentServices().filter((s) => s.type !== 'GR' && needsLogo(s.id)).length;
 }
 
 /**
@@ -296,7 +413,9 @@ const collecting = new Set<string>();
  * 揃うか時間切れになるまで読む。
  */
 async function collect(target: Target, timeout: number, signal?: AbortSignal): Promise<number> {
-    const before = missingOn(target.channel);
+    const before = target.type !== 'GR' ? missingSatellites() : missingOn(target.channel);
+    /** 当たり外れを書き留めたか。毎回書きに行かないための印 */
+    let marked = false;
     const controller = new AbortController();
     const stop = setTimeout(() => controller.abort(), timeout);
     collecting.add(target.channel);
@@ -313,17 +432,44 @@ async function collect(target: Target, timeout: number, signal?: AbortSignal): P
             SWEEP_PRIORITY,
         );
         const feed = watch(target.network_id);
+        const satellite = target.type !== 'GR';
+        let left = before;
+        let progressed = Date.now();
         for await (const chunk of chunks(stream)) {
             feed(chunk);
+            /*
+             * **衛星は「開いた中継の局」では見ない。** 同じカルーセルに BS と CS の
+             * 全局ぶんが入っているので、開いた中継のぶんで打ち切ると後ろに続く
+             * CS を毎回取りこぼす (実機で CS が 0/54 のままだった原因)
+             */
+            const now = satellite ? missingSatellites() : missingOn(target.channel);
+            if (now < left) {
+                left = now;
+                progressed = Date.now();
+            }
             // 全部揃ったら、これ以上開けておく理由がない
-            if (missingOn(target.channel) === 0) break;
+            if (now === 0) break;
+            /*
+             * 衛星は揃いきらないことがある (放送側が流していない局がある)。
+             * 拾えたあと何も来なくなったら、そこで切り上げる。これが無いと
+             * 取れない局が1つでもあるだけで毎回20分丸ごと待つことになる
+             */
+            if (satellite && left < before && Date.now() - progressed > SATELLITE_QUIET) break;
             /*
              * **衛星のロゴは1つの中継にしかない。** 実機の BS はネットワーク4に
              * 26の中継があるが、ロゴを運ぶエンジニアリングサービス (929) が
-             * 居るのは `BS15_0` (NHK BS と同じ中継) だけだった。外れの中継は
-             * PAT を見た時点で分かるので、10分も開けておかずに次へ行く
+             * 居るのは `BS15_0` (NHK BS と同じ中継) だけだった。CS の12中継には
+             * どこにも居ない (CS のロゴもこの BS の中継から流れてくる)。
+             * 外れの中継は PAT を見た時点で分かるので、待たずに次へ行く。
+             *
+             * 当たり外れは書き留めておく。そうしないと、二度と来ないものを
+             * 見回りのたびに開き直すことになる
              */
-            if (target.type !== 'GR' && feed.hasSatelliteLogo === false) break;
+            if (satellite && !marked && feed.hasSatelliteLogo !== null) {
+                marked = true;
+                markRelay(target.channel, feed.hasSatelliteLogo);
+                if (!feed.hasSatelliteLogo) break;
+            }
         }
     } catch {
         // 取れなければ次の機会に。チューナーが空いていないだけのことも多い
@@ -333,7 +479,8 @@ async function collect(target: Target, timeout: number, signal?: AbortSignal): P
         signal?.removeEventListener('abort', give);
         controller.abort();
     }
-    return before - missingOn(target.channel);
+    // 衛星は開いた中継以外の局も一緒に拾える。数えるほうも合わせる
+    return before - (target.type !== 'GR' ? missingSatellites() : missingOn(target.channel));
 }
 
 /**
@@ -434,26 +581,38 @@ function update(patch: Partial<SweepState>): void {
 }
 
 /**
- * 順番に開いて拾う。地上波だけ**同時に2つ**開く。
+ * 順番に開いて拾う。**同時に2つまで。**
  *
  * 地上波は中継ごとに乗っている局が違うので、1つずつ回っていると数が捌けない。
- * 衛星は1つの中継で網羅できる代わりに1回が長いので、並べても得が無い。
+ * 衛星は当たりの中継1つで全局ぶんが揃う代わりに1回が長い。
  *
  * 1つ取りかかるたびに空きを見る。録画が始まったのに開きに行くと、掴めないまま
- * 3分待つことを人数ぶん繰り返すことになる。
+ * 待つことを人数ぶん繰り返すことになる。
  */
 async function drain(queue: Target[], parallel: number, signal: AbortSignal): Promise<void> {
+    /** 空きが無くなった種別。**その種別だけ**諦める (衛星の満杯で地上波を止めない) */
+    const full = new Set<string>();
     const worker = async () => {
         for (;;) {
             const target = queue.shift();
             if (target === undefined || signal.aborted) return;
+            // 諦めたぶんも見終えたものとして数える。進み具合が総数に届かなくなる
+            if (full.has(target.type)) {
+                update({ done: state.done + 1 });
+                continue;
+            }
             if ((await freeTuners(target.type)) === 0) {
-                queue.length = 0;
-                update({ message: '空いているチューナーが無くなったので途中でやめました' });
-                return;
+                full.add(target.type);
+                update({
+                    done: state.done + 1,
+                    message: `${target.type} の空きチューナーが無くなったので、そのぶんはやめました`,
+                });
+                continue;
             }
             update({ channels: [...state.channels, target.channel] });
-            const got = await collect(target, SWEEP_TIMEOUT, signal);
+            // 衛星のカルーセルは十数分に一度しか来ない。当たりの中継はそれまで待つ
+            const limit = target.type === 'GR' ? SWEEP_TIMEOUT : SATELLITE_TIMEOUT;
+            const got = await collect(target, limit, signal);
             update({
                 channels: state.channels.filter((channel) => channel !== target.channel),
                 done: state.done + 1,
@@ -502,37 +661,34 @@ export async function ride(): Promise<number> {
 }
 
 /**
- * 定期取得。持っていない局のロゴを少しずつ取りに行く。
+ * 定期の見回り。**相乗りだけで、自分ではチューナーを開かない。**
  *
- * 分単位で開くので、**空いているチューナーがあるときだけ**にする。優先度は
- * いちばん下 (-2) なので、録画 (2) にも mirakc の番組表集め (-1) にも譲る。
- * 空きが無ければ次の機会に回す。
+ * mirakc は番組表と局を調べるために全チャンネルを定期的に開く。その選局へ
+ * 混ぜてもらえば只で読めるので、**実際に集まっているのはほぼこちら**だった。
+ * 実機で確かめると、BS の38局ぶんは mirakc の局調べに相乗りした一度で全部
+ * 揃っていて、denpa が自分でチューナーを開いて拾えた記録は残っていない。
  *
- * **衛星が埋まるのはこちらだけ。** 画面の「いま取りに行く」は地上波しか見ない
- * (BS/CS はロゴが滅多に流れてこないので、押した人を待たせるだけになる)。
+ * 自分でも開いていた頃は、10分ごとに1チャンネルを数分掴んでいた。相乗りで
+ * 埋まるのに録画とチューナーを取り合う理由がないので、定期のぶんはやめた。
+ * すぐ欲しいときは画面の「いま取りに行く」(`sweepNow`) がある。
  */
-export async function sweep(limit = 1): Promise<number> {
-    if (state.running) return 0;
+export async function sweep(): Promise<number> {
     // 立っているだけでファイルが無い局を先に拾い直す。そうしないと
     // 「もう持っている」とみなして永久に取りに行かない
     reconcile();
-    // 開いているチューナーがあるなら、まずそちらに乗る。只で読める
-    const ridden = await ride();
-
-    const targets = missing().slice(0, limit);
-    if (targets.length === 0 || (await freeTuners(targets[0].type)) === 0) return ridden;
-    await run(targets, 1, ridden);
-    return state.found;
+    return ride();
 }
 
 /**
  * 画面の「いま取りに行く」。残っているぶんを、チューナー2つで一気に取りに行く。
  *
- * 対象は定期取得と同じ (`missing`)。衛星は1ネットワークにつき1中継だけ。
+ * **衛星も混ぜる。** ロゴを運ぶ中継は1つだけで、当たれば BS と CS の全局ぶんが
+ * まとめて揃い、外れは PAT を見た時点 (1秒ほど) で次へ行く。当たり外れを
+ * 書き留めておくので、二度目からは当たりの中継しか開かない。
  */
-export async function sweepGround(): Promise<{ started: boolean; message: string }> {
+export async function sweepNow(): Promise<{ started: boolean; message: string }> {
     /*
-     * 定期取得が回っていても譲ってもらう。1チャンネルに6分開くので、
+     * 前の取得が回っていても譲ってもらう。1チャンネルに数分〜20分開くので、
      * 待たせると押した人の用が済まない。只で読める相乗り (ride) は
      * 別勘定なので、ここでは触らない
      */
@@ -546,17 +702,22 @@ export async function sweepGround(): Promise<{ started: boolean; message: string
         return { started: false, message: 'ロゴはもう全部持っています (取り直しも要りません)' };
     }
     /*
-     * 開ける本数だけ並べる。**種別まで見る。** 「1本でも空いていれば」で数えて
-     * いた頃は、地上波が1本しか空いていなくても2チャンネルを開きに行っていた
-     * (衛星用の空きは地上波の役に立たない)
+     * 空きは**種別ごとに数える。** 衛星用の空きは地上波の役に立たない。
+     * 「1本でも空いていれば」で数えていた頃は、地上波が1本しか空いていなくても
+     * 2チャンネルを開きに行っていた
      */
-    const free = await freeTuners(targets[0].type);
-    if (free === 0) {
+    const free = new Map<string, number>();
+    for (const type of new Set(targets.map((target) => target.type))) {
+        free.set(type, await freeTuners(type));
+    }
+    if ([...free.values()].every((count) => count === 0)) {
         return { started: false, message: '空いているチューナーがありません' };
     }
-    const parallel = Math.min(GROUND_TUNERS, free);
+    // 地上波を先に回す。中継ごとに違う局が乗っているので、数が捌けるのはこちら
+    const ordered = [...targets].sort((a, b) => Number(b.type === 'GR') - Number(a.type === 'GR'));
+    const parallel = Math.min(SWEEP_TUNERS, Math.max(...free.values()));
     // 終わるのは数分後。押した人を待たせず、進み具合は画面へ流す
-    void run(targets, parallel, 0);
+    void run(ordered, parallel, 0);
     return {
         started: true,
         message:
@@ -612,12 +773,18 @@ async function run(targets: Target[], parallel: number, found: number): Promise<
  * 何局ぶん持っているか。「本当に取れているのか」を画面で確かめられるように。
  *
  * `pending` はこれから取りに行く物理チャンネルの数。0 なら押す口を出さない。
+ *
+ * `unavailable` は**放送側が流していないので取れない**局の数。CS がこれで、
+ * 12中継のどれにもロゴのカルーセルが無い。数えておかないと「54局ぶん足りない」
+ * という表示が永久に残り、こちらの不具合と見分けが付かない
  */
-export function stats(): { have: number; total: number; pending: number } {
+export function stats(): { have: number; total: number; pending: number; unavailable: number } {
     const services = currentServices();
+    const has = (service: { id: number }) => existsSync(logoPath(service.id));
     return {
-        have: services.filter((service) => existsSync(logoPath(service.id))).length,
+        have: services.filter(has).length,
         total: services.length,
         pending: missing().length,
+        unavailable: services.filter((service) => !has(service) && skipRelay(service.channel)).length,
     };
 }

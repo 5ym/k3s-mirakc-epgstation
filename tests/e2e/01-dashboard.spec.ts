@@ -12,9 +12,15 @@ test.describe('ダッシュボードと画面遷移', () => {
     test('EPG取得後に局・番組が反映され、全ページを開ける', async ({ page, request }) => {
         await syncEpg(request);
 
-        // 番組数は番組表に出す。古いことに気づくのはこの画面なので
+        /*
+         * 番組数は番組表に出す。古いことに気づくのはこの画面なので。
+         *
+         * 局は4つ (データ放送の局は録画対象にならないので入らない)。
+         * うち1つは**番組表がまだ空**の局 — mirakc が集め終えていない局は
+         * 本物でも普通にあるので、それでも画面が出ることを一緒に見ておく
+         */
         await goto(page, '/guide');
-        await expect(page.getByTestId('counts')).toContainText('局 3');
+        await expect(page.getByTestId('counts')).toContainText('局 4');
 
         for (const [name, heading] of [
             ['nav-guide', '番組表'],

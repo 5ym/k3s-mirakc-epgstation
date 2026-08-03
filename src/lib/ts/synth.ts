@@ -131,14 +131,38 @@ function dsmccSection(tableId: number, message: number[]): Uint8Array {
     return withCrc([tableId, 0x00, 0x00, ...be(0), 0xc1, 0x00, 0x00, ...message]);
 }
 
-/** DII。「このモジュールは何バイトで、名前は何か」を伝える */
+export interface DiiModuleSpec {
+    moduleId: number;
+    moduleSize: number;
+    moduleVersion: number;
+    name: string;
+}
+
+/**
+ * DII。「このモジュールは何バイトで、名前は何か」を伝える。
+ *
+ * **複数のモジュールを載せられる。** 本物の BS はここに `LOGO-05` と
+ * `CS_LOGO-05` を並べて流していて (実機の `BS15_0` で確認)、1つしか
+ * 載せられない作りでは CS を取りこぼす道を試せない。
+ */
 export function diiSection(
     downloadId: number,
     blockSize: number,
-    module: { moduleId: number; moduleSize: number; moduleVersion: number; name: string },
+    modules: DiiModuleSpec | DiiModuleSpec[],
 ): Uint8Array {
-    const name = [...new TextEncoder().encode(module.name)];
-    const info = [0x02, name.length, ...name];
+    const list = Array.isArray(modules) ? modules : [modules];
+    const entries = list.flatMap((module) => {
+        const name = [...new TextEncoder().encode(module.name)];
+        const info = [0x02, name.length, ...name];
+        return [
+            ...be(module.moduleId),
+            ...be(module.moduleSize >> 16),
+            ...be(module.moduleSize & 0xffff),
+            module.moduleVersion,
+            info.length,
+            ...info,
+        ];
+    });
     const rest = [
         ...be(downloadId >> 16),
         ...be(downloadId & 0xffff),
@@ -154,13 +178,8 @@ export function diiSection(
         0,
         0, // tCDownloadScenario
         ...be(0), // compatibilityDescriptor: 長さ0
-        ...be(1), // numberOfModules
-        ...be(module.moduleId),
-        ...be(module.moduleSize >> 16),
-        ...be(module.moduleSize & 0xffff),
-        module.moduleVersion,
-        info.length,
-        ...info,
+        ...be(list.length), // numberOfModules
+        ...entries,
         ...be(0), // privateDataLength
     ];
     return dsmccSection(0x3b, [

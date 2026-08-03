@@ -249,6 +249,28 @@ interface Download {
 }
 
 /**
+ * 組み立て中のモジュールの見分け。
+ *
+ * **downloadId だけでは足りない。** 1つのカルーセルに `LOGO-05` と
+ * `CS_LOGO-05` が両方流れてくることがあり (実機の BS15_0 がそう)、
+ * downloadId で1つだけ持っていた頃は先に来たほうしか組み立てられず、
+ * CS のロゴが永久に揃わなかった。
+ */
+function downloadKey(downloadId: number, moduleId: number): string {
+    return `${downloadId}:${moduleId}`;
+}
+
+/**
+ * 揃ったロゴの見分け。
+ *
+ * `logo_id` は9ビットで、**BS と CS で番号が別々に振られている**。
+ * logo_id だけを鍵にしていると、同じ番号の BS と CS のロゴが上書きし合う。
+ */
+function logoKey(logo: ModuleLogo): string {
+    return `${logo.logoType}:${logo.logoId}:${logo.services[0]?.networkId ?? 0}`;
+}
+
+/**
  * 衛星のロゴを拾い集める。
  *
  * PAT → PMT → カルーセル、と辿る必要があるので、拾う PID が動く。
@@ -261,10 +283,10 @@ export class DsmccLogoCollector {
     /** カルーセルが流れている ES。PMT を読んでから足す */
     private readonly carousels = new Map<number, SectionAssembler>();
 
-    /** downloadId ごとの組み立て中モジュール */
-    private readonly downloads = new Map<number, Download>();
-    /** 揃ったロゴ。logo_id ごと */
-    private readonly logos = new Map<number, ModuleLogo>();
+    /** 組み立て中のモジュール (downloadId + moduleId ごと) */
+    private readonly downloads = new Map<string, Download>();
+    /** 揃ったロゴ */
+    private readonly logos = new Map<string, ModuleLogo>();
     /** PAT を読んだか。読むまでは「この中継にロゴがあるか」を判断できない */
     private sawPat = false;
     private ess = false;
@@ -295,10 +317,19 @@ export class DsmccLogoCollector {
     private onSection(section: Uint8Array): void {
         if (section[0] === TABLE_DII) {
             const dii = parseDii(section);
-            if (dii === null || this.downloads.has(dii.downloadId)) return;
+            if (dii === null) return;
+            /*
+             * **合致するモジュールは全部拾う。** 1つのカルーセルに `LOGO-05` と
+             * `CS_LOGO-05` が並んで流れてくる (実機の BS15_0)。最初の1つで
+             * 打ち切っていた頃は、CS のロゴが永久に揃わなかった
+             */
             for (const module of dii.modules) {
                 if (module.name === null || !LOGO_MODULE_NAMES.has(module.name)) continue;
-                this.downloads.set(dii.downloadId, {
+                const key = downloadKey(dii.downloadId, module.moduleId);
+                const building = this.downloads.get(key);
+                // 組み立て中のものを作り直さない (受け取ったブロックが消える)
+                if (building !== undefined && building.moduleVersion === module.moduleVersion) continue;
+                this.downloads.set(key, {
                     moduleId: module.moduleId,
                     moduleVersion: module.moduleVersion,
                     blockSize: dii.blockSize,
@@ -306,18 +337,18 @@ export class DsmccLogoCollector {
                     blocks: new Set(),
                     total: Math.ceil(module.moduleSize / dii.blockSize),
                 });
-                break;
             }
             return;
         }
 
         const ddb = parseDdb(section);
         if (ddb === null) return;
-        const download = this.downloads.get(ddb.downloadId);
-        if (download === undefined || download.moduleId !== ddb.moduleId) return;
+        const key = downloadKey(ddb.downloadId, ddb.moduleId);
+        const download = this.downloads.get(key);
+        if (download === undefined) return;
         // 版が変わったら組み立て直し。混ぜると壊れた PNG ができる
         if (download.moduleVersion !== ddb.moduleVersion) {
-            this.downloads.delete(ddb.downloadId);
+            this.downloads.delete(key);
             return;
         }
         const at = download.blockSize * ddb.blockNumber;
@@ -327,9 +358,9 @@ export class DsmccLogoCollector {
         if (download.blocks.size < download.total) return;
 
         // 揃った。次の版が来るまで組み立て直さない
-        this.downloads.delete(ddb.downloadId);
+        this.downloads.delete(key);
         for (const logo of parseLogoModule(download.data)) {
-            if (logo.data.length > 0) this.logos.set(logo.logoId, logo);
+            if (logo.data.length > 0) this.logos.set(logoKey(logo), logo);
         }
     }
 

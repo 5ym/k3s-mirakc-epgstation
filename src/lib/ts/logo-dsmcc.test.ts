@@ -131,6 +131,51 @@ describe('DsmccLogoCollector', () => {
         for (const packet of packets(data)) collector.feed(packet);
         expect(collector.collected()[0]?.services).toEqual([{ networkId: 7, serviceId: 330 }]);
     });
+
+    /**
+     * **CS のロゴは BS の中継から流れてくる。**
+     *
+     * 実機の `BS15_0` を15分読み続けると、エンジニアリングサービスに
+     * `LOGO-00`〜`LOGO-05` と `CS_LOGO-00`〜`CS_LOGO-05` が並んで来ていた
+     * (CS の12中継にはエンジニアリングサービスが1つも居ない)。
+     *
+     * DII のモジュールを1つ見つけた時点で打ち切っていた頃は、先に並んでいる
+     * BS のぶんしか組み立てず、CS が永久に揃わなかった。
+     */
+    test('1つのカルーセルに並んだ BS と CS のモジュールを両方組み立てる', () => {
+        const collector = new DsmccLogoCollector();
+        const bs = logoModule(0x05, [{ logoId: 0x0011, services: [[4, 211]], data: PNG }]);
+        // logo_id は BS と CS で別々に振られていて、同じ番号が普通に出てくる
+        const cs = logoModule(0x05, [{ logoId: 0x0011, services: [[7, 330]], data: PNG }]);
+        const CS_MODULE_ID = MODULE_ID + 1;
+        const data = stream(
+            packetize(0x0000, patSection([[ESS, PMT_PID]])),
+            packetize(PMT_PID, pmtSection(ESS, ES_PID, 0x79)),
+            packetize(
+                ES_PID,
+                diiSection(DOWNLOAD_ID, 4066, [
+                    { moduleId: MODULE_ID, moduleSize: bs.length, moduleVersion: 1, name: 'LOGO-05' },
+                    {
+                        moduleId: CS_MODULE_ID,
+                        moduleSize: cs.length,
+                        moduleVersion: 1,
+                        name: 'CS_LOGO-05',
+                    },
+                ]),
+            ),
+            packetize(ES_PID, ddbSection(DOWNLOAD_ID, MODULE_ID, 1, 0, bs)),
+            packetize(ES_PID, ddbSection(DOWNLOAD_ID, CS_MODULE_ID, 1, 0, cs)),
+        );
+        for (const packet of packets(data)) collector.feed(packet);
+
+        // 同じ logo_id でも上書きし合わないこと
+        const found = collector.collected();
+        expect(found).toHaveLength(2);
+        expect(found.flatMap((logo) => logo.services)).toEqual([
+            { networkId: 4, serviceId: 211 },
+            { networkId: 7, serviceId: 330 },
+        ]);
+    });
 });
 
 describe('LogoCollector (衛星)', () => {

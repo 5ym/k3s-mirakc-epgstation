@@ -14,6 +14,22 @@ export interface FakeService {
     slotMs: number;
     /** ARIB のサービス種別。1 がデジタルTV、192 はデータ/ワンセグ */
     serviceType: number;
+    /**
+     * この中継にロゴのデータカルーセルが載っているか (衛星だけ)。
+     *
+     * **本物は1つの中継にしか載っていない。** 実機の BS はネットワーク4の
+     * 26中継のうち `BS15_0` だけで、CS は12中継のどれにも無かった。
+     * 全部の中継に載せてしまうと、外れを見切って次へ行く道が試されない
+     */
+    carousel?: boolean;
+    /**
+     * 番組表を出さない局。
+     *
+     * ロゴの中継まわりを見るためだけに置いてある局は、番組まで生やすと
+     * 他のテストが数えている番組の本数がずれる。**mirakc がまだその局の
+     * 番組表を集めていない状態**は本物でも普通に起きるので、無理は無い
+     */
+    noPrograms?: boolean;
 }
 
 export const SERVICES: FakeService[] = [
@@ -58,6 +74,23 @@ export const SERVICES: FakeService[] = [
         channel: 'BS11_0',
         slotMs: 5_000,
         serviceType: 1,
+        carousel: true,
+    },
+    /*
+     * ロゴの載っていない中継。**実機ではこちらが多数派。**
+     * BS は26中継のうち25、CS は12中継すべてがこれで、開いても永久に来ない。
+     * 見切って次へ行けないと、10分ごとに何十分もチューナーを塞ぐことになる
+     */
+    {
+        id: 400171,
+        serviceId: 171,
+        networkId: 4,
+        name: 'ＢＳテレ東',
+        type: 'BS',
+        channel: 'BS03_0',
+        slotMs: 30 * 60_000,
+        serviceType: 1,
+        noPrograms: true,
     },
 ];
 
@@ -65,3 +98,4 @@ export const MX = SERVICES[0];
 export const FUJI = SERVICES[1];
 export const DATA = SERVICES[2];
 export const BS11 = SERVICES[3];
+export const BS_NO_LOGO = SERVICES[4];

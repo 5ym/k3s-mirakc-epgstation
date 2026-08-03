@@ -53,8 +53,14 @@ const TITLES = [
 
 function programsFor(service: FakeService) {
     const slotMs = service.slotMs;
-    // 番組表(4時〜翌4時)が埋まるだけの本数を出す。短い尺の局は本数で稼ぐと多すぎるので上限を切る
-    const count = Math.max(SLOTS, Math.min(600, Math.ceil(DAY / slotMs)));
+    /*
+     * 番組表(4時〜翌4時)が埋まるだけの本数を出す。短い尺の局は本数で稼ぐと多すぎるので上限を切る。
+     *
+     * 番組を出さない局もある (`noPrograms`)。**mirakc がまだその局の番組表を
+     * 集めていない状態**は本物でも普通に起きる。ロゴの中継まわりを見るためだけに
+     * 置いてある局にまで番組を生やすと、他のテストが数えている本数がずれる
+     */
+    const count = service.noPrograms === true ? 0 : Math.max(SLOTS, Math.min(600, Math.ceil(DAY / slotMs)));
     // 作れる本数で覆える幅。尺が短い局は本数の上限で頭打ちになる
     const span = Math.min(DAY, count * slotMs);
     // 少し過去から始める。全部を過去にすると予約できる番組が1つも無くなる
@@ -335,11 +341,23 @@ function logoPackets(service: FakeService): Uint8Array {
  * ここでも同じようにしておかないと、テストだけ通って現物では永久に集まらない。
  */
 function fakeStream(signal: AbortSignal, services: FakeService[] = []): ReadableStream<Uint8Array> {
-    // 地上波は CDT、衛星はカルーセル。本物と同じ分かれ方にしておく
+    /*
+     * 地上波は CDT、衛星はカルーセル。本物と同じ分かれ方にしておく。
+     *
+     * **カルーセルが載っているのは1中継だけ。** 載っていない中継でも PAT は
+     * 流れてくる (エンジニアリングサービスが居ないだけ) ので、そこまで真似る。
+     * PAT ごと出さないでいると、denpa は「まだ分からない」まま待ち続けて
+     * 見切れない
+     */
     const satellite = services.filter((service) => service.type !== 'GR');
+    const carousel = satellite.filter((service) => service.carousel === true);
     const logo = Uint8Array.from([
         ...services.filter((service) => service.type === 'GR').flatMap((s) => [...logoPackets(s)]),
-        ...(satellite.length > 0 ? [...carouselPackets(satellite)] : []),
+        ...(carousel.length > 0
+            ? [...carouselPackets(carousel)]
+            : satellite.length > 0
+              ? [...packetize(0x0000, patSection(satellite.map((s) => [s.serviceId, 0x1f0])))]
+              : []),
     ]);
     const chunk = packets(20, scrambled);
     return new ReadableStream({

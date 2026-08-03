@@ -1,6 +1,6 @@
 import { fail } from '@sveltejs/kit';
 import { queryAll, queryOne } from '$lib/server/db';
-import { stats as logoStats, sweepGround, sweepState } from '$lib/server/logo';
+import { stats as logoStats, sweepNow, sweepState } from '$lib/server/logo';
 import {
     getChannels,
     getEpgProgress,
@@ -151,17 +151,17 @@ export const actions = {
     },
 
     /**
-     * 局ロゴを取りに行く。**地上波だけ、チューナー2つで。**
+     * 局ロゴを取りに行く。**チューナー2つで、衛星も混ぜて。**
      *
      * ロゴは放送波に数十秒〜数分に一度しか流れてこないので、押してもその場では
      * 出ない。どこまで進んだかを画面に流すので、押した人は待たなくていい。
      *
-     * 衛星を混ぜないのは、BS/CS のロゴが地上波よりさらに来ないため。1チャンネルに
-     * 10分開いて何も来ないのが普通で、押した人を待たせるだけになる。そちらは
-     * 10分ごとの定期取得に任せる (1つの中継で網羅できるので、いつかは埋まる)
+     * 衛星も対象にする。ロゴを運ぶ中継は1つだけで、当たれば数十秒で全局ぶんが
+     * 揃い、外れは PAT を見た時点 (1秒ほど) で次へ行くので、待たせる時間は
+     * 地上波と変わらない。当たり外れは覚えるので、二度目からは当たりだけを開く
      */
     logoSweep: async () => {
-        const result = await sweepGround();
+        const result = await sweepNow();
         if (!result.started) return fail(409, { message: result.message });
         return { success: true, scan: result.message };
     },

@@ -1,5 +1,5 @@
 import { rmSync } from 'node:fs';
-import { BS11, FUJI, MX } from '../fake/services';
+import { BS_NO_LOGO, BS11, FUJI, MX } from '../fake/services';
 import { expect, goto, syncEpg, test } from './helpers';
 
 /**
@@ -15,9 +15,8 @@ import { expect, goto, syncEpg, test } from './helpers';
  */
 test.describe('局ロゴ', () => {
     /**
-     * 画面から取りに行けるのは**地上波だけ**。BS/CS はロゴが地上波よりさらに
-     * 流れてこないので、押した人を待たせるだけになる (10分ごとの定期取得に任せる)。
-     * 地上波は中継ごとに乗っている局が違うので、チューナー2つで並べて回る。
+     * 画面から取りに行くと、地上波も衛星もまとめて回る。地上波は中継ごとに
+     * 乗っている局が違うので、チューナー2つで並べて回る。
      */
     test('地上波を2チャンネル並べて拾い、番組表に出る', async ({ page, request, stack }) => {
         test.setTimeout(120_000);
@@ -63,9 +62,17 @@ test.describe('局ロゴ', () => {
             }).toPass({ timeout: 60_000 });
         }
 
-        // 見終えて、結果が残っていること
-        await goto(page, '/tuners');
-        await expect(page.getByTestId('logo-sweep-done')).toContainText('拾いました');
+        /*
+         * 見終えて、結果が残っていること。
+         *
+         * 地上波が揃ってもまだ終わりではない。同じ一回で衛星の中継も回っていて、
+         * そちらは**最後に拾ってからしばらく待って**から切り上げる (カルーセルは
+         * まとまって来るので、来なくなったことが分かるまで開けておく)
+         */
+        await expect(async () => {
+            await goto(page, '/tuners');
+            await expect(page.getByTestId('logo-sweep-done')).toContainText('拾いました');
+        }).toPass({ timeout: 60_000 });
 
         // 何局ぶん持っているかもここに出す。番組表にロゴが出ないとき、
         // まだ拾えていないのか出し方が悪いのかを見分けるため
@@ -115,5 +122,43 @@ test.describe('衛星の局ロゴ', () => {
 
         await goto(page, '/guide?type=BS');
         await expect(page.locator(`img[src="/api/services/${BS11.id}/logo"]`).first()).toBeVisible();
+    });
+
+    /**
+     * ロゴを流していない中継を**見切ること**。
+     *
+     * 実機の CS は12中継のどれにもロゴのカルーセルが無く、BS も26中継のうち
+     * 25は外れだった。見切れないと、その局はいつまでも「まだ取れていない」
+     * ままになり、取りに行く口が消えず、見回りのたびに開き直すことになる。
+     *
+     * PAT にエンジニアリングサービス (929) が居ないことで分かるので、
+     * 数秒で次へ行けるはず。
+     */
+    test('ロゴを流していない中継は見切って、取れない局として数える', async ({ page, request, stack }) => {
+        test.setTimeout(120_000);
+        await syncEpg(request);
+
+        rmSync(`${stack.root}/logos/${BS_NO_LOGO.id}.png`, { force: true });
+
+        await goto(page, '/tuners');
+        // 既に見切ったあとなら口は出ていない。出ていれば押して確かめる
+        const sweep = page.getByTestId('logo-sweep');
+        if ((await sweep.count()) > 0) await sweep.click();
+
+        /*
+         * 取りに行くところが無くなる = 外れの中継を覚えた、ということ。
+         * 覚えられていないと `missing()` に残り続けて口が消えない
+         */
+        await expect(async () => {
+            await goto(page, '/tuners');
+            await expect(page.getByTestId('logo-sweep')).toHaveCount(0);
+        }).toPass({ timeout: 90_000 });
+
+        // 取れない局は取れないと書く。黙って足りないままだと不具合と区別が付かない
+        await expect(page.getByTestId('status-logos')).toContainText('局');
+        await expect(page.locator('[data-testid="status-card"]')).toContainText(
+            '放送側がロゴを流していないので取れません',
+        );
+        expect((await request.get(`/api/services/${BS_NO_LOGO.id}/logo`)).status()).toBe(404);
     });
 });

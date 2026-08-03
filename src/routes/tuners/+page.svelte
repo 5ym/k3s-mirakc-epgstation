@@ -1,6 +1,6 @@
 <script lang="ts">
     import { submitting } from '$lib/actions';
-    import { liveUpdates } from '$lib/live-updates.svelte';
+    import { held, liveUpdates } from '$lib/live-updates.svelte';
 
     let { data, form } = $props();
 
@@ -38,6 +38,19 @@
      * 揃うまで待ってから描く (バラバラに出ると列が入れ替わって見える)
      */
     const coverage = $derived(Promise.all([data.channels, data.mirakcServices, data.epg]));
+
+    /*
+     * **読み直しの間も前の中身を出したままにする。**
+     *
+     * 知らせが来るたびに読み直しているが、相手待ちのものは promise のまま
+     * 渡ってくるので、`{#await}` に直に食わせると読み直すたびに待ち状態へ戻り、
+     * 表がいったん消えてから同じものが描き直されていた (目に見えてちらつく)。
+     * 中身を持っておけば、実際に変わった行だけが変わる
+     */
+    const shownCoverage = held(() => coverage);
+    const shownTuners = held(() => data.tuners);
+    const shownMirakc = held(() => data.mirakc);
+    const shownCard = held(() => data.card);
 
     /**
      * 局名は取り込み済みのものがあればそちらを出す。
@@ -108,9 +121,10 @@
                     が1局ずつ選局して調べながら数十分かけて埋まっていきます。 揃うたびに denpa
                     へ知らせが来るので、この画面は開いたままで構いません。
                 </p>
-                {#await coverage}
+                {#if shownCoverage.value === undefined}
                     <p class="text-base-content/60 text-sm">確認中…</p>
-                {:then [channels, mirakcServices, epg]}
+                {:else}
+                    {@const [channels, mirakcServices, epg] = shownCoverage.value}
                     {#if channels.length === 0}
                         <p class="text-base-content/60 text-sm" data-testid="channel-empty">
                             まだ1つもありません。チャンネルスキャンを実行してください。
@@ -205,7 +219,7 @@
                             </table>
                         </div>
                     {/if}
-                {/await}
+                {/if}
             </div>
         </section>
 
@@ -309,9 +323,10 @@
                 <dl class="space-y-3">
                     <div class="flex flex-wrap items-center gap-2">
                         <dt class="w-28 text-sm font-medium">mirakc</dt>
-                        {#await data.mirakc}
+                        {#if shownMirakc.value === undefined}
                             <dd class="badge badge-ghost" data-testid="status-mirakc">確認中</dd>
-                        {:then mirakc}
+                        {:else}
+                            {@const mirakc = shownMirakc.value}
                             <dd
                                 class="badge {mirakc.ok ? 'badge-success' : 'badge-error'}"
                                 data-testid="status-mirakc"
@@ -324,7 +339,7 @@
                                     {scan.state === 'running' ? 'スキャン中のため止めています' : mirakc.error}
                                 </dd>
                             {/if}
-                        {/await}
+                        {/if}
                     </div>
                     <!--
                         局ロゴ。mirakc は集めないので denpa が放送波から拾っている。
@@ -333,8 +348,9 @@
                     -->
                     <div class="flex flex-wrap items-center gap-2">
                         <dt class="w-28 text-sm font-medium">局ロゴ</dt>
+                        <!-- 取れないぶんを除いて揃っていれば「揃った」でよい -->
                         <dd
-                            class="badge {data.logos.have === data.logos.total
+                            class="badge {data.logos.have + data.logos.unavailable >= data.logos.total
                                 ? 'badge-success'
                                 : 'badge-ghost'}"
                             data-testid="status-logos"
@@ -346,7 +362,6 @@
                             「もう全部持っています」と断るだけになる。
                             **走っている最中でも押せる** — 押されたほうが譲る作りなので、
                             使えなくすると「BSを取っている間ずっと押せない」に逆戻りする
-                            (いまは地上波しか取りに行かないが、押せない理由にはならない)
                         -->
                         {#if data.logos.pending > 0}
                             <dd>
@@ -358,11 +373,23 @@
                             </dd>
                         {/if}
                         <dd class="text-base-content/60 w-full text-xs">
-                            ロゴが放送波に流れてくるのは数十秒〜数分に一度です。10分ごとに少しずつ拾い、
-                            一度取れたものも1週間経ったら取り直します。
-                            <strong>集められるのは地上波だけです</strong>
-                            — 衛星 (BS/CS) はロゴを CDT に載せず DSM-CC で送るので、開いても来ません (Mirakurun
-                            も BS は別扱いにしています)。
+                            ロゴが放送波に流れてくるのは数十秒〜数分に一度、
+                            <strong>衛星は十数分に一度</strong>です。普段は
+                            <strong>mirakc が番組表を集めるための選局に相乗りして</strong>拾うので、 denpa
+                            がチューナーを掴むことはありません。一度取れたものも1週間経ったら取り直します。
+                            「今すぐ取りに行く」を押したときは衛星も回りますが、ロゴを積んでいる中継は1つだけなので、
+                            そこだけ最大20分開きます (他の中継は数秒で見切ります)。
+                            {#if data.logos.unavailable > 0}
+                                <!--
+                                    取れないものを「まだ取れていない」と出し続けると、
+                                    こちらの不具合と見分けが付かない。実機の CS は
+                                    12中継のどれにもロゴが流れていなかった
+                                -->
+                                <br />
+                                <strong>{data.logos.unavailable} 局</strong
+                                >は放送側がロゴを流していないので取れません
+                                (その中継は1週間後にまた確かめます)。
+                            {/if}
                         </dd>
                         <!--
                             1チャンネルに数分かかる。出さないと押しても何も起きていないように
@@ -394,9 +421,10 @@
                     </div>
                     <div class="flex flex-wrap items-center gap-2">
                         <dt class="w-28 text-sm font-medium">カードリーダー</dt>
-                        {#await data.card}
+                        {#if shownCard.value === undefined}
                             <dd class="badge badge-ghost" data-testid="status-card-reader">確認中</dd>
-                        {:then card}
+                        {:else}
+                            {@const card = shownCard.value}
                             <dd
                                 class="badge {card.ok ? 'badge-success' : 'badge-error'}"
                                 data-testid="status-card-reader"
@@ -409,7 +437,7 @@
                                     {reader}
                                 </dd>
                             {/each}
-                        {/await}
+                        {/if}
                     </div>
                 </dl>
             </div>
@@ -418,9 +446,10 @@
         <section class="card bg-base-100 shadow" data-testid="tuner-card">
             <div class="card-body">
                 <h2 class="card-title">チューナーの空き</h2>
-                {#await data.tuners}
+                {#if shownTuners.value === undefined}
                     <p class="text-base-content/60 text-sm">確認中…</p>
-                {:then tuners}
+                {:else}
+                    {@const tuners = shownTuners.value}
                     {#if tuners.length === 0}
                         <p class="text-base-content/60 text-sm" data-testid="tuner-empty">
                             チューナーが取れません。{scan.state === 'running'
@@ -475,7 +504,7 @@
                             </table>
                         </div>
                     {/if}
-                {/await}
+                {/if}
             </div>
         </section>
     </div>
