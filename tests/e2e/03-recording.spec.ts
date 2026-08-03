@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import type { Page } from '@playwright/test';
-import { cellOf, expect, goto, reserveSoon, syncEpg, test, upcoming } from './helpers';
+import { cellOf, expect, goto, reserveSoon, setRecording, syncEpg, test, upcoming } from './helpers';
 
 /**
  * 録画→エンコード→保存先に入るまでを通しで確認する。
@@ -181,5 +181,48 @@ test.describe('CMの実カット', () => {
         expect(videoPath).toContain('.mkv');
         // 切るための作業ファイルは片付いていること
         expect(existsSync(`${videoPath.replace(/\.mkv$/, '')}.cut.ts`)).toBe(false);
+    });
+});
+
+test.describe('エンコードしない', () => {
+    test.afterEach(async ({ request }) => {
+        await setRecording(request);
+    });
+
+    /*
+     * 映像コーデックの選択に入っている。**別のチェックにはしない** —
+     * 「エンコードする」を外したときにコーデックの選択だけが残ると、
+     * どちらが効いているのか画面から読めなかった
+     */
+    test('コーデックに「しない」を選ぶと、生TSのまま保存先に置く', async ({ page, request }) => {
+        test.setTimeout(180_000);
+        await syncEpg(request);
+
+        await goto(page, '/settings');
+        await page.getByTestId('global-codec').selectOption('none');
+        await page.getByTestId('save-recording').click();
+        await expect(page.getByTestId('saved-result')).toBeVisible();
+        // 選び直しても残っていること (設定は1つしか無い)
+        await goto(page, '/settings');
+        await expect(page.getByTestId('global-codec')).toHaveValue('none');
+
+        const programId = await reserveSoon(page, request, 'BS');
+        const row = `[data-testid="recording-row"][data-program-id="${programId}"]`;
+        await expect(async () => {
+            await goto(page, '/');
+            await expect(page.locator(row).getByTestId('recording-state')).toHaveText('視聴可能');
+        }).toPass({ timeout: 120_000 });
+
+        // 焼かずに置いたので mkv ではない。エンコードの進み具合も出ない
+        const path = (await page.locator(row).getAttribute('data-library-path')) ?? '';
+        expect(path).toContain('.m2ts');
+        await expect(page.locator(row).getByTestId('encode-progress')).toHaveCount(0);
+
+        /*
+         * 焼き直す口は出ない。**焼かない設定では生TSがそのまま保存先へ移る**ので、
+         * 元にできるTSがもう無い (「生TSも残す」は焼いたときの話)。
+         * 焼きたくなったらコーデックを選んで録り直すことになる
+         */
+        await expect(page.locator(row).getByTestId('reencode-button')).toHaveCount(0);
     });
 });

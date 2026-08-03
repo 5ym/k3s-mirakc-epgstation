@@ -135,7 +135,8 @@ export async function recordOne(
 
 /**
  * 録画のしかたを変える。全体で1つの設定なので、番組ごとの指定は無い。
- * 設定画面のフォームと同じものを投げる (チェックを外した状態はキーごと消える)
+ * 設定画面のフォームと同じものを投げる (チェックを外した状態はキーごと消える)。
+ * エンコードしないときは codec に 'none' を渡す (専用のチェックは無い)
  */
 export async function setRecording(
     request: APIRequestContext,
@@ -143,7 +144,6 @@ export async function setRecording(
         codec?: string;
         cmCut?: string;
         cmDetector?: string;
-        encode?: boolean;
         keepOriginal?: boolean;
         freeOnly?: boolean;
     } = {},
@@ -154,7 +154,6 @@ export async function setRecording(
         // 偽 ffmpeg しか居ないので、外部のコマンドを呼ばないほうで固定する
         cmDetector: patch.cmDetector ?? 'silence',
     };
-    if (patch.encode ?? true) form.encode = 'on';
     if (patch.keepOriginal === true) form.keepOriginal = 'on';
     if (patch.freeOnly ?? true) form.freeOnly = 'on';
     const res = await request.post('/settings?/saveRecording', { form });

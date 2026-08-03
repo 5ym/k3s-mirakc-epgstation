@@ -193,6 +193,16 @@ export const actions = {
         if (encodeSource(recording) === null) {
             return fail(400, { message: '生TSが残っていないため再エンコードできません' });
         }
+        /*
+         * どのコーデックで焼くかは**そのときの設定**。押した人は焼きたいので、
+         * 録ったときの設定を再現したいわけではない。設定が「エンコードしない」
+         * だと焼くものが決まらないので、ここで断る
+         */
+        if (settings().codec === 'none') {
+            return fail(400, {
+                message: '設定が「エンコードしない」になっています。映像コーデックを選んでください',
+            });
+        }
         enqueue(recording.id);
         pump();
         return { success: true };

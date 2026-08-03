@@ -27,11 +27,16 @@ export interface ProgramDetail {
 export type CmMode = 'off' | 'chapter' | 'cut';
 
 /**
- * 録画のエンコードに使う映像コーデック。
+ * 録画をどう出すか。
+ *
  * av1  : 既定。同じ画質でファイルが小さいが、エンコードに時間がかかる
  * h264 : エンコードが速く、非力なマシンや古いクライアント向け
+ * none : **エンコードしない。** 生TSのまま保存先へ置く
+ *
+ * 別に「エンコードする」のチェックを持っていた頃は、外したときにコーデックの
+ * 選択だけが残って、どちらが効いているのか画面から読めなかった。選ぶものは1つでいい
  */
-export type VideoCodec = 'av1' | 'h264';
+export type VideoCodec = 'av1' | 'h264' | 'none';
 
 export interface Service {
     id: number;

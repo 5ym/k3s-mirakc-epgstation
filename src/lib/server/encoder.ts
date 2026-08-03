@@ -16,7 +16,7 @@ import { buildPgs } from './subtitle';
 import { notify } from './webhook';
 
 export function isVideoCodec(value: unknown): value is VideoCodec {
-    return value === 'av1' || value === 'h264';
+    return value === 'av1' || value === 'h264' || value === 'none';
 }
 
 /**
@@ -73,7 +73,21 @@ export function smoothMotionFor(genreDetail: string | null): boolean {
     }
 }
 
-function videoArgs(codec: VideoCodec, smooth: boolean): { filter: string; encoder: string[] } {
+/**
+ * 実際にエンコードに使うコーデック。
+ *
+ * 録画の行に `none` (エンコードしない) が入っていることがある。あとから
+ * 「再エンコード」を押したときは、そのときの設定で焼く — 押した人は
+ * 焼きたいのであって、録ったときの設定を再現したいわけではない。
+ * 設定まで `none` なら、そもそも焼くものが決まらないので断る (enqueue 側)
+ */
+function resolveCodec(codec: VideoCodec): 'av1' | 'h264' {
+    if (codec === 'av1' || codec === 'h264') return codec;
+    const chosen = settings().codec;
+    return chosen === 'none' ? 'av1' : chosen;
+}
+
+function videoArgs(codec: 'av1' | 'h264', smooth: boolean): { filter: string; encoder: string[] } {
     if (codec === 'h264') {
         return {
             filter: `${deinterlace(smooth)},format=yuv420p`,
@@ -146,7 +160,7 @@ export function buildArgs(
     codec: VideoCodec = 'av1',
     options: EncodeOptions = {},
 ): string[] {
-    const video = videoArgs(codec, options.smoothMotion === true);
+    const video = videoArgs(resolveCodec(codec), options.smoothMotion === true);
 
     const args = ['-y'];
 

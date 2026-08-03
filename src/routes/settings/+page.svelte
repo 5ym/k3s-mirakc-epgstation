@@ -92,7 +92,20 @@
                             <option value="h264" selected={recording.codec === 'h264'}>
                                 H.264 (速い・非力なマシン向け)
                             </option>
+                            <!--
+                                「エンコードする」のチェックを別に持っていた頃は、外したときに
+                                コーデックの選択だけが残って、どちらが効いているのか読めなかった
+                            -->
+                            <option value="none" selected={recording.codec === 'none'}>
+                                エンコードしない (生TSのまま置く)
+                            </option>
                         </select>
+                        {#if recording.codec === 'none'}
+                            <span class="text-base-content/60 text-xs">
+                                CM のチャプターも字幕トラックも付きません
+                                (どちらもエンコードのときに入れています)
+                            </span>
+                        {/if}
                     </label>
                     <label class="flex flex-col gap-1">
                         <span class="text-sm font-medium">CM</span>
@@ -129,23 +142,10 @@
                         で決まる (src/lib/server/encoder.ts の smoothMotionFor)
                     -->
                     <!--
-                        エンコードするか・生TSを残すか・無料放送だけにするかも、ここで決める。
+                        生TSを残すか・無料放送だけにするかも、ここで決める。
                         画面に出していなかった頃は、保存を押すたびに未送信のチェックボックスとして
                         全部 false で上書きされていた
                     -->
-                    <label class="flex cursor-pointer items-start gap-2">
-                        <input
-                            type="checkbox"
-                            name="encode"
-                            bind:checked={recording.encode}
-                            class="checkbox checkbox-sm mt-0.5"
-                            data-testid="global-encode"
-                        />
-                        <span class="text-sm">
-                            エンコードする
-                            <span class="text-base-content/60 block text-xs"> 外すと生TSのまま置きます </span>
-                        </span>
-                    </label>
                     <label class="flex cursor-pointer items-start gap-2">
                         <input
                             type="checkbox"

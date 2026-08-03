@@ -13,11 +13,15 @@ import { isVideoCodec } from './encoder';
  */
 
 export interface Settings {
-    /** 録画のエンコードに使う映像コーデック */
+    /** 録画のエンコードに使う映像コーデック。`none` ならエンコードしない */
     codec: VideoCodec;
     /** CMの扱い。off / chapter / cut */
     cmCut: CmMode;
-    /** エンコードするか。しないなら生TSのまま置く */
+    /**
+     * エンコードするか。**コーデックの選択から決まる** (`none` 以外なら する)。
+     * 別のチェックとして持っていた頃は、外したときにコーデックの選択だけが残り、
+     * どちらが効いているのか画面から読めなかった
+     */
     encode: boolean;
     /** エンコードしたあとも生TSを残すか */
     keepOriginal: boolean;
@@ -48,10 +52,16 @@ export function settings(): Settings {
         const value = stored(key);
         return value === undefined ? fallback : value === 'true';
     };
+    /*
+     * 「エンコードする」のチェックを持っていた頃のDBは、そこに false が入っている。
+     * コーデックの選択に寄せたので、それを `none` として読む
+     */
+    const chosen = isVideoCodec(codec) ? codec : config.encodeCodec;
+    const resolved = flag('encode', true) ? chosen : 'none';
     return {
-        codec: isVideoCodec(codec) ? codec : config.encodeCodec,
+        codec: resolved,
         cmCut: isCmMode(cmCut) ? cmCut : config.cmCutDefault,
-        encode: flag('encode', true),
+        encode: resolved !== 'none',
         keepOriginal: flag('keepOriginal', false),
         freeOnly: flag('freeOnly', true),
         cmDetector: stored('cmDetector') === 'silence' ? 'silence' : 'jls',
