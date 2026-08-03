@@ -102,7 +102,7 @@
      * 縁を拾うこともある。CM判定が当たらないときに、覚えているものが絵になって
      * いるのかどうかを確かめる手立てが無いと、どこを直せばいいのか分からない。
      */
-    let learned = $state<{ url: string; area: string; depth: number; learnedAt: number } | null>(null);
+    let learned = $state<{ url: string; learnedAt: number } | null>(null);
     /** 覚えているものを調べ終えたか。畳むかどうかはこれが出てから決める */
     let checked = $state(false);
     $effect(() => {
@@ -118,12 +118,7 @@
                 if (!res.ok) throw new Error(String(res.status));
                 const blob = await res.blob();
                 url = URL.createObjectURL(blob);
-                learned = {
-                    url,
-                    area: res.headers.get('X-Logo-Area') ?? '',
-                    depth: Number(res.headers.get('X-Logo-Depth')),
-                    learnedAt: Number(res.headers.get('X-Logo-Learned-At')),
-                };
+                learned = { url, learnedAt: Number(res.headers.get('X-Logo-Learned-At')) };
             } catch {
                 // まだ1本も録っていない局。覚えているものが無いのは普通のこと
                 learned = null;
@@ -258,13 +253,15 @@
     }
 </script>
 
-<div class="mt-3" data-testid="logo-area">
-    <div class="text-sm font-medium">ロゴの位置を教える</div>
-    <p class="text-base-content/70 mt-1 text-sm">
-        {serviceName} のロゴでCMを判定できませんでした。
+<div class="mt-2" data-testid="logo-area">
+    <!--
+        **見出しを置かない。** すぐ上の「CM」の中身の続きとして読むもので、
+        見出しを付けていた頃は、上の覚え書き (「jls は使えず: …」) と
+        ここの説明が別々の話に見えて、同じことを2回読まされていた
+    -->
+    <p class="text-base-content/70 text-sm">
         {#if learned !== null}
-            ロゴ自体は覚えています。下の絵がロゴになっていれば位置は合っているので、
-            まずはそのまま様子を見てください。
+            {serviceName} のロゴは覚えています。下の絵がロゴになっていれば位置は合っているので、 まずはそのまま様子を見てください。
         {:else}
             ロゴが出ているコマまで送って、<strong>ロゴを四角で囲って</strong>ください。 枠は<strong
                 >掴んで動かせます</strong
@@ -300,14 +297,13 @@
                         {dateTime(learned.learnedAt)} に覚えました
                     </div>
                 {/if}
-                <div class="text-base-content/60 mt-0.5 font-mono">{learned.area}</div>
-                <div class="text-base-content/60" data-testid="logo-learned-depth">
-                    濃さ {learned.depth} / 1000
-                </div>
                 <!--
-                    濃さの低さだけでは良し悪しを決められない。半透明の細い文字の
-                    ロゴ (TOKYO MX) は、ちゃんと写っていても 241/1000 しか出ない。
-                    絵を見て判断してもらう
+                    **座標と濃さの数字は出さない。**
+
+                    どちらも見て判断の材料にならなかった。座標は絵と枠を見れば分かるし、
+                    濃さは低くても駄目とは限らない (半透明の細い文字のロゴ = TOKYO MX は
+                    ちゃんと写っていても 241/1000)。数字を並べていた頃は「241 は低いのか」
+                    を考えさせるだけで、答えは結局その隣の絵にしか無かった
                 -->
                 <div class="text-base-content/60 mt-0.5">
                     濃さを明るさにした白黒です (いちばん濃いところが白)。位置を教えると覚え直します。

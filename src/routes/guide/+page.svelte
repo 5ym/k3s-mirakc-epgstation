@@ -331,13 +331,19 @@
                         表の外へ流れて見えなくなっていた。線だけが残って、それが何時の線
                         なのか読めない。
 
-                        `sticky` は流れの中に居ないと効かないので `absolute` はやめて、
-                        線の上に被せるのは負のマージンでやる。`left` は時刻の列 (3.5rem)
-                        のぶんだけ空ける — 0 にすると、同じく `sticky left-0` で
-                        置いてある時刻の列と重なって、どちらも読めなくなる
+                        `sticky` は流れの中に居ないと効かないので `absolute` はやめる。
+                        `left` は時刻の列 (3.5rem) のぶんだけ空ける — 0 にすると、
+                        同じく `sticky left-0` で置いてある時刻の列と重なって、
+                        どちらも読めなくなる。
+
+                        **線をまたぐ位置は `translate` で決める。** `inline-block` に
+                        負のマージンを付けていた頃は、行の高さのぶんだけ下へずれて
+                        線の下に落ち、番組名に被っていた (下がるぶんは字の大きさで
+                        変わるので、マージンの値では合わせられない)。
+                        `block` にして高さの半分だけ上げれば、字が変わっても線の上に乗る
                     -->
                     <span
-                        class="bg-error text-error-content sticky left-14 z-20 -mt-2 inline-block rounded px-1 text-[10px] leading-4"
+                        class="bg-error text-error-content sticky left-14 z-20 block w-fit -translate-y-1/2 rounded px-1 text-[10px] leading-4"
                     >
                         {time(clock)}
                     </span>
@@ -405,7 +411,11 @@
         {#snippet actions()}
             <!--
                 失敗の理由は詳細の中に出す。番組表にインラインで足すと、その分だけ
-                グリッドが下にずれてスクロールバーが出る
+                グリッドが下にずれてスクロールバーが出る。
+
+                **ここだけ Toasts に寄せていない。** 他の画面の知らせは右下に浮かせて
+                いるが、押したのはこのモーダルの中のボタンで、モーダルは浮かせた札より
+                上に出る。下に隠れるものを出しても読めないので、押したボタンの隣に置く
             -->
             {#if form?.message}
                 <div class="alert alert-error mt-4" data-testid="guide-error">{form.message}</div>

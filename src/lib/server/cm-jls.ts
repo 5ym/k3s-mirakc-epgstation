@@ -1,6 +1,6 @@
 import { mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import type { Range } from './cm';
+import { invertRanges, MAX_CM_RATIO, type Range } from './cm';
 import { config } from './config';
 import { logoRepo } from './logo-data';
 import { text } from './stream';
@@ -25,12 +25,6 @@ import { text } from './stream';
  */
 
 const TRIM = /Trim\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)/g;
-
-/**
- * これ以上がCM判定になったら、その結果は信じない。
- * 無音検出の既定 (cm.detectCmRanges の maxRatio) と同じ値にそろえてある
- */
-const MAX_CM_RATIO = 0.5;
 
 /** avs の Trim(開始,終了) はフレーム番号かつ終端を含む。秒の半開区間に直す */
 export function parseTrimRanges(avs: string, fps: number): Range[] {
@@ -61,19 +55,6 @@ export function cmRatio(cm: Range[], duration: number): number {
  */
 export function tooMuchCm(cm: Range[], duration: number): boolean {
     return cmRatio(cm, duration) > MAX_CM_RATIO * 100;
-}
-
-/** 残す区間(Trim)の裏返し = CM区間 */
-export function invertRanges(keep: Range[], duration: number): Range[] {
-    const sorted = [...keep].sort((a, b) => a.start - b.start);
-    const cm: Range[] = [];
-    let cursor = 0;
-    for (const range of sorted) {
-        if (range.start - cursor > 0.5) cm.push({ start: cursor, end: range.start });
-        cursor = Math.max(cursor, range.end);
-    }
-    if (duration - cursor > 0.5) cm.push({ start: cursor, end: duration });
-    return cm;
 }
 
 interface Step {

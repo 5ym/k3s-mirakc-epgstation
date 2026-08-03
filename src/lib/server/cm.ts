@@ -25,6 +25,16 @@ export interface Silence {
     end: number;
 }
 
+/**
+ * これ以上がCM判定になったら、その結果は信じない。
+ *
+ * **無音検出と join_logo_scp で同じ値を使う。** どちらも「検出が効いていない」
+ * 兆候は同じ (番組が丸ごとCMになる) で、本編を削るよりCMが残るほうが被害が小さい、
+ * という判断も同じ。数字を別々に持って「そろえてある」と書いていた頃は、
+ * 片方だけ動かせる状態のまま「そろえてある」と書いてあるだけでした。
+ */
+export const MAX_CM_RATIO = 0.5;
+
 export function isCmMode(value: unknown): value is CmMode {
     return value === 'off' || value === 'chapter' || value === 'cut';
 }
@@ -144,7 +154,7 @@ export function detectCmRanges(
 ): Range[] {
     const tolerance = options.tolerance ?? config.cmTolerance;
     const minBlock = options.minBlock ?? config.cmMinBlock;
-    const maxRatio = options.maxRatio ?? 0.5;
+    const maxRatio = options.maxRatio ?? MAX_CM_RATIO;
 
     if (!Number.isFinite(duration) || duration <= 0) return [];
 
@@ -176,16 +186,26 @@ export function detectCmRanges(
     return cm;
 }
 
-/** CM区間の裏返し。エンコード時に残す区間 */
-export function keepRanges(cm: Range[], duration: number): Range[] {
-    const keep: Range[] = [];
+/**
+ * 区間の裏返し。**CM ↔ 本編のどちらの向きにも同じものを使う。**
+ *
+ * 「CMを渡して残す区間をもらう」(チャプター・実カット) と
+ * 「join_logo_scp の残す区間を渡してCMをもらう」(cm-jls) は同じ計算なので、
+ * 1つにしてある。同じものを2箇所に置いていた頃は、片方だけが渡された区間を
+ * 並べ替えていて、**同じ入力から違う答えが出る**状態になっていた。
+ *
+ * 0.5秒より短い隙間は作らない (切っても意味が無く、チャプターだけが増える)。
+ */
+export function invertRanges(ranges: Range[], duration: number): Range[] {
+    const sorted = [...ranges].sort((a, b) => a.start - b.start);
+    const out: Range[] = [];
     let cursor = 0;
-    for (const block of cm) {
-        if (block.start - cursor > 0.5) keep.push({ start: cursor, end: block.start });
+    for (const block of sorted) {
+        if (block.start - cursor > 0.5) out.push({ start: cursor, end: block.start });
         cursor = Math.max(cursor, block.end);
     }
-    if (duration - cursor > 0.5) keep.push({ start: cursor, end: duration });
-    return keep;
+    if (duration - cursor > 0.5) out.push({ start: cursor, end: duration });
+    return out;
 }
 
 /**
@@ -193,7 +213,7 @@ export function keepRanges(cm: Range[], duration: number): Range[] {
  * プレイヤーのチャプター送りでCMを飛ばせるようにする(ファイルは切らない)。
  */
 export function chapterMetadata(cm: Range[], duration: number): string {
-    const keep = keepRanges(cm, duration);
+    const keep = invertRanges(cm, duration);
     const chapters = [
         ...keep.map((r) => ({ ...r, title: '本編' })),
         ...cm.map((r) => ({ ...r, title: 'CM' })),

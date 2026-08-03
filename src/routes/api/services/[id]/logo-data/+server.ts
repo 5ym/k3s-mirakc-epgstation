@@ -22,14 +22,12 @@ export function GET({ params }) {
             // 覚え直すまで中身は変わらないが、覚え直したらすぐ見たい
             'Cache-Control': 'no-cache',
             /*
-             * 覚えている枠と濃さ。**記録されているコマの座標**で、地上波のHDなら
-             * 1440×1080 の中の位置。絵と一緒に数字も出したいので見出しで渡す
-             * (コマの取り出しが X-Source-Width を渡しているのと同じやり方)
+             * いつ覚えたか。「CM判定に失敗」の記録より新しければ、その失敗は別のロゴのもの。
+             *
+             * **枠と濃さは渡しません。** 画面に数字で出していた頃の名残りでしたが、
+             * どちらも見て判断の材料になりませんでした (座標は絵と枠を見れば分かり、
+             * 濃さは低くても駄目とは限らない)。読む相手が居なくなったので落とします
              */
-            'X-Logo-Area': `${logo.x},${logo.y},${logo.width},${logo.height}`,
-            'X-Logo-Depth': String(logo.depth),
-            'X-Logo-Name': encodeURIComponent(logo.name),
-            // いつ覚えたか。「CM判定に失敗」の記録より新しければ、その失敗は別のロゴのもの
             'X-Logo-Learned-At': String(logo.learnedAt),
         },
     });

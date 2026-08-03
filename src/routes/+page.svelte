@@ -11,6 +11,7 @@
         dateTime,
         duration,
         eta,
+        cmNoteWorthShowing,
         logoUnusable,
         percent,
         recordedDuration,
@@ -75,7 +76,10 @@
     let detail = $state<Detail | null>(null);
     /** その行が失敗・削除された理由。詳細の中で見せる */
     let detailNotes = $state<{ title: string; text: string }[]>([]);
-    /** 何で検出したか。ロゴが効いているかどうかがここで分かる */
+    /**
+     * 何で検出したか。ロゴが効いているかどうかがここで分かる。
+     * うまくいったときは持たない (`cmNoteWorthShowing`)
+     */
     let detailCmNote = $state<string | null>(null);
     /** ロゴを当てられなかった録画。詳細で位置を教えてもらう */
     let detailLogo = $state<{
@@ -125,7 +129,7 @@
         const token = ++opened;
         detailNotes = notes;
         detailLogo = logo;
-        detailCmNote = cmNote;
+        detailCmNote = cmNoteWorthShowing(cmNote) ? cmNote : null;
         detail = {
             ...row,
             extended: null,

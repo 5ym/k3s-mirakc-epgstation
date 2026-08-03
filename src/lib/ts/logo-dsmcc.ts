@@ -56,7 +56,7 @@ function u32(data: Uint8Array, at: number): number {
 }
 
 /** PAT から `サービスID → PMT の PID`。サービス0 は NIT なので飛ばす */
-export function parsePat(section: Uint8Array): Map<number, number> {
+function parsePat(section: Uint8Array): Map<number, number> {
     const programs = new Map<number, number>();
     if (section[0] !== TABLE_PAT) return programs;
     const end = section.length - 4;
@@ -72,7 +72,7 @@ export function parsePat(section: Uint8Array): Map<number, number> {
  * PMT から、ロゴのカルーセルが流れている ES の PID を拾う。
  * 見るのは `stream_identifier_descriptor` の component_tag だけ。
  */
-export function parseLogoEsPids(section: Uint8Array): { serviceId: number; pids: number[] } | null {
+function parseLogoEsPids(section: Uint8Array): { serviceId: number; pids: number[] } | null {
     if (section[0] !== TABLE_PMT) return null;
     const serviceId = u16(section, 3);
     const programInfoLength = ((section[10] & 0x0f) << 8) | section[11];
@@ -129,7 +129,7 @@ function messageOf(section: Uint8Array): Uint8Array | null {
  * 頭は共通で protocolDiscriminator/dsmccType/messageId/transaction_id と続き、
  * adaptationLength ぶん飛ばした先に本体が入っている。
  */
-export function parseDii(section: Uint8Array): Dii | null {
+function parseDii(section: Uint8Array): Dii | null {
     if (section[0] !== TABLE_DII) return null;
     const message = messageOf(section);
     if (message === null || message.length < 20) return null;
@@ -168,7 +168,7 @@ export function parseDii(section: Uint8Array): Dii | null {
 }
 
 /** DDB (Download Data Block)。モジュールを割ったブロックが1つ入っている */
-export function parseDdb(section: Uint8Array): Ddb | null {
+function parseDdb(section: Uint8Array): Ddb | null {
     if (section[0] !== TABLE_DDB) return null;
     const message = messageOf(section);
     if (message === null || message.length < 12) return null;

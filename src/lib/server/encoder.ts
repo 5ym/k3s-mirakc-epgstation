@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } fr
 import { dirname } from 'node:path';
 import { encodeSource } from '../source';
 import type { EncodeJob, EncodePhase, Recording, VideoCodec } from '../types';
-import { type CmDetection, chapterMetadata, detectCm, keepRanges, probeVideo, type Range } from './cm';
+import { type CmDetection, chapterMetadata, detectCm, invertRanges, probeVideo, type Range } from './cm';
 import { config } from './config';
 import { database, now, queryOne } from './db';
 import { emit } from './events';
@@ -591,7 +591,7 @@ async function prepareCm(
     if (detection.cm.length === 0) return none;
 
     if (recording.cm_cut === 'cut') {
-        return { keep: keepRanges(detection.cm, detection.duration), chaptersFile: null };
+        return { keep: invertRanges(detection.cm, detection.duration), chaptersFile: null };
     }
 
     const chaptersFile = `${input}.chapters.txt`;

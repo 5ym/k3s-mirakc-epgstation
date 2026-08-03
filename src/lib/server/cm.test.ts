@@ -4,12 +4,12 @@ import {
     chapterMetadata,
     detectCmRanges,
     fields,
+    invertRanges,
     isCmLength,
-    keepRanges,
     parseFrameRate,
     parseSilences,
 } from './cm';
-import { cmRatio, invertRanges, parseTrimRanges, tooMuchCm } from './cm-jls';
+import { cmRatio, parseTrimRanges, tooMuchCm } from './cm-jls';
 
 describe('parseSilences', () => {
     test('silencedetect のログから無音区間と尺を取る', () => {
@@ -73,16 +73,28 @@ describe('detectCmRanges', () => {
     });
 });
 
-describe('keepRanges', () => {
-    test('CM区間の裏返しになる', () => {
-        expect(keepRanges([{ start: 300, end: 360 }], 1800)).toEqual([
+describe('区間の裏返し', () => {
+    test('CMを渡すと残す区間になる', () => {
+        expect(invertRanges([{ start: 300, end: 360 }], 1800)).toEqual([
             { start: 0, end: 300 },
             { start: 360, end: 1800 },
         ]);
     });
 
     test('先頭がCMなら本編は1区間だけ', () => {
-        expect(keepRanges([{ start: 0, end: 60 }], 600)).toEqual([{ start: 60, end: 600 }]);
+        expect(invertRanges([{ start: 0, end: 60 }], 600)).toEqual([{ start: 60, end: 600 }]);
+    });
+
+    test('並んでいなくても同じ答えになる (jls の Trim は順不同で来うる)', () => {
+        expect(
+            invertRanges(
+                [
+                    { start: 160, end: 600 },
+                    { start: 0, end: 100 },
+                ],
+                600,
+            ),
+        ).toEqual([{ start: 100, end: 160 }]);
     });
 });
 
@@ -175,18 +187,6 @@ describe('join_logo_scp の出力', () => {
         );
         expect(tooMuchCm(normal, 1802)).toBe(false);
         expect(cmRatio(normal, 1802)).toBeLessThan(30);
-    });
-
-    test('残す区間を裏返してCM区間にする', () => {
-        expect(
-            invertRanges(
-                [
-                    { start: 0, end: 100 },
-                    { start: 160, end: 600 },
-                ],
-                600,
-            ),
-        ).toEqual([{ start: 100, end: 160 }]);
     });
 });
 

@@ -116,16 +116,31 @@
 
         {#if cmNote}
             <!--
-                何を使ってCMを見つけたか。**どこを切ったかは書かない** —
-                切った位置はチャプターとして動画に入っているので、再生すれば分かる。
-                ここに時刻を並べていた頃は、長い一覧が説明文の下を埋めていた。
-                ここに残すのは「その判定が当てにできるか」で、ロゴを教える口を
-                出すかどうかもこの文言から決めている (format.logoUnusable)
+                **いつもの精度が出なかったときだけ出す。** ロゴまで見て判定できた回は
+                `cmNote` ごと渡ってこない (`format.cmNoteWorthShowing`) ので、この塊は
+                出ない。「join_logo_scp」とだけ書いてあっても読む人には何の情報にもならず、
+                結果はチャプターを見れば分かる。ここに何か書いてあること自体が合図になる。
+
+                **どこを切ったかは書かない** — 切った位置はチャプターとして動画に
+                入っている。時刻を並べていた頃は、長い一覧が説明文の下を埋めていた。
+
+                ロゴを教える口を出すかどうかも、この文言から決めている
+                (`format.logoUnusable`)。その口 (LogoArea) はこのすぐ下に続くので、
+                **あちらに見出しは付けない** — 同じことを2回読ませないため
             -->
             <div class="mt-3" data-testid="detail-cm">
                 <div class="text-sm font-medium">CM</div>
                 <div class="text-base-content/60 text-xs" data-testid="detail-cm-note">{cmNote}</div>
             </div>
+        {/if}
+
+        <!--
+            ロゴの位置を教える口。**CM の覚え書きのすぐ下に置く。**
+            失敗の理由 (下) を挟んでいた頃は、上の「jls は使えず…」と離れてしまい、
+            見出しが無いと何の話か分からなくなっていた
+        -->
+        {#if extra}
+            {@render extra()}
         {/if}
 
         {#each notes as note (note.title)}
@@ -136,10 +151,6 @@
                     class="bg-base-200 mt-1 max-h-48 overflow-auto rounded p-2 font-mono text-xs whitespace-pre-wrap">{note.text}</pre>
             </div>
         {/each}
-
-        {#if extra}
-            {@render extra()}
-        {/if}
 
         {#if actions}
             {@render actions()}

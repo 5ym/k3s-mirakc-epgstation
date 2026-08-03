@@ -221,6 +221,20 @@ export function logoUnusable(cmNote: string | null): boolean {
     return cmNote?.includes(JLS_UNUSABLE) === true;
 }
 
+/** ロゴまで見て判定できたときの覚え書き (`cm-jls.detectWithJls`) */
+const JLS_OK = 'join_logo_scp';
+
+/**
+ * その覚え書きを画面に出すか。
+ *
+ * **うまくいったときは何も出しません。** `join_logo_scp` とだけ書いてあっても
+ * 読む人には何の情報にもならず、チャプターを見れば結果は分かります。ここに
+ * 何か書いてあること自体が「いつもの精度は出ていない」の合図になります。
+ */
+export function cmNoteWorthShowing(cmNote: string | null): boolean {
+    return cmNote !== null && cmNote !== '' && cmNote !== JLS_OK;
+}
+
 /*
  * 番組の説明に入っているURLを拾う。
  *
