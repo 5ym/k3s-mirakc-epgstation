@@ -125,6 +125,34 @@ describe('コマ数の決め方', () => {
         expect(args).toContain('/tmp/c.txt');
         expect(argValue(args, '-map_chapters')).toBe('2');
     });
+
+    test('PGS があれば3本目の字幕として copy で入れる', () => {
+        /*
+         * 放送どおりの色数 (1枚256色) が入るのはこれだけ。ffmpeg は PGS を
+         * 作れないので denpa が .sup を書いて渡す (src/lib/pgs.ts)
+         */
+        const args = buildArgs('/in.m2ts', '/out.mkv', 1, null, 'av1', { pgsFile: '/tmp/s.sup' });
+        expect(args).toContain('/tmp/s.sup');
+        expect(argValue(args, '-c:s:2')).toBe('copy');
+        expect(args).toContain('2:s:0?');
+        // 既定は文字のまま (ASS)。焼いたほうを既定にすると VLC が落ちる
+        expect(argValue(args, '-disposition:s:2')).toBe('0');
+    });
+
+    test('PGS とチャプターが両方あっても番号がずれない', () => {
+        const args = buildArgs('/in.m2ts', '/out.mkv', 1, null, 'av1', {
+            pgsFile: '/tmp/s.sup',
+            chaptersFile: '/tmp/c.txt',
+        });
+        expect(args).toContain('2:s:0?');
+        // 入力は ASS / bitmap / sup / チャプター の順
+        expect(argValue(args, '-map_chapters')).toBe('3');
+    });
+
+    test('PGS が無ければ字幕は2本のまま', () => {
+        const args = buildArgs('/in.m2ts', '/out.mkv', 1, null);
+        expect(argValue(args, '-c:s:2')).toBeUndefined();
+    });
 });
 
 describe('isVideoCodec', () => {

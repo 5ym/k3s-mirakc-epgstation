@@ -12,6 +12,7 @@ import { sidecarPaths, writeNfo, writeThumbnail } from './metadata';
 import { descramble, isScrambled } from './scramble';
 import { settings } from './settings';
 import { chunks } from './stream';
+import { buildPgs } from './subtitle';
 import { notify } from './webhook';
 
 export function isVideoCodec(value: unknown): value is VideoCodec {
@@ -122,6 +123,11 @@ export interface EncodeOptions {
     smoothMotion?: boolean;
     /** 字幕を絵で焼くときの画面の大きさ ("1920x1080")。無ければ 1440x1080 とみなされる */
     canvasSize?: string;
+    /**
+     * 放送どおりに描いた字幕を入れた PGS (.sup)。
+     * denpa が別に作って渡す (src/lib/server/subtitle.ts)。無ければ入れない
+     */
+    pgsFile?: string | null;
 }
 
 /**
@@ -202,9 +208,19 @@ export function buildArgs(
         '-font',
         SUBTITLE_FONTS,
     ]);
+    /*
+     * 放送どおりに描いた字幕 (PGS)。denpa が作った .sup をそのまま入れる。
+     * ffmpeg は PGS を作れないが読むことはできるので、ここでは copy するだけ
+     */
+    let next = 2;
+    let pgs = -1;
+    if (options.pgsFile != null) {
+        pgs = next++;
+        args.push('-i', options.pgsFile);
+    }
     if (options.chaptersFile != null) {
         // CM位置をチャプターとして持たせる。ファイルは切らないので誤検出しても本編は失われない
-        args.push('-i', options.chaptersFile, '-map_chapters', '2');
+        args.push('-i', options.chaptersFile, '-map_chapters', String(next++));
     }
     // mapで解決できない(型が不明な)ストリームは黙ってスキップする。エンコード自体を止めないため
     args.push('-ignore_unknown');
@@ -214,8 +230,13 @@ export function buildArgs(
      * 既定は ASS のほう。焼いたほうを既定にすると VLC がそれを開いて落ちる
      */
     args.push('-map', '0:s:0?', '-c:s:0', 'ass', '-metadata:s:s:0', 'title=字幕');
-    args.push('-map', '1:s:0?', '-c:s:1', 'dvdsub', '-metadata:s:s:1', 'title=字幕 (放送そのまま)');
+    args.push('-map', '1:s:0?', '-c:s:1', 'dvdsub', '-metadata:s:s:1', 'title=字幕 (焼き 4色)');
     args.push('-disposition:s:0', 'default', '-disposition:s:1', '0');
+    if (pgs >= 0) {
+        // 放送どおりの色数 (1枚256色) が入るのはこれだけ。dvdsub は4色まで
+        args.push(`-map`, `${pgs}:s:0?`, '-c:s:2', 'copy', '-metadata:s:s:2', 'title=字幕 (放送そのまま)');
+        args.push('-disposition:s:2', '0');
+    }
     // インタレ解除 (bwdif は yadif よりコーミング残りが少ない)。
     // なめらかさの指定でコマ数が変わる (videoArgs)
     args.push('-vf', video.filter);
@@ -772,7 +793,7 @@ async function runJob(jobId: number): Promise<void> {
         }
     }
 
-    const encodeOptions = {
+    const encodeOptions: EncodeOptions & { chaptersFile: string | null } = {
         ...(await prepareCm(jobId, recording, sourceTs, signal)),
         // コマ数は番組のジャンルで決まる。国内アニメだけ倍にしない (deinterlace)
         smoothMotion: smoothMotionFor(recording.genre_detail),
@@ -807,6 +828,28 @@ async function runJob(jobId: number): Promise<void> {
         encodeOptions.canvasSize = `${measured.width}x${measured.height}`;
     }
 
+    /*
+     * 放送どおりに描いた字幕を PGS にしておく。
+     *
+     * ffmpeg には PGS の符号器が無いので denpa が書く。焼くほうを dvdsub だけに
+     * していた頃は1枚4色までで、実測230色の字幕から縁のなめらかさと色分けが落ちていた。
+     * 作れなければ黙って諦める (字幕トラックが1本減るだけ)
+     */
+    setPhase(jobId, 'encode', '字幕を絵にしています');
+    const pgs = await buildPgs(source, encodeOptions.canvasSize, SUBTITLE_FONTS, signal);
+    if (pgs !== null) {
+        encodeOptions.pgsFile = pgs.path;
+        database()
+            .prepare('UPDATE encode_jobs SET log = ? WHERE id = ?')
+            .run(`字幕 ${pgs.captions} 枚を PGS にしました`, jobId);
+    }
+    if (canceled.has(jobId)) {
+        removeIfExists(pgs?.path ?? null);
+        removeIfExists(trimmed);
+        removeIfExists(encodeOptions.chaptersFile);
+        return finishCanceled(jobId, recording, decoded);
+    }
+
     let result = await runFfmpeg(
         job,
         source,
@@ -834,6 +877,7 @@ async function runJob(jobId: number): Promise<void> {
     }
 
     removeIfExists(encodeOptions.chaptersFile);
+    removeIfExists(encodeOptions.pgsFile ?? null);
     // CMを切ったTSも解除したTSも作業用。元のTSは残したままなので、やり直せる
     removeIfExists(trimmed);
     removeIfExists(decoded);
