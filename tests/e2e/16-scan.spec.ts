@@ -70,7 +70,7 @@ test.describe('チューナー画面', () => {
          * 表を上から下まで見ないと分からない状態だと、止まっているのか
          * 進んでいるのか区別が付かない
          */
-        await expect(page.getByTestId('channel-coverage')).toContainText('局が取れたチャンネル');
+        await expect(page.getByTestId('channel-coverage')).toContainText('物理チャンネル');
     });
 
     test('mirakc を入れ直せる', async ({ page, request, stack }) => {

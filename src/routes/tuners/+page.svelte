@@ -140,9 +140,18 @@
                         {@const found = [...servicesByChannel.keys()].filter((key) =>
                             channels.some((c) => `${c.type}:${c.channel}` === key),
                         ).length}
+                        <!--
+                            **数え方が2つ並ぶので、単位をはっきり書く。**
+                            「50 / 59 ・ 124 局」と出していた頃は、59 と 124 が
+                            同じものの数に見えて「残り65はどこへ行った」となっていた。
+                            59 は電波の周波数の数 (T19 や BS15_0)、124 はそこに
+                            相乗りしている局の数で、1つの周波数に何局も乗っている
+                        -->
                         <div class="text-base-content/70 text-sm" data-testid="channel-coverage">
-                            局が取れたチャンネル <strong>{found} / {channels.length}</strong>
-                            ・ denpa 取り込み済み <strong>{data.services.length} 局</strong>
+                            <strong>{channels.length} 本</strong>の物理チャンネル (周波数)
+                            のうち、局を拾えたのが
+                            <strong>{found} 本</strong>。そこに乗っている局を
+                            <strong>{data.services.length} 局</strong>取り込み済みです。
                         </div>
                         <div class="max-h-96 overflow-auto">
                             <table class="table-pin-rows table table-sm">
@@ -377,18 +386,22 @@
                             <strong>衛星は十数分に一度</strong>です。普段は
                             <strong>mirakc が番組表を集めるための選局に相乗りして</strong>拾うので、 denpa
                             がチューナーを掴むことはありません。一度取れたものも1週間経ったら取り直します。
-                            「今すぐ取りに行く」を押したときは衛星も回りますが、ロゴを積んでいる中継は1つだけなので、
-                            そこだけ最大20分開きます (他の中継は数秒で見切ります)。
+                            「今すぐ取りに行く」を押したときは衛星も回ります。<strong
+                                >BS も CS も同じ1つの中継から降ってくる</strong
+                            >ので、そこだけ最大20分開きます (他の中継は数秒で見切ります)。
                             {#if data.logos.unavailable > 0}
                                 <!--
                                     取れないものを「まだ取れていない」と出し続けると、
-                                    こちらの不具合と見分けが付かない。実機の CS は
-                                    12中継のどれにもロゴが流れていなかった
+                                    こちらの不具合と見分けが付かない。
+
+                                    **中継にロゴが無いことでは数えない。** CS の中継には
+                                    ロゴが流れていないが、CS のロゴは BS の中継から
+                                    降ってくる。中継で数えていた頃は、取れる CS の54局を
+                                    まとめて「取れません」と出していた
                                 -->
                                 <br />
                                 <strong>{data.logos.unavailable} 局</strong
-                                >は放送側がロゴを流していないので取れません
-                                (その中継は1週間後にまた確かめます)。
+                                >はロゴが放送に載っていないので取れません (1週間後にまた確かめます)。
                             {/if}
                         </dd>
                         <!--

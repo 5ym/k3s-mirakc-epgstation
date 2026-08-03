@@ -1,7 +1,7 @@
 <script lang="ts">
     import type { Snippet } from 'svelte';
     import { type Audio, audioLabel, type Genre, genreLabel, videoLabel } from '$lib/arib';
-    import { cmRanges, dateTime, duration, linkify, time } from '$lib/format';
+    import { dateTime, duration, linkify, time } from '$lib/format';
     import type { ProgramDetail } from '$lib/types';
 
     /**
@@ -15,7 +15,6 @@
         program,
         onclose,
         notes = [],
-        cm = null,
         cmNote = null,
         extra,
         actions,
@@ -30,8 +29,6 @@
          * 行を開くと嘘の見出しが出ていた
          */
         notes?: { title: string; text: string }[];
-        /** 検出したCM区間 (JSON)。録画から開いたときだけ入る */
-        cm?: string | null;
         /** 何を使って検出したか (無音 / join_logo_scp)。判定の当てにできるか分かる */
         cmNote?: string | null;
         /** 開いた場所だけで要るもの (録画ならロゴ位置の指定)。無ければ何も出ない */
@@ -67,7 +64,6 @@
     );
     const audios = $derived(parse<Audio>(program.audios).map(audioLabel));
     const video = $derived(videoLabel(program.video_resolution, program.video_type));
-    const cmText = $derived(cmRanges(cm));
 </script>
 
 <!--
@@ -118,14 +114,17 @@
             </div>
         {/each}
 
-        {#if cmText || cmNote}
-            <!-- どこをCMとみなしたか。一覧に出すと長くて場所を食うので、見たいときだけ -->
+        {#if cmNote}
+            <!--
+                何を使ってCMを見つけたか。**どこを切ったかは書かない** —
+                切った位置はチャプターとして動画に入っているので、再生すれば分かる。
+                ここに時刻を並べていた頃は、長い一覧が説明文の下を埋めていた。
+                ここに残すのは「その判定が当てにできるか」で、ロゴを教える口を
+                出すかどうかもこの文言から決めている (format.logoUnusable)
+            -->
             <div class="mt-3" data-testid="detail-cm">
                 <div class="text-sm font-medium">CM</div>
-                {#if cmNote}
-                    <div class="text-base-content/60 text-xs" data-testid="detail-cm-note">{cmNote}</div>
-                {/if}
-                <div class="text-base-content/70 text-sm break-words">{cmText}</div>
+                <div class="text-base-content/60 text-xs" data-testid="detail-cm-note">{cmNote}</div>
             </div>
         {/if}
 

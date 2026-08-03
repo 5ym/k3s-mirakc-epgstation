@@ -55,10 +55,16 @@ test.describe('録画とエンコード', () => {
         expect(videoPath).toContain(stack.libraryDir);
         expect(videoPath).toContain('.mkv');
 
-        // CM検出が走り、既定のチャプター付与として記録されていること。
-        // どこを検出したかは一覧に出さず、行を押した詳細で見せる (長くて場所を食うため)
+        /*
+         * CM検出が走り、既定のチャプター付与として記録されていること。
+         *
+         * **切った位置は画面に出さない** — チャプターとして動画に入っているので、
+         * 再生すれば分かる。ここでは行の属性から確かめる。
+         * 詳細には「何で見つけたか」だけを出す (ロゴを教える口を出すかの判断にも使う)
+         */
+        expect(await recording.getAttribute('data-cm-ranges')).toContain('300');
         await recording.getByTestId('detail-button').click();
-        await expect(page.getByTestId('detail-cm')).toContainText('5:00-6:00');
+        await expect(page.getByTestId('detail-cm-note')).toContainText('無音');
         await page.getByTestId('detail-close').click();
 
         // 実際に録れた長さが記録されていること。番組表の尺は予定でしかなく、
@@ -171,9 +177,7 @@ test.describe('CMの実カット', () => {
 
         await goto(page, '/');
         const recording = page.locator(recordingRow);
-        await recording.getByTestId('detail-button').click();
-        await expect(page.getByTestId('detail-cm')).toContainText('5:00-6:00');
-        await page.getByTestId('detail-close').click();
+        expect(await recording.getAttribute('data-cm-ranges')).toContain('300');
 
         // 字幕はエンコードの前にTSを切ることで残している。
         // フィルタで切っていた頃は -sn で落とすしかなかった

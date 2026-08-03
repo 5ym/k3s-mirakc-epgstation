@@ -69,8 +69,6 @@
     let detail = $state<Detail | null>(null);
     /** その行が失敗・削除された理由。詳細の中で見せる */
     let detailNotes = $state<{ title: string; text: string }[]>([]);
-    /** その行で検出したCM区間。長いので一覧には出さず、詳細でだけ見せる */
-    let detailCm = $state<string | null>(null);
     /** 何で検出したか。ロゴが効いているかどうかがここで分かる */
     let detailCmNote = $state<string | null>(null);
     /** ロゴを当てられなかった録画。詳細で位置を教えてもらう */
@@ -115,13 +113,11 @@
         programId: number | null,
         row: Row,
         notes: { title: string; text: string }[] = [],
-        cm: string | null = null,
         logo: typeof detailLogo = null,
         cmNote: string | null = null,
     ): Promise<void> {
         const token = ++opened;
         detailNotes = notes;
-        detailCm = cm;
         detailLogo = logo;
         detailCmNote = cmNote;
         detail = {
@@ -231,7 +227,7 @@
         if (rec.encode_error) {
             notes.push({ title: 'エンコードに失敗しました', text: rec.encode_error });
         }
-        void openDetail(rec.program_id, rec, notes, rec.cm_ranges, logoOf(rec), rec.cm_note);
+        void openDetail(rec.program_id, rec, notes, logoOf(rec), rec.cm_note);
     }
 </script>
 
@@ -435,7 +431,11 @@
 
                             **吹き出し (title) は出さない。** 行に指を乗せると色が反転し、
                             再生の印も出ているので、そこを押せば再生になることは見れば分かる。
-                            出していた頃は、行を読もうとするたびに文字の上へ札が被さっていた
+                            出していた頃は、行を読もうとするたびに文字の上へ札が被さっていた。
+
+                            置き場と尺と**切ったCMの位置**は属性にだけ持たせる。普段は見ない
+                            もので (CM の位置はチャプターとして動画に入っている)、
+                            画面に並べると番組名を押し出すが、確かめる手段は残しておきたい
                         -->
                         <div
                             data-testid="recording-row"
@@ -443,6 +443,7 @@
                             data-program-id={rec.program_id}
                             data-library-path={rec.library_path}
                             data-duration-ms={rec.duration_ms}
+                            data-cm-ranges={rec.cm_ranges}
                             class="group hover:bg-base-200/60 relative cursor-pointer p-3"
                             role="button"
                             tabindex="0"
@@ -666,13 +667,7 @@
 </div>
 
 {#if detail}
-    <ProgramDetail
-        program={detail}
-        notes={detailNotes}
-        cm={detailCm}
-        cmNote={detailCmNote}
-        onclose={() => (detail = null)}
-    >
+    <ProgramDetail program={detail} notes={detailNotes} cmNote={detailCmNote} onclose={() => (detail = null)}>
         {#snippet extra()}
             <!--
                 ロゴを当てられなかった録画だけ。囲ってもらった位置は局ごとに覚えて、

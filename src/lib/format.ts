@@ -254,16 +254,3 @@ export function linkify(text: string): TextPart[] {
     if (cursor < text.length) parts.push({ text: text.slice(cursor) });
     return parts;
 }
-
-/** 検出したCM区間 (JSON) を「12:30-14:30」のような一覧にする */
-export function cmRanges(json: string | null): string {
-    if (json === null || json === '') return '';
-    try {
-        const ranges: { start: number; end: number }[] = JSON.parse(json);
-        if (ranges.length === 0) return '検出なし';
-        const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
-        return ranges.map((r) => `${clock(r.start)}-${clock(r.end)}`).join(', ');
-    } catch {
-        return '';
-    }
-}

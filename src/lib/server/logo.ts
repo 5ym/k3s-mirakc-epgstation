@@ -113,7 +113,14 @@ function logoPath(serviceId: number): string {
  * 決めてあるため (`reconcile`)。置き場ごと消えたら、また調べ直せばいい。
  */
 function relayPath(): string {
-    return join(logoDir(), 'no-logo-relays.json');
+    return join(logoDir(), 'satellite-relays.json');
+}
+
+interface RelayNotes {
+    /** ロゴを積んでいなかった中継と、そう分かった時刻 */
+    noCarousel: Record<string, number>;
+    /** カルーセルを読み切っても来なかった局 (局ID → そう分かった時刻) */
+    absent: Record<string, number>;
 }
 
 /**
@@ -123,33 +130,20 @@ function relayPath(): string {
  * 読みに行くと、番組表を1回出すだけで何百回も開くことになる。
  * 書くのはこの1プロセスだけなので、書いたときに入れ替えれば足りる
  */
-let relays: Record<string, number> | null = null;
+let relays: RelayNotes | null = null;
 
-function noLogoRelays(): Record<string, number> {
+function notes(): RelayNotes {
     if (relays !== null) return relays;
     try {
-        const parsed: unknown = JSON.parse(readFileSync(relayPath(), 'utf8'));
-        relays = typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, number>) : {};
+        const parsed = JSON.parse(readFileSync(relayPath(), 'utf8')) as Partial<RelayNotes>;
+        relays = { noCarousel: parsed.noCarousel ?? {}, absent: parsed.absent ?? {} };
     } catch {
-        relays = {};
+        relays = { noCarousel: {}, absent: {} };
     }
     return relays;
 }
 
-/** その中継は今回は飛ばしてよいか。確かめてから RELAY_RETRY の間だけ */
-function skipRelay(channel: string): boolean {
-    const at = noLogoRelays()[channel];
-    return at !== undefined && Date.now() - at < RELAY_RETRY;
-}
-
-/** 「この中継にロゴは載っていない」/「載っていた」を書き留める */
-function markRelay(channel: string, hasLogo: boolean): void {
-    const known = noLogoRelays();
-    // 何も変わらないなら書きに行かない (1チャンクごとに呼ばれる道がある)
-    if (hasLogo === (known[channel] === undefined)) return;
-    const next = { ...known };
-    if (hasLogo) delete next[channel];
-    else next[channel] = Date.now();
+function save(next: RelayNotes): void {
     relays = next;
     try {
         mkdirSync(logoDir(), { recursive: true });
@@ -159,6 +153,50 @@ function markRelay(channel: string, hasLogo: boolean): void {
     } catch {
         // 控えられなくても集めることはできる。次の機会に
     }
+}
+
+/** その中継は今回は飛ばしてよいか。確かめてから RELAY_RETRY の間だけ */
+function skipRelay(channel: string): boolean {
+    const at = notes().noCarousel[channel];
+    return at !== undefined && Date.now() - at < RELAY_RETRY;
+}
+
+/** 「この中継にロゴは載っていない」/「載っていた」を書き留める */
+function markRelay(channel: string, hasLogo: boolean): void {
+    const known = notes();
+    // 何も変わらないなら書きに行かない (1チャンクごとに呼ばれる道がある)
+    if (hasLogo === (known.noCarousel[channel] === undefined)) return;
+    const noCarousel = { ...known.noCarousel };
+    if (hasLogo) delete noCarousel[channel];
+    else noCarousel[channel] = Date.now();
+    save({ ...known, noCarousel });
+}
+
+/**
+ * カルーセルを1回ぶん読み切った。**まだ埋まらない局を控える。**
+ *
+ * カルーセルには BS も CS もまとめて載っているので、読み切ってなお来ない局は
+ * そもそも載っていない。中継ごとの当たり外れ (`noCarousel`) とは別の話で、
+ * 混ぜると**「CS の中継にロゴが無い」=「CS のロゴは取れない」**という誤りになる
+ * (CS のロゴは BS の中継から降ってくる)。
+ *
+ * **局ごとに控える。** 「読み切った時刻」だけを控えていた頃は、そのあと衛星の
+ * ロゴを1つ消しても1週間は取りに行かなかった。局で持てば、消えたぶんは
+ * 「控えに無い = まだ取れるはず」になって自然に取りに行く。
+ */
+function markAbsent(): void {
+    const known = notes();
+    const absent = { ...known.absent };
+    for (const service of currentServices()) {
+        if (service.type !== 'GR' && needsLogo(service.id)) absent[service.id] = Date.now();
+    }
+    save({ ...known, absent });
+}
+
+/** その局はカルーセルに載っていないと分かっているか */
+function absentFromCarousel(serviceId: number): boolean {
+    const at = notes().absent[serviceId];
+    return at !== undefined && Date.now() - at < LOGO_MAX_AGE;
 }
 
 export function readLogo(serviceId: number): Uint8Array | null {
@@ -352,21 +390,40 @@ function currentServices(): { id: number; type: string; channel: string; network
 }
 
 export function missing(): Target[] {
+    const services = currentServices();
     const targets = new Map<string, Target>();
-    for (const service of currentServices()) {
-        if (!needsLogo(service.id)) continue;
-        // ロゴを流していないと分かっている中継は、しばらく見に行かない
-        if (skipRelay(service.channel)) continue;
+    const add = (service: { type: string; channel: string; network_id: number }) => {
         const key = `${service.type}:${service.channel}`;
-        if (targets.has(key)) continue;
+        if (targets.has(key)) return;
         targets.set(key, { type: service.type, channel: service.channel, network_id: service.network_id });
+    };
+
+    // 地上波は中継ごとに乗っている局が違う。その中継の局が足りないときだけ開く
+    for (const service of services) {
+        if (service.type === 'GR' && needsLogo(service.id)) add(service);
     }
+
     /*
-     * 衛星の中継は前もって絞らない。**ロゴが乗っているのは1つだけ**だが、
-     * どれなのかは開いてみないと分からない (実機の BS はネットワーク4の26中継の
-     * うち `BS15_0` だけ)。外れは PAT を見た時点で1秒ほどで切り上げ、
-     * 書き留めて二度目からは飛ばす (`collect` / `markRelay`)
+     * **衛星は「その中継の局が足りているか」では選べない。**
+     *
+     * ロゴを積んだ中継1つに BS も CS も全部載っているので、中継ごとに見ると
+     * BS が揃った時点でその中継が候補から外れ、**そこにしか無い CS が永久に
+     * 埋まらない**。実機ではこれで BS 38/38・CS 0/54 のまま止まっていた。
+     *
+     * 衛星の局が1つでも足りなければ、**まだ外れと分かっていない中継**を当たる。
+     * どれが当たりかは開いてみないと分からないが (実機の BS はネットワーク4の
+     * 26中継のうち `BS15_0` だけ)、外れは PAT を見た時点で1秒ほどで切り上げ、
+     * 書き留めて二度目からは飛ばす (`collect` / `markRelay`)。
+     *
+     * ただし**カルーセルに載っていないと分かっている局は数に入れない**。
+     * 読み切ってなお来なかった局は行っても来ないので、そこだけを理由に
+     * 中継を開き直すと同じことの繰り返しになる
      */
+    if (missingSatellites() > 0) {
+        for (const service of services) {
+            if (service.type !== 'GR' && !skipRelay(service.channel)) add(service);
+        }
+    }
     return [...targets.values()];
 }
 
@@ -387,7 +444,8 @@ function missingOn(channel: string): number {
  * ぶんを毎回取りこぼしていた (実機で CS が 0/54 のままだった)。
  */
 function missingSatellites(): number {
-    return currentServices().filter((s) => s.type !== 'GR' && needsLogo(s.id)).length;
+    return currentServices().filter((s) => s.type !== 'GR' && needsLogo(s.id) && !absentFromCarousel(s.id))
+        .length;
 }
 
 /**
@@ -448,13 +506,22 @@ async function collect(target: Target, timeout: number, signal?: AbortSignal): P
                 progressed = Date.now();
             }
             // 全部揃ったら、これ以上開けておく理由がない
-            if (now === 0) break;
+            if (now === 0) {
+                if (satellite) markAbsent();
+                break;
+            }
             /*
-             * 衛星は揃いきらないことがある (放送側が流していない局がある)。
+             * 衛星は揃いきらないことがある (カルーセルに載っていない局がある)。
              * 拾えたあと何も来なくなったら、そこで切り上げる。これが無いと
-             * 取れない局が1つでもあるだけで毎回20分丸ごと待つことになる
+             * 載っていない局が1つでもあるだけで毎回20分丸ごと待つことになる。
+             *
+             * ここまで来たなら**カルーセルは1回ぶん読み切った**。残っている局は
+             * 載っていない局なので、そう書き留めて次からは行かない
              */
-            if (satellite && left < before && Date.now() - progressed > SATELLITE_QUIET) break;
+            if (satellite && left < before && Date.now() - progressed > SATELLITE_QUIET) {
+                markAbsent();
+                break;
+            }
             /*
              * **衛星のロゴは1つの中継にしかない。** 実機の BS はネットワーク4に
              * 26の中継があるが、ロゴを運ぶエンジニアリングサービス (929) が
@@ -774,9 +841,14 @@ async function run(targets: Target[], parallel: number, found: number): Promise<
  *
  * `pending` はこれから取りに行く物理チャンネルの数。0 なら押す口を出さない。
  *
- * `unavailable` は**放送側が流していないので取れない**局の数。CS がこれで、
- * 12中継のどれにもロゴのカルーセルが無い。数えておかないと「54局ぶん足りない」
- * という表示が永久に残り、こちらの不具合と見分けが付かない
+ * `unavailable` は**カルーセルに載っていないので取れない**衛星の局の数。
+ * 数えておかないと「N局ぶん足りない」という表示が永久に残り、こちらの不具合と
+ * 見分けが付かない。
+ *
+ * **中継にロゴが無いこと (`skipRelay`) では数えない。** CS の12中継にはロゴの
+ * カルーセルが無いが、CS のロゴは BS の中継から降ってくるので、中継で数えると
+ * 取れる局まで「取れません」と出てしまう (実際そう出していた)。
+ * カルーセルを読み切った後になお足りない局だけが、本当に取れない局。
  */
 export function stats(): { have: number; total: number; pending: number; unavailable: number } {
     const services = currentServices();
@@ -785,6 +857,6 @@ export function stats(): { have: number; total: number; pending: number; unavail
         have: services.filter(has).length,
         total: services.length,
         pending: missing().length,
-        unavailable: services.filter((service) => !has(service) && skipRelay(service.channel)).length,
+        unavailable: services.filter((service) => !has(service) && absentFromCarousel(service.id)).length,
     };
 }
