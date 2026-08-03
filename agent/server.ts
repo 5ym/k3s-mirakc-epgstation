@@ -1,49 +1,29 @@
 /**
- * チューナー側のエージェント。mirakc を抱えて、denpa の代わりにチューナーを触る。
+ * チューナーエージェント。**機材に触るのはここだけ。**
  *
- * denpa からは触れないものが3つある。
+ * denpa から触れないものが3つある。
  *
  * - B-CASカード … pcscd 経由でしか読めず、その pcscd はこのコンテナにしか居ない
- * - チューナーデバイス … スキャンは mirakc を通さず recisdb で直接叩く
- * - mirakc の設定 … config.yml は起動時にしか読まれないので、書いたら再起動が要る
+ * - チューナーデバイス … `/dev/dvb/*` が見えているのはこちらだけ
+ * - 選局そのもの … `recisdb` を起こして標準出力を読む
  *
- * そのため mirakc の親としてこれが PID 1 になり、必要なときに mirakc を止めて
- * スキャンし、設定を書き戻してから起動し直す。
+ * **中身は読まない。** NIT も SDT も EIT も解かず、TS をそのまま流す。
+ * 読むのは denpa 側 (`src/lib/ts`) で、局を選り分けるのも番組表を組み立てるのも
+ * あちらの仕事 ([roadmap.md](../docs/roadmap.md))。
+ *
+ * mirakc はもう抱えていない。取り合いも、どのチャンネルが使えるかも、ここが持つ。
  */
 
-import {
-    copyFileSync,
-    existsSync,
-    mkdirSync,
-    readdirSync,
-    readFileSync,
-    renameSync,
-    rmSync,
-    writeFileSync,
-} from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
-import { parseConfig, replaceChannels } from './config';
-import {
-    CHANNEL_RANGES,
-    type ChannelEntry,
-    type ChannelType,
-    channelsFor,
-    Scanner,
-    type Tuner,
-} from './scan';
+import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { type ChannelType, loadChannels, loadTuners, paths, saveChannels } from './channels';
+import { CHANNEL_RANGES, channelsFor, Scanner } from './scan';
+import { TunerPool } from './tuners';
 
 const PORT = Number(process.env.AGENT_PORT ?? 40773);
-/*
- * 設定は /etc/mirakc に置かない。あそこには mirakc 自身の strings.yml が居て、
- * PVC を被せると隠れてしまい mirakc が起動しなくなる
- */
-const CONFIG = process.env.MIRAKC_CONFIG ?? '/app-config/config.yml';
-const CONFIG_TEMPLATE = '/app-config-defaults/config.yml';
-const EPG_CACHE = process.env.MIRAKC_EPG_CACHE ?? '/var/lib/mirakc/epg';
 /** denpa の生TSの置き場。掛かったままのTSは必ずここにある */
 const RECORDED = resolve(process.env.RECORDED_DIR ?? '/denpa-recorded');
 const RECISDB = process.env.RECISDB ?? 'recisdb';
-const MIRAKC = process.env.MIRAKC_BIN ?? '/usr/local/bin/mirakc';
 const LOG_LIMIT = 400;
 
 function log(message: string): void {
@@ -67,60 +47,40 @@ async function run(command: string[], timeout?: number): Promise<{ code: number;
     }
 }
 
-/** mirakc の面倒を見る。落ちたら起こし、頼まれたら止める */
-class Mirakc {
-    private proc: Bun.Subprocess | null = null;
-    /** 設定を置き終わるまで起動させない。設定が無いと mirakc は即死する */
-    private wanted = false;
+/*
+ * 起きたことを知らせる口 (SSE)。denpa の画面がチューナーの様子を追うのに使う。
+ * mirakc の `/events` に当たるが、流すのは**こちらが持っている事実だけ**
+ */
+const listeners = new Set<ReadableStreamDefaultController<Uint8Array>>();
 
-    begin(): void {
-        this.wanted = true;
-        void this.supervise();
-    }
-
-    private async supervise(): Promise<void> {
-        for (;;) {
-            if (this.wanted && this.proc === null) {
-                this.proc = Bun.spawn([MIRAKC], { stdout: 'inherit', stderr: 'inherit' });
-                log(`mirakc を起動しました (pid ${this.proc.pid})`);
-            }
-            const proc = this.proc;
-            if (proc === null) {
-                await Bun.sleep(500);
-                continue;
-            }
-            await proc.exited;
-            if (this.proc === proc) {
-                this.proc = null;
-                // 止めたのが自分なら黙って待つ。落ちたのなら起こし直す
-                if (this.wanted) {
-                    log('mirakc が落ちました。起こし直します');
-                    await Bun.sleep(1000);
-                }
-            }
+function emit(name: string, data: unknown = {}): void {
+    const chunk = new TextEncoder().encode(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`);
+    for (const listener of listeners) {
+        try {
+            listener.enqueue(chunk);
+        } catch {
+            // 既に閉じている購読者。次の cancel で片付く
         }
-    }
-
-    async stop(): Promise<void> {
-        this.wanted = false;
-        const proc = this.proc;
-        if (proc !== null) {
-            proc.kill();
-            await proc.exited;
-        }
-        log('mirakc を止めました');
-    }
-
-    start(): void {
-        this.wanted = true;
-    }
-
-    get alive(): boolean {
-        return this.proc !== null;
     }
 }
 
-const mirakc = new Mirakc();
+/**
+ * 初回だけ雛形を置く。
+ *
+ * 設定は PVC に置いてあるので、イメージを入れ替えても手で書いたものは残る。
+ * イメージ側のものを直に読ませると、**編集できない設定**になってしまう
+ */
+const TEMPLATE = '/app-config-defaults/tuners.yml';
+
+function installTemplate(): void {
+    if (existsSync(paths.tuners) || !existsSync(TEMPLATE)) return;
+    mkdirSync(dirname(paths.tuners), { recursive: true });
+    copyFileSync(TEMPLATE, paths.tuners);
+    log(`チューナーの雛形を置きました: ${paths.tuners}`);
+}
+
+installTemplate();
+const pool = new TunerPool(loadTuners(), () => emit('tuners'));
 
 /**
  * カードリーダーが見えているか。
@@ -213,72 +173,16 @@ function push(
         scanned: scan.scanned + (counts.scanned ?? 0) + (counts.skipped ?? 0),
         channels: scan.channels + (counts.channels ?? 0),
     };
-}
-
-function loadTuners(): Tuner[] {
-    return parseConfig(readFileSync(CONFIG, 'utf8')).tuners ?? [];
-}
-
-/** 並べ替えの順。設定を読むときに種別ごとにまとまっているほうが分かりやすい */
-const TYPE_ORDER: Record<string, number> = { GR: 0, BS: 1, CS: 2 };
-
-/**
- * 見つけたチャンネルだけ差し替える。
- *
- * チューナーの定義はハードウェアの話で、スキャンで分かるものではない。
- * epg やサーバの設定ごと書き換えると、スキャンのたびに設定が飛ぶ。
- *
- * **探した種別だけ**を入れ替え、他はそのまま残す。地上波だけスキャンしたときに
- * 全部を置き換えると、BS と CS が設定から消える(実際に消して、BSの予約が
- * 録れなくなった)。
- */
-function saveChannels(channels: ChannelEntry[], scanned: ChannelType[]): void {
-    const source = readFileSync(CONFIG, 'utf8');
-    const kept = (parseConfig(source).channels ?? []).filter((channel) => !scanned.includes(channel.type));
-    const merged = [...kept, ...channels].sort(
-        (a, b) => (TYPE_ORDER[a.type] ?? 9) - (TYPE_ORDER[b.type] ?? 9) || a.channel.localeCompare(b.channel),
-    );
-    const text = replaceChannels(source, merged);
-
-    // 書きかけを読ませない。mirakc は起動時にしか読まないので、壊れたものを
-    // 掴むと起動しなくなる
-    const working = `${CONFIG}.writing`;
-    writeFileSync(working, text);
-    try {
-        renameSync(working, CONFIG);
-    } catch {
-        // config.yml をファイル単位で bind mount していると差し替えられない
-        // (compose の例がその形)。その場合は諦めて直接書く
-        writeFileSync(CONFIG, text);
-        rmSync(working, { force: true });
-    }
-}
-
-/**
- * mirakc が覚えている局と時刻を捨てる。
- *
- * services.json などにスキャン前の局が残っていると、消えたはずの局が
- * 番組表に出続ける。次の起動で拾い直させる。
- */
-function clearEpgCache(): void {
-    if (!existsSync(EPG_CACHE)) return;
-    for (const name of readdirSync(EPG_CACHE)) {
-        rmSync(join(EPG_CACHE, name), { force: true });
-    }
+    emit('scan');
 }
 
 /** 走っているスキャン。中断のために持っておく */
 let scanner: Scanner | null = null;
 
 async function runScan(targets: [ChannelType, string[]][]): Promise<void> {
-    const running = new Scanner(loadTuners(), (progress) => push(progress.line, progress));
+    const running = new Scanner(pool, (progress) => push(progress.line, progress));
     scanner = running;
     try {
-        // 選局は mirakc を通さず recisdb を直接叩く。動かしたままだと EPG 更新と
-        // チューナーの取り合いになるので、スキャンの間だけ止める
-        push('mirakc を止めています...', {}, { phase: 'mirakc を停止' });
-        await mirakc.stop();
-
         push('チャンネルを探しています...', {}, { phase: 'スキャン中' });
         const found = await running.run(targets);
 
@@ -297,54 +201,23 @@ async function runScan(targets: [ChannelType, string[]][]): Promise<void> {
             throw new Error('チャンネルが1件も見つかりませんでした。チューナーとアンテナを確認してください');
         }
 
-        push('設定を書き込んでいます...', {}, { phase: '設定を反映' });
+        push('チャンネルを保存しています...', {}, { phase: '保存' });
         saveChannels(
             found,
             targets.map(([type]) => type),
         );
+        push('完了しました', {}, { state: 'done', phase: '完了', finishedAt: Date.now() });
         /*
-         * 覚えている局を捨ててから起こす。
-         *
-         * mirakc は**起動したときに局と番組表を取りに行く**ので、これだけで
-         * 新しいチャンネル定義に沿って集め直される。捨てないと、消えたはずの局が
-         * 番組表に出続ける
+         * 局が入れ替わった。denpa は**これを合図に取り込み直す。**
+         * mirakc を入れ直していた頃と違って、こちらは何も再起動しない —
+         * 番組表を集めるのは denpa の仕事で、あちらが自分の都合で取りに行く
          */
-        clearEpgCache();
-        push('mirakc を起動しています...', {}, { state: 'done', phase: '完了', finishedAt: Date.now() });
+        emit('channels');
     } catch (error) {
         push(`失敗しました: ${error}`, {}, { state: 'failed', error: String(error), finishedAt: Date.now() });
     } finally {
         scanner = null;
-        // 中断しても失敗しても、mirakc は必ず戻す。止まったままだと録画も番組表も死ぬ
-        mirakc.start();
     }
-}
-
-/**
- * mirakc を入れ直す。
- *
- * mirakc は**起動したときに局と番組表を取りに行く** (`services.json` が古ければ
- * scan-services から始める)。denpa 側で局を取り込み直しても mirakc が知らない
- * ものは増えないので、「局が足りない」ときに効くのはこちらだけになる。
- *
- * 覚えている局を捨ててから起こすかは選べる。スキャンの直後は捨てる (消えた局が
- * 番組表に残り続けるため) が、手で押すぶんには残したまま追加ぶんだけ拾わせたい。
- */
-async function restartMirakc(body: { forget?: unknown }): Promise<{ ok: boolean; message: string }> {
-    if (scan.state === 'running') {
-        return { ok: false, message: 'チャンネルスキャン中は入れ直せません' };
-    }
-    await mirakc.stop();
-    if (body.forget === true) clearEpgCache();
-    mirakc.start();
-    log('mirakc を入れ直しました');
-    return {
-        ok: true,
-        message:
-            body.forget === true
-                ? 'mirakc を入れ直しました (覚えている局は捨てました)'
-                : 'mirakc を入れ直しました',
-    };
 }
 
 function stopScan() {
@@ -383,19 +256,64 @@ function startScan(body: { types?: unknown }) {
 const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
+/**
+ * 選局して TS を流す。**エージェントの表看板。**
+ *
+ * 素の TS をそのまま chunked で返す。何も包まないので
+ * `curl --unix-socket ... > x.ts` で人手でも確かめられる。
+ */
+function openStream(url: URL, signal: AbortSignal): Response {
+    const type = url.searchParams.get('type') ?? '';
+    const channel = url.searchParams.get('channel') ?? '';
+    if (type === '' || channel === '') return json({ error: 'type と channel が要ります' }, 400);
+
+    try {
+        const stream = pool.open({
+            type,
+            channel,
+            priority: Number(url.searchParams.get('priority') ?? 0) || 0,
+            use: url.searchParams.get('use') ?? '不明',
+        });
+        signal.addEventListener('abort', () => void stream.cancel().catch(() => undefined));
+        return new Response(stream, { headers: { 'Content-Type': 'video/MP2T' } });
+    } catch (error) {
+        // 掴めなかった。**409 で返す**ので、呼んだ側は待って掛け直せる
+        return json({ error: String(error) }, 409);
+    }
+}
+
+function eventStream(): Response {
+    let self: ReadableStreamDefaultController<Uint8Array>;
+    const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+            self = controller;
+            listeners.add(controller);
+        },
+        cancel() {
+            listeners.delete(self);
+        },
+    });
+    return new Response(stream, {
+        headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' },
+    });
+}
+
 export function serve(port = PORT): Bun.Server {
     return Bun.serve({
         port,
         hostname: '0.0.0.0',
-        // スキャンは何十分もかかる。既定のまま切られると解除も途中で落ちる
+        // 選局は何時間も開きっぱなしになる。既定のまま切られると録画が落ちる
         idleTimeout: 0,
         async fetch(request) {
-            const { pathname } = new URL(request.url);
+            const url = new URL(request.url);
+            const { pathname } = url;
 
+            if (pathname === '/denpa/stream') return openStream(url, request.signal);
+            if (pathname === '/denpa/events') return eventStream();
+            if (pathname === '/denpa/tuners') return json({ tuners: pool.status() });
+            if (pathname === '/denpa/channels') return json(loadChannels());
             if (pathname === '/denpa/card' && request.method === 'GET') return json(await cardStatus());
-            if (pathname === '/denpa/scan' && request.method === 'GET') {
-                return json({ ...scan, mirakc: mirakc.alive });
-            }
+            if (pathname === '/denpa/scan' && request.method === 'GET') return json(scan);
             if (pathname === '/denpa/decode' && request.method === 'POST') {
                 const result = await decode(await request.json());
                 return json(result, result.ok ? 200 : 500);
@@ -408,23 +326,12 @@ export function serve(port = PORT): Bun.Server {
                 const result = stopScan();
                 return json(result, result.stopped ? 200 : 409);
             }
-            if (pathname === '/denpa/mirakc/restart' && request.method === 'POST') {
-                const result = await restartMirakc(await request.json().catch(() => ({})));
-                return json(result, result.ok ? 200 : 409);
-            }
             return json({ ok: false, error: 'not found' }, 404);
         },
     });
 }
 
 if (import.meta.main) {
-    if (!existsSync(CONFIG) && existsSync(CONFIG_TEMPLATE)) {
-        mkdirSync(dirname(CONFIG), { recursive: true });
-        copyFileSync(CONFIG_TEMPLATE, CONFIG);
-        log(`初期設定を置きました: ${CONFIG}`);
-    }
-    mkdirSync(EPG_CACHE, { recursive: true });
-
     if ((await run(['pgrep', '-x', 'pcscd'], 10_000)).code !== 0) {
         Bun.spawn(['pcscd', '--foreground', '--disable-polkit'], { stdout: 'ignore', stderr: 'ignore' });
         log('pcscd を起動しました');
@@ -432,11 +339,12 @@ if (import.meta.main) {
 
     for (const signal of ['SIGTERM', 'SIGINT'] as const) {
         process.on(signal, () => {
-            void mirakc.stop().then(() => process.exit(0));
+            pool.closeAll();
+            process.exit(0);
         });
     }
 
-    mirakc.begin();
     serve();
-    log(`listening on :${PORT} (recorded: ${RECORDED})`);
+    log(`listening on :${PORT} (tuners: ${paths.tuners} / channels: ${paths.channels})`);
+    log(`チューナー ${pool.tuners.length} 本 / チャンネル ${loadChannels().length} 件`);
 }

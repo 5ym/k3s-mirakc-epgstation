@@ -7,12 +7,15 @@
  * - 1チャンネルにつき最大 30 秒待ち、NIT と SDT が**両方**揃ったら受信できたとみなす
  * - 録るに値するサービス種別だけ残す (psi.SERVICE_TYPES)
  *
- * チューナーは mirakc の設定に書いてあるものをそのまま使う。台数ぶん並べて回すので、
- * 2台あれば半分の時間で終わる。スキャンの間 mirakc は止まっているので取り合いにならない。
+ * **選局はチューナープールに頼む。** 自分で `recisdb` を起こしていた頃は、
+ * スキャンの間じゅう mirakc を止めておく必要があった。プールが優先度で捌くように
+ * なったので、**録画中でもスキャンできる** (録画のほうが強いので、そのチューナーは
+ * 使われないだけ)。
  */
 
-import { type ChildProcess, spawn } from 'node:child_process';
 import { type FoundService, ServiceReader } from '../src/lib/ts/psi';
+import { type ChannelEntry, type ChannelType, channelEntry } from './channels';
+import type { TunerPool } from './tuners';
 
 /**
  * 1チャンネルあたりの待ち時間。
@@ -22,12 +25,17 @@ import { type FoundService, ServiceReader } from '../src/lib/ts/psi';
  * Mirakurun の 20 秒では取りこぼすことがある
  */
 const TUNE_TIMEOUT = 30_000;
-/** 止めるときの猶予。過ぎたら SIGKILL */
-const KILL_GRACE = 3_000;
-/** stderr は理由を出すぶんだけ持つ。落とすとなぜ失敗したか分からなくなる */
-const STDERR_TAIL = 2_000;
 
-export type ChannelType = 'GR' | 'BS' | 'CS';
+/**
+ * スキャンの優先度。
+ *
+ * **録画より下、番組表より上。** 人が押して待っているので番組表集めには譲らせるが、
+ * 録画を蹴ってまでやることではない。
+ */
+export const SCAN_PRIORITY = 5;
+
+/** チューナーが空くのを待ち直す間隔。録画が終われば空く */
+const BUSY_RETRY = 10_000;
 
 export const CHANNEL_RANGES: Record<ChannelType, { min: number; max: number }> = {
     GR: { min: 13, max: 62 },
@@ -37,20 +45,6 @@ export const CHANNEL_RANGES: Record<ChannelType, { min: number; max: number }> =
 
 /** BS は1つの物理チャンネルに最大4本の TS が相乗りしている */
 const BS_SLOTS = 4;
-
-export interface Tuner {
-    name: string;
-    types: string[];
-    command: string;
-    disabled?: boolean;
-}
-
-export interface ChannelEntry {
-    name: string;
-    type: ChannelType;
-    channel: string;
-    services: number[];
-}
 
 /** 選局する物理チャンネルの一覧。recisdb が受け付ける書き方で返す */
 export function channelsFor(type: ChannelType, minimum?: number, maximum?: number): string[] {
@@ -68,62 +62,6 @@ export function channelsFor(type: ChannelType, minimum?: number, maximum?: numbe
     return range.map((ch) => `CS${String(ch).padStart(2, '0')}`);
 }
 
-/** mirakc のチューナーコマンド (Mustache) にチャンネルを埋める */
-export function render(command: string, channel: string, type: string): string {
-    const values: Record<string, string> = {
-        channel,
-        channel_type: type,
-        duration: '-',
-        extra_args: '',
-    };
-    return command.replace(/\{\{\{?\s*([a-z_]+)\s*\}?\}\}/g, (_, name: string) => values[name] ?? '');
-}
-
-/**
- * mirakc の channels に入れる1件。
- *
- * 物理チャンネルごとに1件にする。サービスごとに分けても選局先は同じで、
- * 設定が長くなるだけ。
- */
-export function channelEntry(type: ChannelType, channel: string, services: FoundService[]): ChannelEntry {
-    return {
-        name: channel,
-        type,
-        channel,
-        services: services.map((service) => service.serviceId).sort((a, b) => a - b),
-    };
-}
-
-/**
- * 選局コマンドを丸ごと終わらせる。
- *
- * **プロセスを1つ殺すだけでは足りない。** `sh -c` に渡すのがパイプラインだと、
- * sh を殺しても recisdb は生き残ってチューナーを掴んだままになり、次の
- * チャンネルが「デバイスが使用中」で失敗し続ける。プロセスグループごと落とす。
- *
- * 終わるまで待つのも同じ理由。待たずに次を選局すると、まだ閉じていない
- * デバイスを開きに行くことになる。
- */
-async function stop(child: ChildProcess): Promise<void> {
-    if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
-
-    const exited = new Promise<void>((resolve) => child.once('close', () => resolve()));
-    const kill = (signal: NodeJS.Signals) => {
-        try {
-            // 負のPIDでプロセスグループ全体に送る (detached で起こしてある)
-            process.kill(-child.pid!, signal);
-        } catch {
-            // もう居ない
-        }
-    };
-
-    kill('SIGTERM');
-    const gone = await Promise.race([exited.then(() => true), Bun.sleep(KILL_GRACE).then(() => false)]);
-    if (gone) return;
-    kill('SIGKILL');
-    await Promise.race([exited, Bun.sleep(KILL_GRACE)]);
-}
-
 export interface ScanResult {
     services: FoundService[] | null;
     error: string | null;
@@ -132,7 +70,7 @@ export interface ScanResult {
 }
 
 /**
- * 1チャンネル選局して、NIT と SDT が揃うまで読む。
+ * 流れてくる TS を、NIT と SDT が揃うまで読む。
  *
  * 揃った時点で打ち切る。最後まで読む必要はないし、居ない局で 30 秒待つのは
  * 総当たりだと効いてくる。
@@ -141,46 +79,35 @@ export interface ScanResult {
  * 読めなかった」は原因がまるで違い、まとめてしまうと直しようがない。
  */
 export async function readServices(
-    command: string,
+    stream: ReadableStream<Uint8Array>,
     timeout = TUNE_TIMEOUT,
     abort?: AbortSignal,
 ): Promise<ScanResult> {
-    let child: ChildProcess;
-    try {
-        child = spawn('sh', ['-c', command], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
-    } catch (error) {
-        return { services: null, error: String(error), signal: false };
-    }
-
     const reader = new ServiceReader();
+    const source = stream.getReader();
     let bytes = 0;
     let message = '';
 
-    // recisdb はうまくいかない理由を stderr に書く (デバイスが無い・使用中など)。
-    // 捨てると画面には「受信できませんでした」しか出ず、原因が分からない
-    child.stderr?.on('data', (chunk: Buffer) => {
-        message = `${message}${chunk.toString()}`.slice(-STDERR_TAIL);
-    });
-
-    await new Promise<void>((resolve) => {
+    const deadline = new Promise<void>((resolve) => {
         const timer = setTimeout(resolve, timeout);
-        const finish = () => {
-            clearTimeout(timer);
-            abort?.removeEventListener('abort', finish);
-            resolve();
-        };
-        child.stdout?.on('data', (chunk: Buffer) => {
-            bytes += chunk.length;
-            if (reader.feed(chunk)) finish();
-        });
-        // 電波が無いと recisdb はすぐ落ちる。閉じたら待たずに次へ
-        child.once('close', finish);
-        child.once('error', finish);
-        // 中断されたら、選局の途中でも待つのをやめる (下で確実に殺す)
-        abort?.addEventListener('abort', finish, { once: true });
+        timer.unref?.();
+        abort?.addEventListener('abort', () => resolve(), { once: true });
     });
 
-    await stop(child);
+    const read = (async () => {
+        for (;;) {
+            const { done, value } = await source.read();
+            if (done || value === undefined) return;
+            bytes += value.byteLength;
+            if (reader.feed(value)) return;
+        }
+    })().catch((error: unknown) => {
+        // 選局が落ちた理由はここに来る (デバイスが無い・使用中など)
+        message = String(error);
+    });
+
+    await Promise.race([read, deadline]);
+    await source.cancel().catch(() => undefined);
 
     const signal = bytes > 0;
     if (reader.complete) return { services: reader.services(), error: null, signal };
@@ -204,7 +131,6 @@ export interface Progress {
 
 /** チューナーの台数ぶん並べて総当たりする */
 export class Scanner {
-    private readonly tuners: Tuner[];
     /** 中断の合図。押されたら選局を殺し、残りのチャンネルには行かない */
     private readonly aborter = new AbortController();
     private readonly found = new Map<string, ChannelEntry>();
@@ -214,11 +140,9 @@ export class Scanner {
     private retry: string[] = [];
 
     constructor(
-        tuners: Tuner[],
+        private readonly pool: TunerPool,
         private readonly onProgress: (progress: Progress) => void = () => {},
-    ) {
-        this.tuners = tuners.filter((tuner) => !tuner.disabled);
-    }
+    ) {}
 
     /**
      * 中断する。
@@ -238,7 +162,9 @@ export class Scanner {
     async run(targets: [ChannelType, string[]][]): Promise<ChannelEntry[]> {
         for (const [type, channels] of targets) {
             if (this.aborted) break;
-            const usable = this.tuners.filter((tuner) => tuner.types.includes(type));
+            const usable = this.pool.tuners.filter(
+                (tuner) => tuner.disabled !== true && tuner.types.includes(type),
+            );
             if (usable.length === 0) {
                 this.onProgress({
                     line: `${type}: 対応するチューナーがありません`,
@@ -250,7 +176,7 @@ export class Scanner {
             const pending = [...channels];
             this.tuned = 0;
             this.retry = [];
-            await Promise.all(usable.map((tuner) => this.work(tuner, type, pending)));
+            await Promise.all(usable.map(() => this.work(type, pending)));
 
             /*
              * 電波は来たのに揃わなかったチャンネルは、もう一度だけ回す。
@@ -263,7 +189,7 @@ export class Scanner {
             this.retry = [];
             if (retry.length > 0 && !this.aborted) {
                 this.onProgress({ line: `${type}: ${retry.length}ch をもう一度試します` });
-                await Promise.all(usable.map((tuner) => this.work(tuner, type, retry, false)));
+                await Promise.all(usable.map(() => this.work(type, retry, false)));
             }
             /*
              * 種別ごとに1行でまとめる。
@@ -289,17 +215,33 @@ export class Scanner {
     }
 
     /** first が false のときは数え直さない (同じチャンネルを2回数えないため) */
-    private async work(tuner: Tuner, type: ChannelType, pending: string[], first = true): Promise<void> {
+    private async work(type: ChannelType, pending: string[], first = true): Promise<void> {
         for (;;) {
             if (this.aborted) return;
             const channel = pending.shift();
             if (channel === undefined) return;
 
-            const { services, error, signal } = await readServices(
-                render(tuner.command, channel, type),
-                undefined,
-                this.aborter.signal,
-            );
+            let stream: ReadableStream<Uint8Array>;
+            try {
+                stream = this.pool.open({
+                    type,
+                    channel,
+                    priority: SCAN_PRIORITY,
+                    use: `scan ${channel}`,
+                });
+            } catch (error) {
+                /*
+                 * チューナーが全部塞がっている。**飛ばさずに待つ。**
+                 * 録画中のチューナーは蹴れないので、ここで諦めるとその
+                 * チャンネルだけ設定から消える
+                 */
+                this.onProgress({ line: `${channel}: 空きを待っています (${error})` });
+                pending.unshift(channel);
+                await Bun.sleep(BUSY_RETRY);
+                continue;
+            }
+
+            const { services, error, signal } = await readServices(stream, undefined, this.aborter.signal);
             if (this.aborted) return;
             const counts = first ? { scanned: 1 } : {};
             if (first && signal) this.tuned++;

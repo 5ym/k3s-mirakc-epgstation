@@ -1,0 +1,23 @@
+# 繋いである機材。**ここは人が書く。** エージェントは読むだけで、書き換えない。
+#
+# スキャンで分かるのは「どのチャンネルに何が居るか」だけで、チューナーが何本あって
+# 何を受けられるかは機材の話。分かれているので、スキャンのたびに設定が飛ぶことも
+# 手で書いたコメントが消えることもない (見つかったチャンネルは channels.json)。
+#
+# command は選局して TS を標準出力に流すもの。`{{channel}}` にチャンネル名が入る。
+# recisdb は既定で ARIB STD-B25 を復号するが、カードが開けないときは黙って
+# 素通しする。電波は二度と戻ってこないので、掛かったままでも録っておくほうがまし
+# (denpa がエンコードの前に見て、必要ならエージェントに解かせる)。
+tuners:
+    - name: adapter0
+      types: [BS, CS]
+      command: recisdb tune --device /dev/dvb/adapter0/frontend0 --channel {{channel}} -
+    - name: adapter1
+      types: [GR]
+      command: recisdb tune --device /dev/dvb/adapter1/frontend0 --channel {{channel}} -
+    - name: adapter2
+      types: [BS, CS]
+      command: recisdb tune --device /dev/dvb/adapter2/frontend0 --channel {{channel}} -
+    - name: adapter3
+      types: [GR]
+      command: recisdb tune --device /dev/dvb/adapter3/frontend0 --channel {{channel}} -
