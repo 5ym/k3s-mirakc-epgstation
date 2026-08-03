@@ -63,11 +63,15 @@ export function reconcile(): { checked: number; removed: number } {
 export function pruneHistory(): { reservations: number; recordings: number; jobs: number } {
     const cutoff = now() - config.historyRetention;
 
-    // 録画中や予約中のものは、いつ立てたかに関係なく残す
+    /*
+     * 録画中や予約中のものは、いつ立てたかに関係なく残す。
+     * 「終わった予約」は**取り消し・録り逃しか、もう録り始めたもの**。
+     * 録り始めたあとの顛末は録画の行が持っているので、予約側では見ない
+     */
     const reservations = database()
         .prepare(
             `DELETE FROM reservations
-             WHERE state IN ('done', 'failed', 'canceled', 'missed') AND end_at < ?`,
+             WHERE (state IN ('canceled', 'missed') OR started_at IS NOT NULL) AND end_at < ?`,
         )
         .run(cutoff).changes;
 

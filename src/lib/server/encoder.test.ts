@@ -70,34 +70,28 @@ describe('コマ数の決め方', () => {
         expect(args).toContain('-preset');
     });
 
-    test('字幕は文字のままと焼いたものを2本入れる', () => {
+    test('字幕は PGS 1本だけ。入力も1回しか開かない', () => {
         for (const codec of ['av1', 'h264'] as const) {
-            const args = buildArgs('/in.m2ts', '/out.mkv', 1, null, codec);
-            // 同じ入力を2回開き、片方は ASS、もう片方はビットマップで読む
-            expect(args.filter((a) => a === '/in.m2ts')).toHaveLength(2);
-            expect(argValue(args, '-c:s:0')).toBe('ass');
+            const args = buildArgs('/in.m2ts', '/out.mkv', 1, null, codec, { pgsFile: '/tmp/s.sup' });
             /*
-             * 焼くほうは dvdsub。dvbsub は ffmpeg が CodecPrivate を書かないので
-             * VLC がトラックごと捨てる (届いても復号が壊れる)。PGS は ffmpeg に
-             * 符号器が無い。VLC が実際に読めるビットマップ字幕はこれだけ
+             * ASS (外字が「〓」になる) と dvdsub (1枚4色) を作るために同じ入力を
+             * 2回開いていた頃の名残を残さない。PGS が放送どおりに出るので、
+             * 見た目の違うものを「字幕」として並べる理由が無くなった
              */
-            expect(argValue(args, '-c:s:1')).toBe('dvdsub');
-            // 既定は ASS。どの再生側でも素直に出る
+            expect(args.filter((a) => a === '/in.m2ts')).toHaveLength(1);
+            expect(args).not.toContain('ass');
+            expect(args).not.toContain('dvdsub');
+            expect(argValue(args, '-c:s:0')).toBe('copy');
             expect(argValue(args, '-disposition:s:0')).toBe('default');
-            expect(argValue(args, '-disposition:s:1')).toBe('0');
+            expect(argValue(args, '-c:s:1')).toBeUndefined();
             expect(argValue(args, '-c:a')).toBe('libopus');
         }
     });
 
-    test('焼く側には画面の大きさを渡す', () => {
-        // 渡さないと libaribcaption は 1440x1080 とみなすので、
-        // 1920x1080 の録画では字幕だけ横に伸びる
+    test('画面の大きさはここでは使わない', () => {
+        // 絵にするのは .sup を作る側 (buildPgs)。エンコード側は copy するだけ
         const args = buildArgs('/in.m2ts', '/out.mkv', 1, null, 'av1', { canvasSize: '1920x1080' });
-        expect(argValue(args, '-canvas_size')).toBe('1920x1080');
-        // 文字のままのほうには要らない (位置は ASS の座標系で書かれる)
-        expect(args.filter((a) => a === '-canvas_size')).toHaveLength(1);
-        // 大きさが取れなかったときは付けない
-        expect(buildArgs('/in.m2ts', '/out.mkv', 1, null)).not.toContain('-canvas_size');
+        expect(args).not.toContain('-canvas_size');
     });
 
     test('デュアルモノは左右を別トラックに分ける', () => {
@@ -115,28 +109,27 @@ describe('コマ数の決め方', () => {
         // CMはエンコードの前にTSの段階で切るので、エンコード側は素直に字幕を通すだけ
         const args = buildArgs('/in.m2ts', '/out.mkv', 1, null, 'av1', {
             keep: [{ start: 0, end: 300 }],
+            pgsFile: '/tmp/s.sup',
         });
         expect(args).not.toContain('-sn');
-        expect(argValue(args, '-c:s:0')).toBe('ass');
+        expect(argValue(args, '-c:s:0')).toBe('copy');
     });
 
-    test('チャプターは字幕2本の後ろ、3つ目の入力として読み込む', () => {
+    test('チャプターだけならそれが2つ目の入力になる', () => {
         const args = buildArgs('/in.m2ts', '/out.mkv', 1, null, 'av1', { chaptersFile: '/tmp/c.txt' });
         expect(args).toContain('/tmp/c.txt');
-        expect(argValue(args, '-map_chapters')).toBe('2');
+        expect(argValue(args, '-map_chapters')).toBe('1');
     });
 
-    test('PGS があれば3本目の字幕として copy で入れる', () => {
+    test('PGS は copy でそのまま入れる', () => {
         /*
          * 放送どおりの色数 (1枚256色) が入るのはこれだけ。ffmpeg は PGS を
          * 作れないので denpa が .sup を書いて渡す (src/lib/pgs.ts)
          */
         const args = buildArgs('/in.m2ts', '/out.mkv', 1, null, 'av1', { pgsFile: '/tmp/s.sup' });
         expect(args).toContain('/tmp/s.sup');
-        expect(argValue(args, '-c:s:2')).toBe('copy');
-        expect(args).toContain('2:s:0?');
-        // 既定は文字のまま (ASS)。焼いたほうを既定にすると VLC が落ちる
-        expect(argValue(args, '-disposition:s:2')).toBe('0');
+        expect(args).toContain('1:s:0?');
+        expect(argValue(args, '-c:s:0')).toBe('copy');
     });
 
     test('PGS とチャプターが両方あっても番号がずれない', () => {
@@ -144,14 +137,15 @@ describe('コマ数の決め方', () => {
             pgsFile: '/tmp/s.sup',
             chaptersFile: '/tmp/c.txt',
         });
-        expect(args).toContain('2:s:0?');
-        // 入力は ASS / bitmap / sup / チャプター の順
-        expect(argValue(args, '-map_chapters')).toBe('3');
+        expect(args).toContain('1:s:0?');
+        // 入力は 本編 / sup / チャプター の順
+        expect(argValue(args, '-map_chapters')).toBe('2');
     });
 
-    test('PGS が無ければ字幕は2本のまま', () => {
+    test('PGS が無ければ字幕トラックは入らない', () => {
         const args = buildArgs('/in.m2ts', '/out.mkv', 1, null);
-        expect(argValue(args, '-c:s:2')).toBeUndefined();
+        expect(argValue(args, '-c:s:0')).toBeUndefined();
+        expect(args.filter((a) => a.startsWith('-disposition:s'))).toHaveLength(0);
     });
 });
 

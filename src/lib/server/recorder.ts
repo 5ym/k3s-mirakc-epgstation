@@ -37,9 +37,16 @@ function summary(recording: Recording) {
 }
 
 function fail(recordingId: number, error: string): void {
+    /*
+     * 理由を書けば状態は決まる (recordings.state は生成列)。
+     * 掴むのも終わりなので、録り終えた時刻も同時に埋める
+     */
     database()
-        .prepare(`UPDATE recordings SET state = 'failed', error = ?, updated_at = ? WHERE id = ?`)
-        .run(error, now(), recordingId);
+        .prepare(
+            `UPDATE recordings SET error = ?, finished_at = COALESCE(finished_at, ?), updated_at = ?
+             WHERE id = ?`,
+        )
+        .run(error, now(), now(), recordingId);
     const rec = queryOne<Recording>('SELECT * FROM recordings WHERE id = ?', recordingId);
     if (rec !== undefined) {
         notify({
@@ -49,11 +56,7 @@ function fail(recordingId: number, error: string): void {
             error,
         });
     }
-    if (rec?.reservation_id != null) {
-        database()
-            .prepare(`UPDATE reservations SET state = 'failed', updated_at = ? WHERE id = ?`)
-            .run(now(), rec.reservation_id);
-    }
+    // 予約側には何も書かない。失敗したことは録画の行が持っている
 }
 
 export function createRecording(reservation: Reservation): Recording {
@@ -64,11 +67,12 @@ export function createRecording(reservation: Reservation): Recording {
 
     const info = database()
         .prepare(
+            // finished_at を入れないので、この行は「録画中」として読まれる
             `INSERT INTO recordings
                 (reservation_id, program_id, service_id, service_name, name, series, subtitle,
-                 description, start_at, end_at, audio_type, genre_detail, state, keep_original, cm_cut, codec,
+                 description, start_at, end_at, audio_type, genre_detail, keep_original, cm_cut, codec,
                  created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'recording', ?, ?, ?, ?, ?)`,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
             reservation.id,
@@ -365,17 +369,12 @@ async function pump(recording: Recording, controller: AbortController): Promise<
 /** 録画完了。エンコードするならキューに積み、しないならそのまま保存先に置く */
 export function finish(recordingId: number, size: number): void {
     const at = now();
+    // 録り終えた時刻が入った時点で「録画済み」になる (recordings.state は生成列)
     database()
-        .prepare(`UPDATE recordings SET state = 'recorded', ts_size = ?, updated_at = ? WHERE id = ?`)
-        .run(size, at, recordingId);
+        .prepare(`UPDATE recordings SET finished_at = ?, ts_size = ?, updated_at = ? WHERE id = ?`)
+        .run(at, size, at, recordingId);
 
     const recording = queryOne<Recording>('SELECT * FROM recordings WHERE id = ?', recordingId)!;
-    if (recording.reservation_id != null) {
-        database()
-            .prepare(`UPDATE reservations SET state = 'done', updated_at = ? WHERE id = ?`)
-            .run(at, recording.reservation_id);
-    }
-
     const reservation =
         recording.reservation_id == null
             ? undefined
@@ -403,7 +402,8 @@ export function finish(recordingId: number, size: number): void {
     void writeThumbnail(dest, (recording.end_at - recording.start_at) / 1000);
     database()
         .prepare(
-            `UPDATE recordings SET state = 'available', library_path = ?, ts_path = NULL, updated_at = ? WHERE id = ?`,
+            // 保存先に置いた時点で「視聴可能」になる
+            `UPDATE recordings SET library_path = ?, ts_path = NULL, updated_at = ? WHERE id = ?`,
         )
         .run(dest, now(), recording.id);
 }

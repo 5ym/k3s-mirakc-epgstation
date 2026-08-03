@@ -121,11 +121,14 @@ export interface EncodeOptions {
     chaptersFile?: string | null;
     /** 60コマ/秒で出す。滑らかになる代わりに時間もサイズも約2倍 (smoothMotionFor) */
     smoothMotion?: boolean;
-    /** 字幕を絵で焼くときの画面の大きさ ("1920x1080")。無ければ 1440x1080 とみなされる */
+    /**
+     * 字幕を絵にするときの画面の大きさ ("1920x1080")。無ければ 1440x1080 とみなされる。
+     * 使うのは .sup を作る側 (buildPgs) で、buildArgs はこれを見ない
+     */
     canvasSize?: string;
     /**
      * 放送どおりに描いた字幕を入れた PGS (.sup)。
-     * denpa が別に作って渡す (src/lib/server/subtitle.ts)。無ければ入れない
+     * denpa が別に作って渡す (src/lib/server/subtitle.ts)。無ければ字幕は入らない
      */
     pgsFile?: string | null;
 }
@@ -150,40 +153,26 @@ export function buildArgs(
     const args = ['-y'];
 
     /*
-     * ARIB字幕は**2本入れる**。同じ入力を2回開いて、片方は文字のまま (ASS)、
-     * もう片方は絵に焼いて持つ。
+     * ARIB字幕は**PGS 1本だけ**入れる。denpa が別に作った .sup をそのまま copy する
+     * (作り方は src/lib/server/subtitle.ts)。
      *
-     * どちらか一方では足りない。
-     * - ASS … Matroska が元から想定している形で、VLC も Kodi も Infuse も素直に出す。
-     *   ただし**外字 (DRCS) は全部「〓」になる** (libaribcaption は ASS を組むとき
+     * 以前は ASS (文字) と dvdsub (絵・4色) の2本を、ここで同じ入力を2回開いて
+     * 作っていた。PGS が入ったので、どちらも残す理由が無くなった。
+     * - ASS … **外字 (DRCS) が全部「〓」になる** (libaribcaption は ASS を組むとき
      *   DRCS を下駄記号に置き換える。`replace_drcs` はビットマップ専用)。
-     *   背景の箱も影の色で代用するだけで、点滅は表せない
-     * - 絵に焼いたほう … 放送されたとおりの字が出る。外字もそのまま絵になる
+     *   背景の箱も影の色で代用するだけで、位置も色も放送どおりにはならない
+     * - dvdsub … 1枚あたり4色まで。実測230色の字幕を文字・縁・箱・透明で
+     *   使い切ってしまう。PGS が無かった頃の妥協で、色が落ちる
+     * - PGS … 1枚256色。位置も背景の箱も放送そのまま。Blu-ray と同じ形なので
+     *   VLC / Kodi / Infuse / Jellyfin のどれも読める
      *
-     * 焼くほうは **dvdsub (S_VOBSUB)**。ffmpeg で作れるビットマップ字幕のうち、
-     * VLC が実際に読めるのはこれだけだった。
-     * - dvbsub は表現力は上 (256色) だが、**ffmpeg は CodecPrivate を書かない**。
-     *   VLC の mkv 読み取りは S_DVBSUB に4バイト以上の CodecPrivate を要求するので、
-     *   トラックごと捨てられる。届いたとしても、ffmpeg が字幕ごとに必ず出す
-     *   「消すための空パケット」で VLC の dvbsub 復号が壊れる (修正は 2026-07 に
-     *   入ったばかりで、まだどの released 版にも乗っていない)
-     * - PGS なら256色で申し分ないが、**ffmpeg に符号器が無い** (復号のみ)
-     * - dvdsub は1枚あたり4色まで。文字・縁取り・背景・透明でちょうど使い切る。
-     *   色分けした字幕は色が落ちるが、出ないよりはるかにまし
-     *
-     * ASS を既定のトラックにして、原寸で見たいときに焼いたほうへ切り替える。
-     * 字幕は数十KBしかないので、入れておいて損が無い。
-     *
-     * `-font` は libaribcaption が ASS に書き込むフォント名。
-     * `Rounded M+ 1m for ARIB` は公式推奨で、丸ゴシック+JIS第三水準漢字+ARIB外字を
-     * 1本でカバーする (イメージに入れてある)。無ければ端末側の丸ゴシックに落ちる。
-     * `ass_single_rect` は「複数の矩形を扱えない再生側」向けの回避策 (VLC がそれ)
+     * PGS が作れなかったとき (字幕の無い番組・sub2video が落ちた場合) は
+     * 字幕トラックが1本も入らない。ASS を保険に残すことはしない —
+     * 見た目が違うものが「字幕」として混ざるほうが紛らわしい
      */
-    args.push('-fix_sub_duration');
 
     /** 入力ごとに同じ前置きが要る。デコーダの設定は入力ファイル単位で効く */
-    const openInput = (subtitles: string[]) => {
-        args.push(...subtitles);
+    const openInput = () => {
         if (seek !== null) {
             // 録画開始直後の1秒未満だけ、多重化されたもう一方の映像ストリームのPAT/PMTが確定しておらず
             // エンコーダの初期化(fps/解像度確定)自体が失敗することがある。
@@ -195,24 +184,12 @@ export function buildArgs(
         args.push('-i', input);
     };
 
-    openInput(['-sub_type', 'ass', '-ass_single_rect', '1', '-font', SUBTITLE_FONTS]);
+    openInput();
     /*
-     * 焼くほうには画面の大きさを渡す。libaribcaption は指定が無いと 1440x1080
-     * (PROFILE_A) とみなすので、1920x1080 で録れているものは字幕だけ横に伸びる
+     * 放送どおりに描いた字幕 (PGS)。ffmpeg は PGS を作れないが読むことはできるので、
+     * ここでは copy するだけ
      */
-    const canvas = options.canvasSize;
-    openInput([
-        '-sub_type',
-        'bitmap',
-        ...(canvas === undefined ? [] : ['-canvas_size', canvas]),
-        '-font',
-        SUBTITLE_FONTS,
-    ]);
-    /*
-     * 放送どおりに描いた字幕 (PGS)。denpa が作った .sup をそのまま入れる。
-     * ffmpeg は PGS を作れないが読むことはできるので、ここでは copy するだけ
-     */
-    let next = 2;
+    let next = 1;
     let pgs = -1;
     if (options.pgsFile != null) {
         pgs = next++;
@@ -224,18 +201,10 @@ export function buildArgs(
     }
     // mapで解決できない(型が不明な)ストリームは黙ってスキップする。エンコード自体を止めないため
     args.push('-ignore_unknown');
-    /*
-     * 字幕。?は字幕ストリームが無い録画でもエンコードが失敗しないようにするため。
-     * 開いている口は同じ番組なので、字幕は先頭の1本だけ拾う (文字スーパーは追わない)。
-     * 既定は ASS のほう。焼いたほうを既定にすると VLC がそれを開いて落ちる
-     */
-    args.push('-map', '0:s:0?', '-c:s:0', 'ass', '-metadata:s:s:0', 'title=字幕');
-    args.push('-map', '1:s:0?', '-c:s:1', 'dvdsub', '-metadata:s:s:1', 'title=字幕 (焼き 4色)');
-    args.push('-disposition:s:0', 'default', '-disposition:s:1', '0');
+    // 字幕。?は .sup が空だった場合でもエンコードを止めないため
     if (pgs >= 0) {
-        // 放送どおりの色数 (1枚256色) が入るのはこれだけ。dvdsub は4色まで
-        args.push(`-map`, `${pgs}:s:0?`, '-c:s:2', 'copy', '-metadata:s:s:2', 'title=字幕 (放送そのまま)');
-        args.push('-disposition:s:2', '0');
+        args.push('-map', `${pgs}:s:0?`, '-c:s:0', 'copy', '-metadata:s:s:0', 'title=字幕');
+        args.push('-disposition:s:0', 'default');
     }
     // インタレ解除 (bwdif は yadif よりコーミング残りが少ない)。
     // なめらかさの指定でコマ数が変わる (videoArgs)
@@ -264,8 +233,9 @@ export function buildArgs(
     }
     args.push('-c:a', 'libopus', '-b:a', '256k'); // 元放送(AAC 256kbps)と同じビットレート
 
-    // トラックのdefaultフラグを明示(未設定だとプレイヤーが自動選択せず字幕/音声が出ないことがある)
-    args.push('-disposition:s:0', 'default', '-disposition:v:0', 'default', '-disposition:a:0', 'default');
+    // トラックのdefaultフラグを明示(未設定だとプレイヤーが自動選択せず音声が出ないことがある。
+    // 字幕は上で入れたときだけ立てる)
+    args.push('-disposition:v:0', 'default', '-disposition:a:0', 'default');
     // 進捗を key=value 形式で標準出力に吐かせる。stderr の人間向けログを目視パースするより確実
     args.push('-progress', 'pipe:1');
     /*
@@ -693,14 +663,17 @@ function keepOriginal(): boolean {
     return settings().keepOriginal;
 }
 
-/** エンコードの失敗を記録して知らせる。理由はそのまま録画の行に出る */
+/**
+ * エンコードの失敗を記録して知らせる。
+ *
+ * **録画の行には何も書かない。** 落ちたのは焼き直しのほうで、元の録画は無事なので、
+ * 録画そのものを「失敗」にすると観られるはずのものが観られなくなる (実際にそうなっていた)。
+ * 理由はジョブが持ち、一覧は最新のジョブを見て出す
+ */
 function fail(jobId: number, recording: Recording, reason: string): void {
     database()
         .prepare(`UPDATE encode_jobs SET state = 'failed', error = ?, finished_at = ? WHERE id = ?`)
         .run(reason, now(), jobId);
-    database()
-        .prepare(`UPDATE recordings SET state = 'failed', error = ?, updated_at = ? WHERE id = ?`)
-        .run('エンコードに失敗しました', now(), recording.id);
     emit('recordings');
     notify({
         event: 'encode.failed',
@@ -727,9 +700,7 @@ function finishCanceled(jobId: number, recording: Recording, working: string | n
     database()
         .prepare(`UPDATE encode_jobs SET state = 'canceled', finished_at = ? WHERE id = ?`)
         .run(now(), jobId);
-    database()
-        .prepare(`UPDATE recordings SET state = 'recorded', updated_at = ? WHERE id = ?`)
-        .run(now(), recording.id);
+    // 録画の行は触らない。ジョブが消えれば「録画済み」に戻って見える
     emit('recordings');
 }
 
@@ -750,12 +721,10 @@ async function runJob(jobId: number): Promise<void> {
     }
 
     /*
-     * 前に失敗していたら、その痕跡はここで消す。
-     * 残したままだと、録り直して成功しても行に赤い理由が出続ける
+     * 「エンコード中」は録画の行には書かない。動いているジョブがあることが
+     * そのまま「エンコード中」なので、一覧はそれを見て出す (format.encodeLabel)。
+     * 前の失敗の理由もジョブ側にあり、いちばん新しいジョブだけを見ているので消して回る必要もない
      */
-    database()
-        .prepare(`UPDATE recordings SET state = 'encoding', error = NULL, updated_at = ? WHERE id = ?`)
-        .run(now(), recording.id);
     emit('recordings');
 
     const output = libraryPath(recording, '.mkv');
@@ -938,17 +907,16 @@ async function runJob(jobId: number): Promise<void> {
         },
     });
 
+    // 保存先が入った時点で「視聴可能」になる (recordings.state は生成列)
     if (keepOriginal()) {
         database()
-            .prepare(
-                `UPDATE recordings SET state = 'available', library_path = ?, ts_size = ?, updated_at = ? WHERE id = ?`,
-            )
+            .prepare(`UPDATE recordings SET library_path = ?, ts_size = ?, updated_at = ? WHERE id = ?`)
             .run(output, size, now(), recording.id);
     } else {
         removeIfExists(recording.ts_path);
         database()
             .prepare(
-                `UPDATE recordings SET state = 'available', library_path = ?, ts_path = NULL, ts_size = ?, updated_at = ? WHERE id = ?`,
+                `UPDATE recordings SET library_path = ?, ts_path = NULL, ts_size = ?, updated_at = ? WHERE id = ?`,
             )
             .run(output, size, now(), recording.id);
     }

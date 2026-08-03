@@ -26,22 +26,36 @@ function seed(): void {
     const db = database();
     db.exec('DELETE FROM reservations; DELETE FROM recordings; DELETE FROM encode_jobs');
 
+    /*
+     * 「終わった予約」は取り消し・録り逃しか、録り始めたもの (started_at が入る)。
+     * 予約の行に 'done' や 'failed' は入らない — 顛末は録画の行が持っている
+     */
     const reservation = db.prepare(
-        `INSERT INTO reservations (id, program_id, service_id, name, start_at, end_at, state, created_at, updated_at)
-         VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO reservations (id, program_id, service_id, name, start_at, end_at, state, started_at, created_at, updated_at)
+         VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?)`,
     );
-    reservation.run(1, 1, '古い完了', now - 30 * DAY, now - 30 * DAY, 'done', now, now);
-    reservation.run(2, 2, '古い取り消し', now - 30 * DAY, now - 30 * DAY, 'canceled', now, now);
-    reservation.run(3, 3, 'これから', now + DAY, now + DAY, 'scheduled', now, now);
-    reservation.run(4, 4, '最近の完了', now - DAY, now - DAY, 'done', now, now);
+    reservation.run(1, 1, '古い完了', now - 30 * DAY, now - 30 * DAY, 'scheduled', now - 30 * DAY, now, now);
+    reservation.run(2, 2, '古い取り消し', now - 30 * DAY, now - 30 * DAY, 'canceled', null, now, now);
+    reservation.run(3, 3, 'これから', now + DAY, now + DAY, 'scheduled', null, now, now);
+    reservation.run(4, 4, '最近の完了', now - DAY, now - DAY, 'scheduled', now - DAY, now, now);
 
+    // state は生成列なので入れられない。録り終えた時刻と保存先で「視聴可能」になる
     const recording = db.prepare(
-        `INSERT INTO recordings (id, service_id, name, start_at, end_at, state, deleted_at, created_at, updated_at)
-         VALUES (?, 1, ?, ?, ?, 'available', ?, ?, ?)`,
+        `INSERT INTO recordings (id, service_id, name, start_at, end_at, finished_at, library_path, deleted_at, created_at, updated_at)
+         VALUES (?, 1, ?, ?, ?, ?, '/library/x.mkv', ?, ?, ?)`,
     );
-    recording.run(1, '古い削除済み', now - 30 * DAY, now - 30 * DAY, now - 30 * DAY, now, now);
-    recording.run(2, '最近の削除済み', now - DAY, now - DAY, now - DAY, now, now);
-    recording.run(3, '残っている録画', now - 30 * DAY, now - 30 * DAY, null, now, now);
+    recording.run(
+        1,
+        '古い削除済み',
+        now - 30 * DAY,
+        now - 30 * DAY,
+        now - 30 * DAY,
+        now - 30 * DAY,
+        now,
+        now,
+    );
+    recording.run(2, '最近の削除済み', now - DAY, now - DAY, now - DAY, now - DAY, now, now);
+    recording.run(3, '残っている録画', now - 30 * DAY, now - 30 * DAY, now - 30 * DAY, null, now, now);
 
     const job = db.prepare(
         `INSERT INTO encode_jobs (id, recording_id, state, created_at, finished_at) VALUES (?, ?, ?, ?, ?)`,

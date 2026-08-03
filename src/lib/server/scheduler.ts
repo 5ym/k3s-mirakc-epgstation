@@ -41,7 +41,8 @@ export async function resolveConflicts(): Promise<{ accepted: number; rejected: 
             `SELECT r.*, s.type AS type, s.channel AS channel
              FROM reservations r
              JOIN services s ON s.id = r.service_id
-             WHERE r.state IN ('scheduled', 'conflict') AND r.end_at > ?
+             -- 録り始めたものは数え直さない。掴む本数はもう決まっている
+             WHERE r.state IN ('scheduled', 'conflict') AND r.started_at IS NULL AND r.end_at > ?
              ORDER BY r.start_at`,
         )
         .all(now()) as Candidate[];
@@ -92,7 +93,7 @@ export async function tick(): Promise<void> {
     const expired = database()
         .prepare(
             `UPDATE reservations SET state = 'missed', updated_at = ?
-             WHERE state IN ('scheduled', 'conflict') AND end_at <= ?`,
+             WHERE state IN ('scheduled', 'conflict') AND started_at IS NULL AND end_at <= ?`,
         )
         .run(at, at);
     if (expired.changes > 0) emit('reservations');
@@ -107,17 +108,22 @@ export async function tick(): Promise<void> {
     const due = database()
         .prepare(
             `SELECT * FROM reservations
-             WHERE state = 'scheduled' AND start_at - ? <= ? AND end_at > ?`,
+             WHERE state = 'scheduled' AND started_at IS NULL AND start_at - ? <= ? AND end_at > ?`,
         )
         .all(config.startMargin, at, at) as Reservation[];
 
     for (const reservation of due) {
-        // 状態を先に進めてから録画を開始する。tick が重なっても二重に開始しない
+        /*
+         * 録り始めた時刻を先に立ててから開始する。tick が重なっても二重に開始しない。
+         * 状態の文字列を 'recording' に進めていた頃と同じ鍵の掛け方だが、
+         * こちらは録画の行と食い違いようがない (録り始めたかどうかは事実ひとつ)
+         */
         const claimed = database()
             .prepare(
-                `UPDATE reservations SET state = 'recording', updated_at = ? WHERE id = ? AND state = 'scheduled'`,
+                `UPDATE reservations SET started_at = ?, updated_at = ?
+                 WHERE id = ? AND started_at IS NULL AND state = 'scheduled'`,
             )
-            .run(at, reservation.id);
+            .run(at, at, reservation.id);
         if (claimed.changes === 0) continue;
         await startRecording(reservation);
     }

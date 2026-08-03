@@ -61,7 +61,30 @@ export const ADDED_COLUMNS: { table: string; column: string; definition: string 
      * 24時間で消えるので、録り直しのたびに引き直せるようにしておく必要がある
      */
     { table: 'recordings', column: 'genre_detail', definition: 'TEXT' },
+    /*
+     * 録り終えた時刻 / 録り始めた時刻。
+     *
+     * どちらも「状態の文字列を持つのをやめる」ために足したもの。
+     * 中身の入れ直しは列を足すだけでは済まないので {@link dropStoredState} が続きをやる
+     */
+    { table: 'recordings', column: 'finished_at', definition: 'INTEGER' },
+    { table: 'reservations', column: 'started_at', definition: 'INTEGER' },
 ];
+
+/**
+ * 録画の状態。**列としては持たず、事実から毎回決める。**
+ *
+ * CREATE TABLE の生成列と、既にあるDBを移し替えるとき (db.dropStoredState) の
+ * 両方から使う。二か所に書くと必ず食い違うので、式はここにしか置かない。
+ */
+export const RECORDING_STATE = `
+        CASE
+            WHEN deleted_at IS NOT NULL THEN 'deleted'
+            WHEN error IS NOT NULL THEN 'failed'
+            WHEN finished_at IS NULL THEN 'recording'
+            WHEN library_path IS NOT NULL THEN 'available'
+            ELSE 'recorded'
+        END`;
 
 export const SCHEMA = `
 -- 全て CREATE ... IF NOT EXISTS で書き、起動のたびに流す。
@@ -166,9 +189,18 @@ CREATE TABLE IF NOT EXISTS reservations (
     -- off / chapter / cut
     cm_cut TEXT NOT NULL DEFAULT 'chapter',
     codec TEXT NOT NULL DEFAULT 'av1',
-    -- scheduled | conflict | recording | done | failed | canceled | missed
-    -- missed = 始まらないまま放送が終わったもの(アプリが止まっていた等)
+    /*
+     * scheduled | conflict | canceled | missed
+     * missed = 始まらないまま放送が終わったもの(アプリが止まっていた等)。
+     *
+     * **録り始めてからの状態は持たない。** 録画の行がそれを知っているので、
+     * ここに 'recording' / 'done' / 'failed' を書き写すと二重管理になる
+     * (実際、録画が失敗しても予約側が 'recording' のまま残ることがあった)
+     */
     state TEXT NOT NULL DEFAULT 'scheduled',
+    -- 録り始めた時刻。NULL なら**まだ始めていない**。
+    -- 二重に録り始めないための鍵でもある (scheduler.tick)
+    started_at INTEGER,
     conflict_reason TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
@@ -191,8 +223,11 @@ CREATE TABLE IF NOT EXISTS recordings (
     ts_path TEXT,
     ts_size INTEGER NOT NULL DEFAULT 0,
     library_path TEXT,
-    -- recording | recorded | encoding | available | failed
-    state TEXT NOT NULL,
+    -- 録り終えた時刻。NULL なら**まだチューナーを掴んでいる**。
+    -- 「録画中かどうか」を文字列で持たないための、ただ一つの事実
+    finished_at INTEGER,
+    -- 録画そのものが失敗した理由。消したときは削除の理由も入る。
+    -- **エンコードの失敗はここに書かない** (encode_jobs.error が持っている)
     error TEXT,
     keep_original INTEGER NOT NULL DEFAULT 0,
     -- off / chapter / cut
@@ -209,7 +244,21 @@ CREATE TABLE IF NOT EXISTS recordings (
     -- 失敗をユーザーが確認した時刻。以降ダッシュボードの通知に出さない
     acknowledged_at INTEGER,
     created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
+    updated_at INTEGER NOT NULL,
+    /*
+     * 状態は**持たない**。上の列から決まるものを毎回引き直す。
+     *
+     * 文字列で別に持っていた頃は、同じことを二重に書くことになっていた
+     * (エンコードが始まれば 'encoding'、終われば library_path と一緒に 'available')。
+     * 書き忘れれば食い違うし、実際にエンコードの失敗が録画そのものの失敗として
+     * 'failed' に化けて、中身のある生TSを持ったまま再生もできなくなっていた。
+     *
+     * 生成列にしておくと SQLite が書き込みを拒むので、食い違いようがない。
+     * 'encoding' はここに無い。動いているエンコードは encode_jobs にしか無く、
+     * 一覧はそちらを見て「エンコード中」を出す (format.encodeLabel)
+     */
+    state TEXT GENERATED ALWAYS AS (${RECORDING_STATE}
+    ) VIRTUAL
 );
 CREATE INDEX IF NOT EXISTS recordings_state ON recordings (state);
 CREATE INDEX IF NOT EXISTS recordings_start ON recordings (start_at DESC);

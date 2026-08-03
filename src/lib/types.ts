@@ -91,7 +91,22 @@ export interface Rule {
     created_at: number;
 }
 
-export type ReservationState = 'scheduled' | 'conflict' | 'recording' | 'done' | 'failed' | 'canceled';
+/**
+ * 予約の状態。
+ *
+ * DBの列に入っているのは `scheduled | conflict | canceled | missed` だけ。
+ * 録り始めてからの `recording | done | failed` は**録画の行から引いた結果**で、
+ * 一覧を組み立てるときに足す (routes/+page.server.ts)。
+ * 予約側にも書き写していた頃は、録画が失敗しても予約は録画中のまま残っていた
+ */
+export type ReservationState =
+    | 'scheduled'
+    | 'conflict'
+    | 'canceled'
+    | 'missed'
+    | 'recording'
+    | 'done'
+    | 'failed';
 
 export interface Reservation {
     id: number;
@@ -109,12 +124,20 @@ export interface Reservation {
     cm_cut: CmMode;
     codec: VideoCodec;
     state: ReservationState;
+    /** 録り始めた時刻。null なら**まだ始めていない**。二重に始めないための鍵でもある */
+    started_at: number | null;
     conflict_reason: string | null;
     created_at: number;
     updated_at: number;
 }
 
-export type RecordingState = 'recording' | 'recorded' | 'encoding' | 'available' | 'failed';
+/**
+ * 録画の状態。**列ではなく生成列**で、他の列から毎回決まる (schema.RECORDING_STATE)。
+ *
+ * `encoding` はここに無い。動いているエンコードは encode_jobs にしか無く、
+ * 一覧はそれを見て「エンコード中」を出す (format.encodeLabel)
+ */
+export type RecordingState = 'recording' | 'recorded' | 'available' | 'failed' | 'deleted';
 
 export interface Recording {
     id: number;
@@ -132,7 +155,10 @@ export interface Recording {
     ts_path: string | null;
     ts_size: number;
     library_path: string | null;
+    /** 録り終えた時刻。null なら**まだ掴んでいる最中** */
+    finished_at: number | null;
     state: RecordingState;
+    /** 録画そのものが失敗した理由 (消したときは削除の理由)。エンコードの失敗は入らない */
     error: string | null;
     keep_original: number;
     cm_cut: CmMode;

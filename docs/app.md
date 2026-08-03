@@ -50,12 +50,31 @@ EPGStation の置き換えとして作ったもので、エンコード設定は
 ## 状態遷移
 
 ```
-予約 scheduled ─(開始時刻)→ recording ─→ done
+予約 scheduled ─(開始時刻)→ started_at が入る ─→ あとは録画の行が持つ
       ├(チューナー不足)→ conflict
+      ├(手で取り消し)→ canceled
       └(始まらないまま放送終了)→ missed
 
-録画 recording ─→ recorded ─(エンコード)→ encoding ─→ available ─(削除)→ 削除済み
+録画 recording ─→ recorded ─→ available ─(削除)→ deleted
+                                  └(録画そのものの失敗)→ failed
 ```
+
+**状態は列として持ちません。** 持っているのは事実だけで、そこから毎回決めます。
+
+| 見せる状態 | 何から決まるか |
+| --- | --- |
+| `recording` | `recordings.finished_at` がまだ NULL (=チューナーを掴んでいる) |
+| `recorded` | 録り終えたが保存先にはまだ無い |
+| `available` | `library_path` が入っている |
+| `failed` | `recordings.error` が入っている (**録画そのものの失敗だけ**) |
+| `deleted` | `deleted_at` が入っている |
+| エンコード中 / エンコード失敗 | `encode_jobs` の最新の1件 (録画の状態には混ぜない) |
+
+`recordings.state` は SQLite の**生成列**です (`schema.RECORDING_STATE`)。書き込もうとすると
+SQLite が拒むので、事実と状態が食い違いようがありません。文字列で別に持っていた頃は、
+**エンコードの失敗が録画そのものの失敗として書き込まれ**、中身のある生TSを持ったまま
+再生もダウンロードもできなくなっていました。予約側も同じで、`recording` / `done` /
+`failed` を書き写していたために、録画が失敗しても予約は録画中のまま残ることがありました。
 
 チューナーの本数を数えるときは、番組の時刻ではなく前後マージンを足した
 「実際に掴んでいる区間」で重なりを見ます。22:00 終了と 22:00 開始は実際には重なるので、

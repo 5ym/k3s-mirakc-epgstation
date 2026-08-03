@@ -63,23 +63,38 @@ export function load({ url, request }) {
     const showFinished = url.searchParams.get('all') === '1';
     const showDeleted = url.searchParams.get('deleted') === '1';
 
-    const states = showFinished
-        ? "('scheduled','conflict','recording','done','failed','canceled','missed')"
-        : "('scheduled','conflict','recording')";
     /*
      * 並びは**放送日時の近い順**で固定する。録画中だけは真っ先に見たいので先頭に置く。
      *
      * 「完了分も表示」で向きを変えていた頃は、押した瞬間に一覧がひっくり返って、
      * さっきまで見ていた行がどこへ行ったのか分からなくなっていた。
      * 出るものが増えるだけで、並びは変わらないほうがいい
+     *
+     * 予約が録り始めてからの状態は**録画の行から引く**。予約側に 'recording' /
+     * 'done' / 'failed' を書き写していた頃は、録画が失敗しても予約が録画中のまま
+     * 残ることがあった。持っているのは「録り始めた時刻」だけにしてある
      */
+    // まだ始まっていないものと、いま録っているものだけ。「完了分も表示」なら全部
+    const pending = showFinished
+        ? '1 = 1'
+        : `((r.state IN ('scheduled','conflict') AND r.started_at IS NULL) OR rec.state = 'recording')`;
     const reservations = queryAll<ReservationRow>(
-        `SELECT r.*, s.name AS service_name, rules.name AS rule_name
+        // 最後の state が r.* の state を隠す。出したいのは録画から引いたほう
+        `SELECT r.*, s.name AS service_name, rules.name AS rule_name,
+                CASE
+                    WHEN r.started_at IS NULL THEN r.state
+                    WHEN rec.state = 'recording' THEN 'recording'
+                    WHEN rec.state = 'failed' THEN 'failed'
+                    ELSE 'done'
+                END AS state
          FROM reservations r
          JOIN services s ON s.id = r.service_id
          LEFT JOIN rules ON rules.id = r.rule_id
-         WHERE r.state IN ${states}
-         ORDER BY (r.state = 'recording') DESC, r.start_at ASC
+         LEFT JOIN recordings rec ON rec.id = (
+             SELECT id FROM recordings WHERE reservation_id = r.id ORDER BY id DESC LIMIT 1
+         )
+         WHERE ${pending}
+         ORDER BY (rec.state = 'recording') DESC, r.start_at ASC
          LIMIT 300`,
     );
 

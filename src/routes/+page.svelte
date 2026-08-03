@@ -9,10 +9,10 @@
         date,
         dateTime,
         duration,
-        encodeLabel,
         eta,
         percent,
         recordedDuration,
+        rowState,
         size,
         stateLabel,
         time,
@@ -177,12 +177,12 @@
         if (rec.deleted_at !== null) return false;
         if ((rec.library_path ?? rec.ts_path) === null) return false;
         /*
-         * **エンコードの失敗は別。** 落ちたのは焼き直しのほうで、生TSは無事なので
-         * 観られるし、やり直しもできる。エンコードで落ちると録画の状態まで
-         * 'failed' になる (encoder.fail) ため、状態だけで弾いていた頃は
+         * **エンコードの失敗はここに出てこない。** 落ちたのは焼き直しのほうで
+         * 生TSは無事なので、観られるし、やり直しもできる。
+         * エンコードで落ちると録画の状態まで 'failed' にしていた頃は、
          * 中身のあるTSを持っているのに再生もダウンロードもできなかった
          */
-        return rec.state !== 'failed' || Boolean(rec.encode_error);
+        return rec.state !== 'failed';
     }
 
     /** ロゴを当てられなかった録画だけ、詳細に位置の指定を出す */
@@ -208,13 +208,8 @@
      */
     function openRecording(rec: (typeof data.recordings)[number]): void {
         const notes: { title: string; text: string }[] = [];
-        /*
-         * error 列は録り直して成功しても残るので、いま失敗している行にだけ出す。
-         *
-         * エンコードで落ちたときは、この列にも「エンコードに失敗しました」と
-         * 入る (encoder.fail)。中身の入っている encode_error のほうだけ出せば足りる
-         */
-        if (rec.state === 'failed' && rec.error && !rec.encode_error) {
+        // error 列に入るのは**録画そのものの失敗だけ**。エンコードの理由は encode_error
+        if (rec.state === 'failed' && rec.error) {
             notes.push({ title: '録画に失敗しました', text: rec.error });
         }
         if (rec.deleted_at !== null && rec.error) {
@@ -457,19 +452,14 @@
                                     </span>
                                 {/if}
                                 <div class="min-w-0 flex-1 basis-56" data-testid="row-body">
-                                    <!-- 消したものは「視聴可能」のままだと嘘になる。
-                                         行は履歴として残るので、状態のほうを差し替える -->
+                                    <!--
+                                        録画の状態とエンコードの状態を1つにまとめて出す
+                                        (rowState)。消したもの (deleted) も録画の状態から
+                                        決まるので、ここで書き分けることは何も無い
+                                    -->
                                     {@render title(
-                                        rec.deleted_at !== null
-                                            ? '削除済み'
-                                            : (encodeLabel(
-                                                  rec.job_state === null
-                                                      ? null
-                                                      : { state: rec.job_state, phase: rec.job_phase },
-                                              ) ?? stateLabel(rec.state)),
-                                        rec.deleted_at === null
-                                            ? badgeClass(rec.job_state ?? rec.state)
-                                            : 'badge-ghost',
+                                        rowState(rec).label,
+                                        rowState(rec).badge,
                                         rec.name,
                                         'recording-state',
                                     )}

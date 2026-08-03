@@ -88,13 +88,12 @@ export async function cancel(reservationId: number): Promise<void> {
     const reservation = queryOne<Reservation>('SELECT * FROM reservations WHERE id = ?', reservationId);
     if (reservation === undefined) return;
 
-    if (reservation.state === 'recording') {
-        const recording = queryOne<Pick<Recording, 'id'>>(
-            `SELECT id FROM recordings WHERE reservation_id = ? AND state = 'recording'`,
-            reservationId,
-        );
-        if (recording !== undefined) stopRecording(recording.id);
-    }
+    // 録っている最中なら止める。掴んでいるかどうかを知っているのは録画の行のほう
+    const recording = queryOne<Pick<Recording, 'id'>>(
+        `SELECT id FROM recordings WHERE reservation_id = ? AND state = 'recording'`,
+        reservationId,
+    );
+    if (recording !== undefined) stopRecording(recording.id);
 
     database()
         .prepare(`UPDATE reservations SET state = 'canceled', updated_at = ? WHERE id = ?`)

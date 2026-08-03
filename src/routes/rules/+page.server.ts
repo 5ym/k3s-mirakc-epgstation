@@ -361,7 +361,10 @@ export const actions = {
         // 飛ばすので(手で取り消したものをルールが復活させないため)、取り消しで残すと
         // 同じルールを作り直しても二度と予約が立たなくなる
         const canceled = database()
-            .prepare(`DELETE FROM reservations WHERE rule_id = ? AND state IN ('scheduled', 'conflict')`)
+            .prepare(
+                `DELETE FROM reservations
+                 WHERE rule_id = ? AND state IN ('scheduled', 'conflict') AND started_at IS NULL`,
+            )
             .run(id);
         // 録画中・録画済みのぶんは履歴として残すので、ルールとの紐付けだけ外す
         database().prepare('UPDATE reservations SET rule_id = NULL WHERE rule_id = ?').run(id);

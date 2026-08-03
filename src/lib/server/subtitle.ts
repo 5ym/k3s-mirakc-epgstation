@@ -36,8 +36,8 @@ export interface PgsResult {
 /**
  * 字幕を絵で取り出して `.sup` を書く。字幕が無ければ null。
  *
- * 失敗しても録画とエンコードは止めない。字幕トラックが1本減るだけで、
- * 文字のまま (ASS) と焼いたもの (dvdsub) は変わらず入る。
+ * 失敗しても録画とエンコードは止めない。**入る字幕はこれ1本だけ**なので、
+ * null になった録画には字幕トラックが付かない。
  */
 export async function buildPgs(
     input: string,

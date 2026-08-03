@@ -195,10 +195,11 @@ async function importOne(row: Row, options: MigrateOptions): Promise<'imported' 
     // denpa の番組IDと衝突せず、二重取り込みの判定にも使える
     const info = database()
         .prepare(
+            // 録り終えた時刻を入れておく。あとでファイルの置き場所が入れば「視聴可能」になる
             `INSERT INTO recordings
                 (reservation_id, program_id, service_id, service_name, name, series, subtitle,
-                 description, start_at, end_at, state, created_at, updated_at)
-             VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'available', ?, ?)`,
+                 description, start_at, end_at, finished_at, created_at, updated_at)
+             VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
             -row.id,
@@ -210,6 +211,7 @@ async function importOne(row: Row, options: MigrateOptions): Promise<'imported' 
             toHalfWidth(row.description ?? ''),
             Number(row.startAt),
             Number(row.endAt),
+            at,
             at,
             at,
         );

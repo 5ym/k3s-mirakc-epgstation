@@ -26,29 +26,33 @@ test.describe('エンコードの失敗', () => {
 
         await reserveSoon(page, request, 'BS');
 
-        // 失敗したものは進み具合を出さない。行に残るのは状態だけ
-        await waitForRow(page, '[data-testid="recording-row"] [data-testid="recording-state"]', '失敗');
+        /*
+         * 失敗したものは進み具合を出さない。行に残るのは状態だけ。
+         *
+         * 出るのは「エンコード失敗」であって「失敗」ではない。落ちたのは焼き直しの
+         * ほうなので、録画そのものの状態 (録画済み) には手を付けない
+         */
+        await waitForRow(
+            page,
+            '[data-testid="recording-row"] [data-testid="recording-state"]',
+            'エンコード失敗',
+        );
         await goto(page, '/');
         await expect(page.getByTestId('encode-progress')).toHaveCount(0);
         const failed = page
             .getByTestId('recording-row')
-            .filter({ has: page.getByTestId('recording-state').getByText('失敗') })
+            .filter({ has: page.getByTestId('recording-state').getByText('エンコード失敗') })
             .first();
-        await expect(failed.getByTestId('recording-state')).toHaveText('失敗');
+        await expect(failed.getByTestId('recording-state')).toHaveText('エンコード失敗');
 
-        /*
-         * **落ちたのは焼き直しのほうで、生TSは無事。** 観られるしダウンロードもできる。
-         * 状態が 'failed' になるからと弾いていた頃は、中身のあるTSを持っているのに
-         * どちらも出せなかった
-         */
+        // **生TSは無事なので観られるしダウンロードもできる**
         await expect(failed.getByTestId('play-hint')).toHaveCount(1);
         await expect(failed.getByTestId('download-link')).toHaveCount(1);
 
         // 理由は行の「詳細」から。ffmpeg の出力は長いので一覧には貼らない
         await failed.getByTestId('detail-button').click();
         const detail = page.getByTestId('program-detail');
-        // 理由は1つだけ。recordings.error にも「エンコードに失敗しました」と入るが、
-        // 中身の入っている encode_jobs.error のほうだけ出す
+        // 理由は1つだけ。録画そのものは失敗していないので、出るのはジョブ側の理由だけ
         const note = detail.getByTestId('detail-error');
         await expect(note).toHaveCount(1);
         await expect(note).toContainText('エンコードに失敗しました');

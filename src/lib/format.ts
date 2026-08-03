@@ -88,6 +88,31 @@ export function encodeLabel(job: { state: string; phase: string | null } | null)
     return PHASE_LABEL[job.phase ?? 'encode'] ?? 'エンコード中';
 }
 
+/**
+ * 一覧の行に出す状態。
+ *
+ * 録画の状態 (`state`) は録画そのものの話しかしない。エンコードは別の仕事なので、
+ * 動いていればその段階を、落ちていれば落ちたことを、こちらで足す。
+ * エンコードの失敗を録画の状態に書き込んでいた頃は、生TSが無事なのに
+ * 「失敗」と出て再生もダウンロードもできなくなっていた
+ */
+export function rowState(rec: {
+    state: string;
+    job_state: string | null;
+    job_phase: string | null;
+    encode_error: string | null;
+}): { label: string; badge: string } {
+    const running = encodeLabel(
+        rec.job_state === null ? null : { state: rec.job_state, phase: rec.job_phase },
+    );
+    if (running !== null) return { label: running, badge: badgeClass(rec.job_state ?? '') };
+    // 動いているものが無く、いちばん新しいエンコードが失敗している
+    if (rec.encode_error !== null && rec.encode_error !== '') {
+        return { label: 'エンコード失敗', badge: badgeClass('failed') };
+    }
+    return { label: stateLabel(rec.state), badge: badgeClass(rec.state) };
+}
+
 /** daisyUI の badge 色。状態が一目で分かるようにする */
 export function badgeClass(state: string): string {
     switch (state) {
@@ -104,6 +129,7 @@ export function badgeClass(state: string): string {
         case 'failed':
             return 'badge-error badge-outline';
         case 'canceled':
+        case 'deleted':
             return 'badge-ghost';
         default:
             return 'badge-info';
@@ -121,6 +147,8 @@ export const STATE_LABEL: Record<string, string> = {
     recorded: '録画済み',
     encoding: 'エンコード中',
     available: '視聴可能',
+    // 消したあとも行は履歴として残る。「視聴可能」のままだと嘘になる
+    deleted: '削除済み',
     queued: '待機中',
     running: '実行中',
 };

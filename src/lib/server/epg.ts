@@ -79,8 +79,9 @@ export function syncServices(services: mirakc.MirakcService[]): number {
         for (const id of dropped) {
             database()
                 .prepare(
+                    // 録り始めたものは触らない。取り消しても録画は戻らない
                     `UPDATE reservations SET state = 'canceled', updated_at = ?
-                     WHERE service_id = ? AND state IN ('scheduled', 'conflict')`,
+                     WHERE service_id = ? AND state IN ('scheduled', 'conflict') AND started_at IS NULL`,
                 )
                 .run(at, id);
             database().prepare('DELETE FROM programs WHERE service_id = ?').run(id);
@@ -187,6 +188,8 @@ export function syncReservationTimes(): number {
         FROM programs p
         WHERE p.id = reservations.program_id
           AND reservations.state IN ('scheduled', 'conflict')
+          -- 録り始めた予約の時刻は動かさない。延長への追従は録画の行のほうでやる
+          AND reservations.started_at IS NULL
           AND (reservations.start_at != p.start_at OR reservations.end_at != p.end_at)
     `,
         )
