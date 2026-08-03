@@ -88,11 +88,9 @@ function videoArgs(codec: VideoCodec, smooth: boolean): { filter: string; encode
 const DUAL_MONO = 2;
 
 /**
- * 字幕に使うフォント。先頭から順に探される。
- * 1つ目はイメージに入れてあるもの。残りは Windows / Mac / Linux の丸ゴシックで、
- * ASS を端末側で描くときに、その端末が持っているものへ落ちるようにしてある
+ * 字幕に使うフォント。
  */
-const SUBTITLE_FONTS = 'Rounded M+ 1m for ARIB,Hiragino Maru Gothic ProN,Yu Gothic UI,Noto Sans CJK JP';
+const SUBTITLE_FONTS = 'Rounded M+ 1m for ARIB';
 /** 進捗をDBに書き戻す間隔。1フレームごとに書くとWAL肥大とUIのちらつきの原因になる */
 const PROGRESS_INTERVAL = 2000;
 
