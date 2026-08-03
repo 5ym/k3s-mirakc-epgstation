@@ -4,7 +4,7 @@
 実チューナーも B-CASカードも ffmpeg も要りません。
 
 ```sh
-docker compose up                           # 開発サーバ(:5173) + 偽mirakc(:40772)
+docker compose up                           # 開発サーバ(:5173) + 偽エージェント(:40773)
 docker compose run --rm unit                # 単体テスト
 docker compose run --rm e2e                 # E2E (Playwright)
 docker compose run --rm unit bun run lint   # リント + フォーマット確認
@@ -17,9 +17,9 @@ docker compose run --rm unit bun run check  # 型 (svelte-check)
 
 ## テストの方針
 
-**E2E が主で、単体テストは純粋関数の境界条件だけ。** 偽mirakc・偽の通知先・
+**E2E が主で、単体テストは純粋関数の境界条件だけ。** 偽エージェント・偽の通知先・
 偽ffmpeg を立てて、予約から録画・CM検出・エンコード・保存先への配置・
-視聴済み削除までを実際に通します (`tests/fake/`)。偽mirakc は1番組10秒にしてあるので、
+視聴済み削除までを実際に通します (`tests/fake/`)。偽エージェントは1番組10秒にしてあるので、
 録画完了まで待っても30秒で終わります。
 
 画面まわりの入口は [app.md](app.md#テスト)、置いてあるものの一覧は
@@ -27,7 +27,7 @@ docker compose run --rm unit bun run check  # 型 (svelte-check)
 
 ### 並べて流す
 
-**ワーカーごとに denpa と偽mirakc と偽通知先を1式ずつ立てます** (`tests/stack.ts`)。
+**ワーカーごとに denpa と偽エージェントと偽通知先を1式ずつ立てます** (`tests/stack.ts`)。
 ポートも置き場もDBも別なので、同時に走っているファイル同士は互いに見えません。
 
 1つのアプリとDBを共有していた頃は直列に流すしかありませんでした。予約もルールも
@@ -95,11 +95,11 @@ sh mac/verify.sh
 
 ## イメージ
 
-`Dockerfile` が denpa 本体、`mirakc/` がチューナー側 (mirakc + スキャン用の
+`Dockerfile` が denpa 本体、`agent/` がチューナー側 (recisdb + スキャン用の
 エージェント) です。CI が両方を焼いて `k3s/` のタグを書き戻します。
 
 ## もっと詳しく
 
 - [architecture.md](architecture.md) — **なぜこの形なのか**
 - [app.md](app.md) — **どこに何があるか** (ファイル・環境変数・画面・状態遷移)
-- [data.md](data.md) — mirakc に都度聞くもの / denpa が持つもの
+- [data.md](data.md) — エージェントに都度聞くもの / denpa が持つもの

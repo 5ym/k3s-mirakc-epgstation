@@ -6,7 +6,8 @@
 [architecture.md](architecture.md) に置く (両方に書くと必ず片方が古くなる)。
 迷ったら「これは何」ならここ、「なぜこれ」なら architecture.md。
 
-mirakc から EPG と TS を受け取り、予約・録画・エンコード・保存先への配置までを行う。
+チューナーエージェントから TS を受け取り、番組表の読み取り・予約・録画・エンコード・
+保存先への配置までを行う。
 出来上がった mkv は保存先に置かれ、denpa が配って外部プレイヤーで見る。削除は手動。
 EPGStation の置き換えとして作ったもので、エンコード設定はそこから移した。
 
@@ -14,9 +15,10 @@ EPGStation の置き換えとして作ったもので、エンコード設定は
 
 | ファイル | 役割 |
 | --- | --- |
-| `src/lib/server/mirakc.ts` | mirakc の API クライアント |
-| `src/lib/server/mirakc-events.ts` | mirakc からの知らせ (`/events`) の購読 |
-| `src/lib/server/epg.ts` | 番組表の取り込みと予約時刻の追従 |
+| `src/lib/server/tuner.ts` | チューナーエージェントへの口 (選局・チューナー一覧) |
+| `src/lib/server/agent-events.ts` | エージェントからの知らせ (`/denpa/events`) の購読 |
+| `src/lib/server/epg.ts` | 局と番組表のDB書き込み、予約時刻の追従 |
+| `src/lib/server/epg-collect.ts` | 番組表集め (どのチャンネルを何本並べて開くか) |
 | `src/lib/server/rules.ts` | ルール(キーワード/チャンネル/ジャンル)から予約を作る |
 | `src/lib/server/reservations.ts` | 手動予約と取り消し |
 | `src/lib/server/conflict.ts` | チューナー割り当てと競合判定 (純粋関数) |
@@ -38,11 +40,15 @@ EPGStation の置き換えとして作ったもので、エンコード設定は
 | `src/lib/server/logo-data.ts` | logoframe が覚えたロゴ (`.lgd`) の置き場・読み取り・破棄 |
 | `src/lib/components/LogoArea.svelte` | CM検出用のロゴ位置を画面から教える |
 | `src/lib/components/Toasts.svelte` | 押した結果を画面の右下に浮かせて出す (本文を押し下げない) |
-| `src/lib/ts/psi.ts` | TS の PSI (NIT / SDT) を読む。チューナー側と共通 |
+| `src/lib/ts/psi.ts` | TS の PSI (NIT / SDT) を読む。エージェント側と共通 |
+| `src/lib/ts/aribtext.ts` | ARIB STD-B24 の8単位符号を読む (番組名・局名) |
+| `src/lib/ts/aribtext-gaiji.ts` | ARIB 外字の対応表 (`[新]` `[字]` はここ) |
+| `src/lib/ts/eit.ts` | EIT[schedule] と EIT[p/f]。集まり具合の判定も |
+| `src/lib/ts/service-filter.ts` | チャンネル丸ごとの TS から1局ぶんを抜く |
 | `src/lib/ts/logo.ts` | TS から局ロゴを読む (地上波は CDT、衛星は下記) |
 | `src/lib/ts/logo-dsmcc.ts` | 衛星の局ロゴをデータカルーセル (DSM-CC) から読む |
 | `src/lib/ts/logo-palette.ts` | 局ロゴPNGに ARIB の色の表 (PLTE/tRNS) を入れ直す |
-| `src/lib/ts/synth.ts` | TS のセクションを組み立てる (テストと偽mirakc用) |
+| `src/lib/ts/synth.ts` | TS のセクションを組み立てる (テストと偽エージェント用) |
 | `src/lib/server/migrate.ts` | EPGStation からの引き継ぎ |
 | `src/lib/server/dav.ts` | WebDAV (Kodi 向け) |
 | `src/lib/server/auth.ts` | ベーシック認証 |
@@ -90,7 +96,7 @@ SQLite が拒むので、事実と状態が食い違いようがありません�
 その種別のチューナー本数を超えたときだけ競合です (`conflict.ts` の `assign`)。
 ルール画面のプレビューも同じ物差しで数えます (`contending`)。時間の重なりだけを
 出していた頃は、**衛星の番組に地上波の番組が競合として並び**、地上波チューナーが2本
-あって実際には録れる組にも印が付いていました。本数が分からないとき (mirakc が落ちて
+あって実際には録れる組にも印が付いていました。本数が分からないとき (エージェントに繋がらず
 いるとき) はどちらも何も言いません。
 
 録画中にプロセスが落ちた場合、次の起動でまだ放送中なら録り直します。生TSは追記で
@@ -114,8 +120,7 @@ k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書い�
 
 | 変数 | 既定値 | 説明 |
 | --- | --- | --- |
-| `MIRAKC_URL` | `http://mirakc:40772` | mirakc |
-| `TUNER_AGENT_URL` | `http://mirakc:40773` | チューナー側のエージェント (スキャン・カード・解除) |
+| `TUNER_AGENT_URL` | `http://tuner-agent:40773` | チューナーエージェント。選局もスキャンもカードも解除もここ1つ |
 | `DENPA_DB` | `/app/data/denpa.db` | SQLite の置き場。局ロゴと `.lgd` もこの隣 |
 | `RECORDED_DIR` | `/app/recorded` | 生TSの作業領域 |
 | `LIBRARY_DIR` | `/library` | エンコード済みの置き場。ここから配る |
@@ -123,14 +128,14 @@ k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書い�
 | `ENCODE_CONCURRENCY` | `1` | 録画エンコードの同時実行数。ライブ配信の本数とは無関係 |
 | `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` | `denpa` / (空) | 初期値。パスワードが入っているときだけ有効 |
 | `BASIC_AUTH_SCOPE` | `files` | 初期値。`files` … 配信と WebDAV だけ / `all` … 画面も含めて全部 |
-| `START_MARGIN` / `END_MARGIN` | `10000` / `15000` | 録画の前後マージン(ms)。放送に追従しているときは mirakc 側が切れ目を決める |
+| `START_MARGIN` / `END_MARGIN` | `10000` / `15000` | 録画の前後マージン(ms)。延長には EIT[p/f] で追従する |
 | `SCHEDULER_TICK` | `5000` | 予約チェックの間隔(ms) |
 | `RECONCILE_INTERVAL` | `300000` | 保存先の実体とDBを突き合わせる間隔(ms) |
-| `EPG_SYNC_INTERVAL` | `600000` | EPG取得の間隔(ms)。保険 (合図は mirakc の `/events`) |
-| `EPG_EVENT_DEBOUNCE` | `10000` | 知らせが来てから取り直すまで(ms)。局の数だけ連続で飛んでくるため |
-| `SERVICE_SYNC_INTERVAL` | `60000` | 局だけを取り直す間隔(ms)。mirakc は局が揃ったことを知らせてくれない |
-| `ONAIR_POLL_INTERVAL` | `300000` | 放送の延長を見に行く間隔(ms)。これも保険 |
-| `ONAIR_FALLBACK_WAIT` | `90000` | 番組単位で開いて何も来ないとき、サービス単位に切り替えるまで(ms) |
+| `EPG_COLLECT_INTERVAL` | `1800000` | 番組表を集め直す局を選び直す間隔(ms) |
+| `EPG_CHANNEL_INTERVAL` | `21600000` | 同じチャンネルを集め直すまでの間(ms) |
+| `EPG_CHANNEL_TIMEOUT` | `300000` | 1チャンネルを開いておく上限(ms)。普段は EIT が揃った時点で閉じる |
+| `EPG_MIN_COVERAGE` | `259200000` | 番組表がここまで埋まっていない局は周期を待たずに集め直す(ms) |
+| `CHANNEL_SYNC_INTERVAL` | `60000` | 局だけを取り直す間隔(ms)。スキャンの結果はここで届く |
 | `SHUTDOWN_WAIT` | `21600000` | 止められたとき、録画が終わるまで待つ上限(ms)。`0` で待たない |
 | `EPGSTATION_*` | — | 引き継ぎ元の DB と録画置き場 |
 | `DENPA_AUTOSTART` | `1` | `0` で常駐処理を止める |
@@ -142,34 +147,35 @@ k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書い�
 | `/` | **予約と録画**を2ペインで並べる。**録画の行を押すと再生**、中身は「詳細」から。行の形はどの画面幅でも同じで、狭いところでは押すものが下へ回り込む。生TSを残しているときは大きさを両方出す (`43 MB (生TS 594 MB)`)。**エンコードの失敗では再生もダウンロードも消さない** — 落ちたのは焼き直しのほうで、生TSは無事 |
 | `/guide` | 番組表(グリッド)と番組検索。マスはジャンルごとに色を変える。詳細から予約・取消と、録れているものはそのまま再生できる |
 | `/rules` | 自動予約ルールの一覧と作成。「この条件で録れる番組」に**予約済みのものも競合も同じ表で**出す (1件ずつ取り消せる) |
-| `/tuners` | チャンネルスキャン (途中で中断できる)、**mirakc の入れ直し** (局を増やせるのはこれだけ)、チューナーの空き、取れているチャンネル (mirakc 側の局と番組表の集まり具合つき)、mirakc とカードリーダーと局ロゴの状態 (**局ロゴを今すぐ取りに行く**: 地上波も衛星もチューナー2つで。進み具合が出る)。チューナーを掴んでいる相手は用途で出す (「録画: 番組名」「局ロゴ収集 (T16)」) |
+| `/tuners` | チャンネルスキャン (途中で中断でき、録画中でも実行できる)、チューナーの空きと何を掴んでいるか、取れているチャンネル (番組表の集まり具合つき)、エージェントとカードリーダーと局ロゴの状態 (**局ロゴを今すぐ取りに行く**: 地上波も衛星もチューナー2つで。進み具合が出る)。チューナーを掴んでいる相手は用途で出す (「録画: 番組名」「番組表 (T16)」「局ロゴ収集 (T16)」) |
 | `/settings` | 録画のしかた(映像コーデック — **「エンコードしない」もここ**/CMの扱い/CMの探し方/生TSを残すか/無料放送だけか)、通知先(Webhook)、ベーシック認証(パスワードの表示と作り直し)、EPGStation からの引き継ぎ |
 | `/api/recordings/<id>/file` | 録画ファイル。Range 対応。**エンコード済みがあればそちら、無ければ生TS。エンコードが走っている間は生TSのほう** (録り直しの最中は library_path がまだ古いファイルを指していて、しかもそれは終わり際に消える) |
 | `/api/recordings/<id>/frame?at=<秒>` | 録画から1コマ (JPEG)。ロゴの位置を指定するときに使う (既定で右上を 16:9 のまま拡大、覚えてある枠は掴んで動かせる) |
 | `/api/services/<id>/logo-data` | **logoframe がいま覚えているロゴ** (白黒PNG)。番組表に出すロゴとは別物で、絵になっているかを確かめるためのもの |
 | `/dav` | WebDAV (PROPFIND / GET / HEAD)。Kodi 用。書き込みは受けない |
 
-## チューナー側 (`mirakc/`)
+## チューナーエージェント (`agent/`)
 
-mirakc の親として動くエージェント。なぜ親を置いているかは
-[architecture.md](architecture.md#チューナー側-mirakc--エージェント)。
+機材に触る側。中身は読まず、掴んだチャンネルの TS をそのまま流す。
+なぜこの切り分けなのかは [architecture.md](architecture.md#チューナーエージェント)。
 
 | ファイル | 役割 |
 | --- | --- |
-| `mirakc/agent.ts` | mirakc の起動と停止、denpa からの窓口 (HTTP) |
-| `mirakc/scan.ts` | 物理チャンネルの総当たり |
-| `mirakc/config.ts` | mirakc の `config.yml` の読み書き |
-| `mirakc/config.yml` | 初回に配る設定の雛形 |
+| `agent/server.ts` | denpa からの窓口 (HTTP)。選局・スキャン・カード・解除 |
+| `agent/tuners.ts` | 優先度つきの取り合いと、選局プロセスの面倒 |
+| `agent/scan.ts` | 物理チャンネルの総当たり |
+| `agent/channels.ts` | `tuners.yml` を読み、`channels.json` を書く |
+| `agent/tuners.yml` | 初回に配る設定の雛形 (機材の定義) |
 
 ## テスト
 
 | 場所 | 何 |
 | --- | --- |
 | `tests/e2e/` | Playwright。番号順に、予約 → 録画 → ルール → 引き継ぎ → 放送の延長。**ファイル単位で並ぶ**ので、長いものは割ってある |
-| `tests/stack.ts` | ワーカーごとに denpa と偽 mirakc を1式立てる (これでファイル単位に並べられる) |
-| `tests/fake/` | 偽mirakc・偽の通知先・偽ffmpeg |
+| `tests/stack.ts` | ワーカーごとに denpa と偽エージェントを1式立てる (これでファイル単位に並べられる) |
+| `tests/fake/` | 偽エージェント・偽の通知先・偽ffmpeg。**偽エージェントは素のTSを流す** (EIT も SDT も組み立てる) |
 | `src/**/*.test.ts` | 純粋関数の境界条件 (bun test) |
-| `mirakc/*.test.ts` | チューナー側 (設定の読み書き、スキャン) |
+| `agent/*.test.ts` | チューナー側 (取り合い、スキャン) |
 | `windows/verify.ps1` `mac/verify.sh` | `denpa://` の登録役 |
 
 回し方と方針は [development.md](development.md) に置いてある。

@@ -1,12 +1,15 @@
 # denpa
 
-テレビを録って観るためのもの。**mirakc(チューナー制御) + denpa(予約・録画・エンコード・配信)**
-の2つだけで、メディアサーバは置きません。
+テレビを録って観るためのもの。**チューナーエージェント(選局)** と
+**denpa(番組表・予約・録画・エンコード・配信)** の2つだけで、メディアサーバは置きません。
 
 ```text
-チューナー ── mirakc ── denpa ── 録画(mkv) ─┬─→ VLC / Infuse (URLスキーム)
-                                              └─→ Kodi (WebDAV)
+チューナー ── エージェント ── denpa ── 録画(mkv) ─┬─→ VLC / Infuse (URLスキーム)
+                                                    └─→ Kodi (WebDAV)
 ```
+
+エージェントは**チャンネルを掴んで素のTSを流すだけ**です。番組表を読むのも、
+局を選り分けるのも、CMを見つけるのも denpa がやります。
 
 ## 用意するもの
 
@@ -24,14 +27,15 @@ curl -LO https://raw.githubusercontent.com/danything/denpa/main/compose.prod.yml
 docker compose -f compose.prod.yml up -d
 ```
 
-初回起動で `./config/config.yml` が出てきます。**そこの `tuners:` と、
+初回起動で `./config/tuners.yml` が出てきます。**そこの `tuners:` と、
 `compose.prod.yml` の `devices:` を手元の機材に合わせて**から、
 
 ```sh
-docker compose -f compose.prod.yml restart mirakc
+docker compose -f compose.prod.yml restart tuner-agent
 ```
 
-チャンネルは書かなくて構いません(この後のスキャンで入ります)。
+チャンネルは書きません。**スキャンで見つかったものは別のファイル**
+(`channels.json`) に書き出されるので、手で書いたものが消えることはありません。
 
 ## Kubernetes で動かす
 
@@ -49,11 +53,12 @@ kubectl apply -f k3s/
 1. **チャンネルスキャン** — 画面の「チューナー」から実行します。チャンネル設定は
    空で出荷しているので、これをやるまで番組表は空です。地上波の総当たりで
    十数分かかります
-2. **EPGを取得** — スキャンが終わると自動で取り直します。番組表に出ればできています
+2. **番組表を集める** — スキャンが終わると自動で集めに行きます。空いている
+   チューナーの数だけ並べて回るので、待つのは数分です
 3. **番組を予約** — 番組表から選ぶか、「ルール」でキーワードを登録して自動予約に
 
-うまくいかないときは画面の「チューナー」を見てください。mirakc とカードリーダーの
-状態、スキャンの1チャンネルごとの結果が出ます。**カードリーダーが NG のまま録ると、
+うまくいかないときは画面の「チューナー」を見てください。エージェントとカードリーダーの
+状態、スキャンの1チャンネルごとの結果、番組表がどこまで集まったかが出ます。**カードリーダーが NG のまま録ると、
 成功したように見えて中身が全部スクランブルされたまま**になります。
 
 ## 再生
@@ -93,7 +98,7 @@ URLに埋めても壊れない文字だけで24文字作って、そのまま保
 
 - [docs/architecture.md](docs/architecture.md) — **なぜこの形なのか** (決めたこと・踏んだ落とし穴)
 - [docs/app.md](docs/app.md) — **どこに何があるか** (ファイル・環境変数・画面・状態遷移)
-- [docs/data.md](docs/data.md) — mirakc に都度聞くもの / denpa が持つもの
+- [docs/data.md](docs/data.md) — エージェントに都度聞くもの / denpa が持つもの
 - [docs/development.md](docs/development.md) — **手を入れるとき** (開発環境・テスト)
 - [docs/player.md](docs/player.md) — `denpa://` の登録、ライブ視聴の繋ぎ方
 - [docs/roadmap.md](docs/roadmap.md) — これから入れるもの

@@ -73,12 +73,11 @@ LAN 内 (10.10.0.0/16) からだけ通り、forward-auth も通しません。
 
 ## ライブ視聴
 
-**放送中のものをそのまま観たい**ときは、denpa ではなく mirakc に直接繋ぎます。
-Kodi の PVR IPTV Simple Client に
+**放送中のものをそのまま観るのは、いまはできません。** mirakc をやめたときに、
+その口 (下記) ごと無くなりました。denpa 側に作る話は
+[stream.md](stream.md) にあります。
 
-- プレイリスト: `http://<mirakcのホスト>:40772/api/iptv/playlist`
-- EPG: `http://<mirakcのホスト>:40772/api/iptv/xmltv`
-
-を入れると、番組表付きのライブTVになります (Android TV・Fire TV も同じ)。
-denpa は通らないので、予約もベーシック認証も効きません。
-設計の話は [architecture.md](architecture.md#ライブ視聴)。
+以前は Kodi の PVR IPTV Simple Client に mirakc の口
+(`/api/iptv/playlist` と `/api/iptv/xmltv`) を入れれば、番組表付きの
+ライブTVになっていました。denpa を通らないので、予約もベーシック認証も
+効きませんでした。設計の話は [architecture.md](architecture.md#ライブ視聴)。
