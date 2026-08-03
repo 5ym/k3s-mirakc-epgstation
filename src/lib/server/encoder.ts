@@ -564,14 +564,14 @@ async function prepareCm(
             'SELECT logo_area FROM services WHERE id = ?',
             recording.service_id,
         );
-        detection = await detectCm(
-            input,
+        detection = await detectCm(input, {
             signal,
-            recording.service_name,
-            progressReporter(jobId),
-            service?.logo_area ?? '',
-            (label) => setStep(jobId, label),
-        );
+            channel: recording.service_name,
+            serviceId: recording.service_id,
+            area: service?.logo_area ?? '',
+            onProgress: progressReporter(jobId),
+            onStep: (label) => setStep(jobId, label),
+        });
     } catch (error) {
         console.error(`[cm] 検出に失敗したためCM処理をスキップします: ${error}`);
         return none;

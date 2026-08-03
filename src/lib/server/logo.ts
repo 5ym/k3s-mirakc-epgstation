@@ -41,6 +41,13 @@ const SWEEP_TIMEOUT_SATELLITE = 10 * 60_000;
 const RIDE_TIMEOUT = 3 * 60_000;
 /** ロゴを取りに行くときの優先度。録画より低くして、必要なら奪われるようにする */
 const SWEEP_PRIORITY = 0;
+/**
+ * 画面から取りに行くときに同時に開く地上波の数。
+ *
+ * 地上波は中継ごとに乗っている局が違うので、1チャンネルずつ3分かけていると
+ * 数十チャンネルぶんが何時間もかかる。全部は使わない (録画に残しておく)。
+ */
+const GROUND_TUNERS = 2;
 
 function timeoutFor(type: string): number {
     return SWEEP_TIMEOUT[type] ?? SWEEP_TIMEOUT_SATELLITE;
@@ -279,11 +286,84 @@ function openChannels(tuners: MirakcTuner[]): Set<string> {
 
 /** 同時に2つ走らせない。相乗りの合図 (tuner.status-changed) は連続して飛んでくる */
 let riding = false;
+
 /**
- * こちらも同時に2つ走らせない。BS/CS は1チャンネルに数分かけるので、
- * 定期実行と画面からの「いま取りに行く」が重なるとチューナーを食い合う
+ * 取りに行っている最中の様子。画面はこれを見る。
+ *
+ * 1チャンネルに数分かける仕事なので、押しても何も起きていないように見えていた。
+ * どこまで進んだかを出さないと、動いているのか失敗したのか区別が付かない。
  */
-let sweeping = false;
+export interface SweepState {
+    running: boolean;
+    /** いま開いている物理チャンネル。地上波は2つ並ぶ */
+    channels: string[];
+    /** 見終えた物理チャンネル数と、その総数 */
+    done: number;
+    total: number;
+    /** 拾えた局の数 */
+    found: number;
+    /** いまの様子、または終わった理由。そのまま画面に出す */
+    message: string;
+    startedAt: number | null;
+    finishedAt: number | null;
+}
+
+const IDLE: SweepState = {
+    running: false,
+    channels: [],
+    done: 0,
+    total: 0,
+    found: 0,
+    message: '',
+    startedAt: null,
+    finishedAt: null,
+};
+
+/**
+ * 走っているのは高々1つ。定期実行と画面からの「いま取りに行く」が重なると
+ * チューナーを食い合う。相乗り (ride) だけは只なので別勘定にしてある
+ */
+let state: SweepState = IDLE;
+
+export function sweepState(): SweepState {
+    return state;
+}
+
+function update(patch: Partial<SweepState>): void {
+    state = { ...state, ...patch };
+    emit('logos');
+}
+
+/**
+ * 順番に開いて拾う。地上波だけ**同時に2つ**開く。
+ *
+ * 地上波は中継ごとに乗っている局が違うので、1つずつ回っていると数が捌けない。
+ * 衛星は1つの中継で網羅できる代わりに1回が長いので、並べても得が無い。
+ *
+ * 1つ取りかかるたびに空きを見る。録画が始まったのに開きに行くと、掴めないまま
+ * 3分待つことを人数ぶん繰り返すことになる。
+ */
+async function drain(queue: Target[], parallel: number): Promise<void> {
+    const worker = async () => {
+        for (;;) {
+            const target = queue.shift();
+            if (target === undefined) return;
+            if (!(await hasFreeTuner())) {
+                queue.length = 0;
+                update({ message: '空いているチューナーが無くなったので途中でやめました' });
+                return;
+            }
+            update({ channels: [...state.channels, target.channel] });
+            const got = await collect(target, timeoutFor(target.type));
+            update({
+                channels: state.channels.filter((channel) => channel !== target.channel),
+                done: state.done + 1,
+                found: state.found + got,
+            });
+        }
+    };
+    await Promise.all(Array.from({ length: parallel }, worker));
+}
 
 /**
  * **いま開いている選局に相乗りして**ロゴを拾う。
@@ -321,33 +401,82 @@ export async function ride(): Promise<number> {
 }
 
 /**
- * 持っていない局のロゴを取りに行く。
+ * 定期取得。持っていない局のロゴを少しずつ取りに行く。
  *
  * 分単位で開くので、**空いているチューナーがあるときだけ**にする。優先度は 0 に
  * してあるので録画 (2) には割り込まれるが、mirakc 自身の番組表集め (-1) は
  * こちらに追い出されてしまう。空きが無ければ次の機会に回す。
+ *
+ * **衛星が埋まるのはこちらだけ。** 画面の「いま取りに行く」は地上波しか見ない
+ * (BS/CS はロゴが滅多に流れてこないので、押した人を待たせるだけになる)。
  */
 export async function sweep(limit = 1): Promise<number> {
-    if (sweeping) return 0;
-    sweeping = true;
-    try {
-        // 立っているだけでファイルが無い局を先に拾い直す。そうしないと
-        // 「もう持っている」とみなして永久に取りに行かない
-        reconcile();
-        // 開いているチューナーがあるなら、まずそちらに乗る。只で読める
-        let found = await ride();
+    if (state.running) return 0;
+    // 立っているだけでファイルが無い局を先に拾い直す。そうしないと
+    // 「もう持っている」とみなして永久に取りに行かない
+    reconcile();
+    // 開いているチューナーがあるなら、まずそちらに乗る。只で読める
+    const ridden = await ride();
 
-        const targets = missing().slice(0, limit);
-        if (targets.length > 0 && !(await hasFreeTuner())) return found;
-        for (const target of targets) {
-            found += await collect(target, timeoutFor(target.type));
-        }
-        if (found > 0) {
-            console.log(`[logo] ${found} 局ぶん拾いました (残り ${missing().length} チャンネル)`);
-        }
-        return found;
+    const targets = missing().slice(0, limit);
+    if (targets.length === 0 || !(await hasFreeTuner())) return ridden;
+    await run(targets, 1, ridden);
+    return state.found;
+}
+
+/**
+ * 画面の「いま取りに行く」。**地上波だけ**を、チューナー2つで取りに行く。
+ *
+ * 衛星を混ぜないのは、BS/CS のロゴが滅多に流れてこないため。1チャンネルに
+ * 10分開いて何も来ないことが普通で、押した人を待たせるだけになる。
+ * そちらは10分ごとの定期取得に任せる (1つの中継で網羅できるので、いつかは埋まる)。
+ */
+export async function sweepGround(): Promise<{ started: boolean; message: string }> {
+    if (state.running) return { started: false, message: 'もう取りに行っています' };
+    reconcile();
+    const targets = missing().filter((target) => target.type === 'GR');
+    if (targets.length === 0) {
+        return { started: false, message: '地上波のロゴはもう全部持っています' };
+    }
+    if (!(await hasFreeTuner())) {
+        return { started: false, message: '空いているチューナーがありません' };
+    }
+    // 終わるのは数分後。押した人を待たせず、進み具合は画面へ流す
+    void run(targets, GROUND_TUNERS, 0);
+    return {
+        started: true,
+        message: `地上波 ${targets.length} チャンネルぶんを取りに行きます。ロゴが流れてくるまで数分かかります`,
+    };
+}
+
+/** 実際に回すところ。走っている印を立て、終わったら結果を残す */
+async function run(targets: Target[], parallel: number, found: number): Promise<void> {
+    state = {
+        running: true,
+        channels: [],
+        done: 0,
+        total: targets.length,
+        found,
+        message: '',
+        startedAt: Date.now(),
+        finishedAt: null,
+    };
+    emit('logos');
+    try {
+        await drain([...targets], parallel);
     } finally {
-        sweeping = false;
+        const left = missing().length;
+        update({
+            running: false,
+            channels: [],
+            finishedAt: Date.now(),
+            message:
+                state.message !== ''
+                    ? state.message
+                    : `${state.found} 局ぶん拾いました (まだ持っていないチャンネルは残り ${left})`,
+        });
+        if (state.found > 0) console.log(`[logo] ${state.message}`);
+        emit('services');
     }
 }
 

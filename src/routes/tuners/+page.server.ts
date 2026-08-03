@@ -1,6 +1,6 @@
 import { fail } from '@sveltejs/kit';
 import { queryAll } from '$lib/server/db';
-import { stats as logoStats, sweep } from '$lib/server/logo';
+import { stats as logoStats, sweepGround, sweepState } from '$lib/server/logo';
 import { getChannels, getEpgProgress, getServices, getTuners, ping } from '$lib/server/mirakc';
 import { refresh, restartMirakc, start, stop } from '$lib/server/scan';
 import { cardStatus } from '$lib/server/scramble';
@@ -37,6 +37,11 @@ export async function load() {
          * 出ないとき、取れていないのか出し方が悪いのかを見分けられるようにする
          */
         logos: logoStats(),
+        /*
+         * 取りに行っている最中の様子。1チャンネルに数分かかるので、出さないと
+         * 押しても何も起きていないように見える
+         */
+        logoSweep: sweepState(),
     };
 }
 
@@ -77,13 +82,18 @@ export const actions = {
     },
 
     /**
-     * 局ロゴを取りに行く。
+     * 局ロゴを取りに行く。**地上波だけ、チューナー2つで。**
      *
-     * ロゴは放送波に数十秒〜数分に一度しか流れてこないので、押しても
-     * その場では出ない。普段は10分ごとに少しずつ拾っている
+     * ロゴは放送波に数十秒〜数分に一度しか流れてこないので、押してもその場では
+     * 出ない。どこまで進んだかを画面に流すので、押した人は待たなくていい。
+     *
+     * 衛星を混ぜないのは、BS/CS のロゴが地上波よりさらに来ないため。1チャンネルに
+     * 10分開いて何も来ないのが普通で、押した人を待たせるだけになる。そちらは
+     * 10分ごとの定期取得に任せる (1つの中継で網羅できるので、いつかは埋まる)
      */
-    logoSweep: () => {
-        void sweep(3);
-        return { success: true, scan: '局ロゴを取りに行っています。届くまで数分かかります' };
+    logoSweep: async () => {
+        const result = await sweepGround();
+        if (!result.started) return fail(409, { message: result.message });
+        return { success: true, scan: result.message };
     },
 };

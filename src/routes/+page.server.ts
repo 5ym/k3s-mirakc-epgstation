@@ -2,6 +2,7 @@ import { statSync } from 'node:fs';
 import { fail } from '@sveltejs/kit';
 import { detectPlatform } from '$lib/play';
 import { enabled as authEnabled } from '$lib/server/auth';
+import { forgetLogoData } from '$lib/server/cm-jls';
 import { database, queryAll, queryOne } from '$lib/server/db';
 import { cancel as cancelEncode, enqueue, pump } from '$lib/server/encoder';
 import { emit } from '$lib/server/events';
@@ -250,6 +251,11 @@ export const actions = {
      *
      * CM検出 (jls) で logoframe が自分で見つけられなかった局だけ、画面から
      * 囲ってもらう。局ごとの設定なので、次に同じ局を録ったときから効く。
+     *
+     * **覚え込んだロゴも一緒に捨てる。** `-logo-area` はロゴを覚えるときにしか
+     * 効かないので、既に覚えているものが残っていると教え直しても使われない。
+     * 実機では TOKYO MX が「ロゴには合致するのに結果の 100% がCM判定」のまま
+     * 動かず、位置を教えても何も変わらなかった
      */
     logoArea: async ({ request }) => {
         const form = await request.formData();
@@ -261,7 +267,8 @@ export const actions = {
             return fail(400, { message: 'ロゴの範囲を囲ってください' });
         }
         database().prepare('UPDATE services SET logo_area = ? WHERE id = ?').run(area, serviceId);
-        return { success: true, message: `ロゴの位置を覚えました (${area})` };
+        forgetLogoData(serviceId);
+        return { success: true, message: `ロゴの位置を覚えました (${area})。次の録画から覚え直します` };
     },
 
     logoAreaClear: async ({ request }) => {
@@ -269,6 +276,8 @@ export const actions = {
         const serviceId = Number(form.get('serviceId'));
         if (!Number.isFinite(serviceId)) return fail(400, { message: '局IDが不正です' });
         database().prepare('UPDATE services SET logo_area = NULL WHERE id = ?').run(serviceId);
+        // 教えた枠で覚えたものが残っていると、自動に戻しても効かない
+        forgetLogoData(serviceId);
         return { success: true, message: 'ロゴの位置を自動に戻しました' };
     },
 };

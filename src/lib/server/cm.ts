@@ -278,20 +278,27 @@ export interface CmDetection {
     logoMissing: boolean;
 }
 
+export interface CmOptions {
+    signal?: AbortSignal;
+    /** 局名。logoframe に渡すとこの名前でロゴを覚える */
+    channel?: string;
+    /** 局のID。覚えたロゴの置き場を局ごとに分けるのに使う */
+    serviceId?: number;
+    /** 手で教えてもらったロゴの位置 ("x,y,w,h") */
+    area?: string;
+    /** 無音検出の進み具合 */
+    onProgress?: (percent: number) => void;
+    /** jls の中でいま何をしているか。段階の名前だけでは進み具合が分からない */
+    onStep?: (label: string) => void;
+}
+
 /**
  * 設定された検出器でCM区間を求める。
  * jls を選んでいても、ロゴデータ未整備などで結果が空なら無音ベースに落とす
  * (何も検出できないよりは、チャプターだけでも付いたほうが使えるため)。
  */
-export async function detectCm(
-    input: string,
-    signal?: AbortSignal,
-    channel = '',
-    onProgress?: (percent: number) => void,
-    area = '',
-    /** jls の中でいま何をしているか。段階の名前だけでは進み具合が分からない */
-    onStep?: (label: string) => void,
-): Promise<CmDetection> {
+export async function detectCm(input: string, options: CmOptions = {}): Promise<CmDetection> {
+    const { signal, onProgress } = options;
     /** ロゴを当てられなかったことは、無音検出に落ちたあとも伝える */
     let logoMissing = false;
     /** jls が使えなかった理由。落ちた先の説明に足す */
@@ -301,7 +308,7 @@ export async function detectCm(
         const duration = await probeDuration(input);
         if (Number.isFinite(duration)) {
             const { detectWithJls } = await import('./cm-jls');
-            const result = await detectWithJls(input, duration, signal, channel, area, onStep);
+            const result = await detectWithJls(input, duration, options);
             logoMissing = result.logoMissing;
             if (result.cm.length > 0) {
                 return { cm: result.cm, duration, note: result.note, logoMissing };

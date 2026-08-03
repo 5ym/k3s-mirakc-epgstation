@@ -176,20 +176,54 @@ function workFiles(input: string) {
     };
 }
 
+/**
+ * 覚えたロゴ (`.lgd`) の置き場。**局ごとに分ける。**
+ *
+ * logoframe は局名をファイル名に埋めて覚えるが、その名前は多バイト文字を
+ * `_E7_B7_8F` のように潰したもので、こちらから組み立て直しても当たる保証がない。
+ * 局ごとの入れ物にしておけば、位置を教え直したときに丸ごと捨てられる。
+ *
+ * **捨てられることが要る。** `-logo-area` はロゴを覚えるときにしか効かず、
+ * 既に覚えているものがあれば合致率が落ちるまで作り直さない。実機では
+ * TOKYO MX が「合致はしているのに結果の 100% がCM判定」のまま動かなくなり、
+ * 位置を教えても覚えているほうが使われ続けていた。
+ */
+function logoRepo(serviceId: number | undefined): string {
+    return serviceId === undefined ? config.jlsLogoDir : join(config.jlsLogoDir, String(serviceId));
+}
+
+/**
+ * その局の覚えたロゴを捨てる。次のエンコードで、教えてもらった枠から覚え直す。
+ * 覚え直しは録画1本ぶん余計にかかるが、当たらないまま回り続けるよりはいい
+ */
+export function forgetLogoData(serviceId: number): void {
+    rmSync(logoRepo(serviceId), { recursive: true, force: true });
+}
+
+export interface JlsOptions {
+    signal?: AbortSignal;
+    /** 局名。logoframe に渡すとこの名前でロゴを覚える */
+    channel?: string;
+    /** 局のID。覚えたロゴの置き場を局ごとに分けるのに使う */
+    serviceId?: number;
+    /** 手で教えてもらったロゴの位置 ("x,y,w,h") */
+    area?: string;
+    /** いま何をしているか。数分かかる道具を3つ順に回すので、その都度伝える */
+    onStep?: (label: string) => void;
+}
+
 export async function detectWithJls(
     input: string,
     duration: number,
-    signal?: AbortSignal,
-    channel = '',
-    area = '',
-    /** いま何をしているか。数分かかる道具を3つ順に回すので、その都度伝える */
-    onStep?: (label: string) => void,
+    options: JlsOptions = {},
 ): Promise<{ cm: Range[]; note: string; logoMissing: boolean }> {
+    const { signal, channel = '', serviceId, area = '', onStep } = options;
     const deadline = Date.now() + config.cmDetectTimeout;
     const step = onStep ?? (() => {});
     const work = workFiles(input);
     const bin = (name: string) => `${config.jlsBin}/${name}`;
-    mkdirSync(config.jlsLogoDir, { recursive: true });
+    const repo = logoRepo(serviceId);
+    mkdirSync(repo, { recursive: true });
 
     try {
         /*
@@ -206,12 +240,12 @@ export async function detectWithJls(
          */
         const logoArgs =
             channel === ''
-                ? ['-logo', config.jlsLogoDir]
+                ? ['-logo', repo]
                 : [
                       '-channel',
                       channel,
                       '-logo-dir',
-                      config.jlsLogoDir,
+                      repo,
                       '-logo-samples',
                       String(config.jlsLogoSamples),
                       // 自動で見つからなかった局だけ、画面から教わった範囲を渡す

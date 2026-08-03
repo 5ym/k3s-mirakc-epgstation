@@ -5,8 +5,9 @@
     let { data, form } = $props();
 
     // スキャンは数十分かかることがある。進み具合はサーバから push される。
-    // 局の取り込みも1回では終わらないので、増えるたびに描き直す
-    liveUpdates(['scan', 'services']);
+    // 局の取り込みも1回では終わらないので、増えるたびに描き直す。
+    // ロゴ取得も1チャンネルに数分かかるので、同じように流してもらう
+    liveUpdates(['scan', 'services', 'logos']);
     const scan = $derived(data.scan);
 
     const TYPE_LABEL: Record<string, string> = { GR: '地上波', BS: 'BS', CS: 'CS' };
@@ -341,13 +342,48 @@
                         </dd>
                         <dd>
                             <form method="POST" action="?/logoSweep" use:submitting>
-                                <button class="btn btn-xs" data-testid="logo-sweep">いま取りに行く</button>
+                                <button
+                                    class="btn btn-xs"
+                                    disabled={data.logoSweep.running}
+                                    data-testid="logo-sweep"
+                                >
+                                    {data.logoSweep.running ? '取得中…' : '地上波を今すぐ取りに行く'}
+                                </button>
                             </form>
                         </dd>
                         <dd class="text-base-content/60 w-full text-xs">
                             ロゴが放送波に流れてくるのは数十秒〜数分に一度です。10分ごとに少しずつ拾っているので、
-                            全部揃うまでには時間がかかります。
+                            全部揃うまでには時間がかかります。<strong>押すと地上波だけ</strong
+                            >をチューナー2つで 取りに行きます
+                            (衛星はさらに流れてこないので、定期取得に任せます)。
                         </dd>
+                        <!--
+                            1チャンネルに数分かかる。出さないと押しても何も起きていないように
+                            見えるので、どこまで進んだかをそのまま流す
+                        -->
+                        {#if data.logoSweep.startedAt !== null}
+                            <dd class="w-full space-y-1" data-testid="logo-sweep-progress">
+                                <progress
+                                    class="progress progress-primary w-full"
+                                    value={data.logoSweep.done}
+                                    max={Math.max(1, data.logoSweep.total)}
+                                ></progress>
+                                <div class="text-base-content/70 text-xs">
+                                    <span data-testid="logo-sweep-count">
+                                        {data.logoSweep.done} / {data.logoSweep.total} チャンネル
+                                    </span>
+                                    ・ 拾えた <strong>{data.logoSweep.found} 局</strong>
+                                    {#if data.logoSweep.channels.length > 0}
+                                        ・ 受信中 {data.logoSweep.channels.join(', ')}
+                                    {/if}
+                                </div>
+                                {#if data.logoSweep.message !== ''}
+                                    <div class="text-base-content/60 text-xs" data-testid="logo-sweep-done">
+                                        {data.logoSweep.message}
+                                    </div>
+                                {/if}
+                            </dd>
+                        {/if}
                     </div>
                     <div class="flex flex-wrap items-center gap-2">
                         <dt class="w-28 text-sm font-medium">カードリーダー</dt>

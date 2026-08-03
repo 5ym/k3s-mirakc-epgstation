@@ -10,7 +10,15 @@
  * (SvelteKit + adapter-node で WebSocket を扱うには自前のサーバが要る)。
  */
 
-export type DenpaEvent = 'recordings' | 'reservations' | 'migrate' | 'scan' | 'services' | 'tuners';
+export type DenpaEvent =
+    | 'recordings'
+    | 'reservations'
+    | 'migrate'
+    | 'scan'
+    | 'services'
+    /** 局ロゴを取りに行っている最中の進み具合。1チャンネルに数分かかる */
+    | 'logos'
+    | 'tuners';
 
 type Listener = (event: DenpaEvent) => void;
 
