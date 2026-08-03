@@ -1,6 +1,6 @@
 # 放送波ストリーミングシステム 構成設計
 
-最終更新: 2026-08-02
+最終更新: 2026-08-03
 
 ---
 
@@ -37,12 +37,12 @@
         ┌─────────────┘      │      └─────────────┐
         ▼                    ▼                    ▼
 ┌───────────────┐   ┌────────────────┐   ┌──────────────────┐
-│ tsreadex      │   │ B24 字幕抽出    │   │ psisiarc         │
-│   ↓           │   │ (tsreadex の    │   │ PSI/SI +         │
-│ ffmpeg /      │   │  ID3化 または   │   │ データカルーセル  │
-│ QSVEncC 等    │   │  PES 直接抽出)  │   │                  │
-│   ↓           │   │                 │   │                  │
-│ AV1 + Opus    │   │ B24 PES + PTS   │   │ .psc ストリーム   │
+│ tsreadex      │   │ ffmpeg          │   │ psisiarc         │
+│   ↓           │   │ + libaribcaption│   │ PSI/SI +         │
+│ ffmpeg /      │   │ (sub2video)     │   │ データカルーセル  │
+│ QSVEncC 等    │   │   ↓             │   │                  │
+│   ↓           │   │ 字幕の絵 (RGBA) │   │                  │
+│ AV1 + Opus    │   │ + PTS           │   │ .psc ストリーム   │
 │ fMP4 チャンク  │   │                 │   │                  │
 └───────┬───────┘   └────────┬────────┘   └─────────┬────────┘
         │                    │                      │
@@ -51,6 +51,7 @@
               ┌──────────────────────────────┐
               │   SvelteKit サーバ            │
               │  ・プロセス管理／再起動        │
+              │  ・字幕の切り抜き + PNG化      │
               │  ・WebSocket ハブ             │
               │  ・BML通信系プロキシ           │
               └──────────────┬───────────────┘
@@ -58,9 +59,9 @@
                              ▼
               ┌──────────────────────────────┐
               │   ブラウザ (SvelteKit client) │
-              │  ・MSE / mpegts.js  → 映像音声 │
-              │  ・aribb24.js       → 字幕     │
-              │  ・web-bml          → データ放送│
+              │  ・MSE 直接        → 映像音声 │
+              │  ・canvas 重ね     → 字幕     │
+              │  ・web-bml         → データ放送│
               └──────────────────────────────┘
 ```
 
@@ -72,58 +73,70 @@
 
 これは迂回路ではなく、本システムの主要な設計要素である。
 
+### 字幕はサーバで絵にする
+
+**ブラウザに B24 を渡さない。** サーバ側で libaribcaption に描かせ、**絵と時刻だけ**を送る。
+
+放送に絵は流れてこない。乗っているのは文字と「どこに・どの大きさで・何色で・背景の箱つきで」という指定で、テレビはそれを見て毎回自分で描いている。`-sub_type bitmap` はその描画を libaribcaption にやらせたもので、**それが「放送どおりの字幕の絵」**になる。
+
+この経路は**録画側で実装・実測済み**（[architecture.md「字幕は PGS 1本だけ」](architecture.md)、`src/lib/server/subtitle.ts`）。live で変わるのは出口だけで、`.sup` に書く代わりに WebSocket へ流す。
+
+| | サーバで描く（採用） | ブラウザで描く（aribb24.js） |
+| --- | --- | --- |
+| 外字 (DRCS) | そのまま絵になる | 実装依存 |
+| 位置・背景の箱・点滅 | 放送どおり | 実装依存 |
+| 録画との見た目 | **完全に同じ**（同じ描画系） | 別実装なので揃わない |
+| 帯域 | 実測 **約 1 kB/s**（下記） | 数百バイト／字幕 |
+| サーバ負荷 | live 1本につき ffmpeg が**もう1プロセス** | なし |
+| クライアント側の自由度 | 拡大は画像の拡大になる | 文字サイズを変えられる |
+| 持つコード | 出口だけ（録画と共通） | 字幕ライブラリ1本 |
+
+帯域の実測値: 5分の番組で字幕は11枚、1枚あたり30KB前後。**約 1 kB/s** で、映像の隣では誤差になる。字幕は「次が来たら前を消す」動作なので、届いた瞬間に出して次で消せば遅延も増えない。
+
+> live では色を作り直す必要がない。録画側は PGS に入れるために 256 色へ落として YCrCb
+> 限定レンジで書いているが、ここは RGBA のまま PNG にして送る。**量子化も色空間の
+> 選択も要らない**（録画側で最大のずれ 1 まで詰めた話が、そもそも発生しない）。
+
 ---
 
 ## 3. コンポーネント選定
 
 | 役割 | 採用 | ★ | 備考 |
 | --- | --- | --- | --- |
-| TS 整形 | xtne6f/tsreadex | 41 | デュアルモノ無劣化分離、PID固定、字幕のID3化 |
+| TS 整形 | xtne6f/tsreadex | 41 | デュアルモノ無劣化分離、PID固定 |
 | エンコード | FFmpeg（将来 QSVEncC/NVEncC/VCEEncC） | — | CLI パイプラインで差し替え可能 |
-| 字幕デコード/描画 | monyone/aribb24.js | 57 | `feedB24(payload, pts, dts)` |
+| 字幕の描画 | xqq/libaribcaption | 127 | `-sub_type bitmap` + sub2video。録画側と同じ。denpa の ffmpeg は `--enable-libaribcaption` で組んである |
 | データ放送抽出 | xtne6f/psisiarc | 19 | PSI/SI + カルーセルを .psc に圧縮 |
 | データ放送描画 | otya128/web-bml | 246 | BMLブラウザ。サイドカーとして起動 |
-| 再生 (Phase 1) | xqq/mpegts.js | 2,262 | MPEG-TS 直接再生、`PES_PRIVATE_DATA_ARRIVED` |
-| 再生 (Phase 3) | MSE 直接 / Vanilagy/mediabunny | 6,846 | AV1+Opus fMP4 |
+| 再生 | MSE 直接 / Vanilagy/mediabunny | 6,846 | AV1+Opus fMP4 |
 | WebRTC 化（任意） | bluenviron/mediamtx | 19,690 | AV1 over WebRTC / WHEP |
 
 ★は 2026-08-02 時点。日本の放送関連ツールはスター数が2桁だが**代替が存在しない**ため、数値で評価しないこと。
 
+**mpegts.js と aribb24.js は使わない。** どちらも「H.264 + MPEG-TS をブラウザで直接再生し、
+字幕も TS の中から拾う」構成のための部品で、fMP4 + サイドチャネルにすると出番が無くなる。
+段階を踏むために一度その構成を通す案もあったが、**字幕の経路が録画側で先に完成した**ため、
+捨てることになるコードを書く理由が無くなった。
+
 ---
 
-## 4. 段階的実装計画
+## 4. 実装の順序
 
-AV1 から入ると前例ゼロの難所を3つ同時に踏むことになる。以下の順で進める。
+作るものは1つ。難所は「AV1 のリアルタイムエンコード」だけに絞れているので、そこだけ逃げ道を用意する。
 
-### Phase 1 — H.264 + MPEG-TS で全機能を通す
+1. **メディア経路** — `tsreadex → ffmpeg → fMP4 → WebSocket → MSE`。まず映像音声だけ出す
+2. **字幕** — 2本目の ffmpeg を足してサイドチャネルへ流し、canvas に重ねる（録画側の実装を流用）
+3. **データ放送** — psisiarc → web-bml をサイドカーとして起動し、iframe で抱える
+4. **低遅延の追い込み（任意）** — MediaMTX 経由で WebRTC/WHEP（0.2秒級）、または Media over QUIC
 
-- `tsreadex → ffmpeg (libx264 -tune zerolatency) → MPEG-TS → WebSocket → mpegts.js`
-- 字幕: `PES_PRIVATE_DATA_ARRIVED` → `aribb24.js`
-- データ放送: psisiarc → web-bml
-- **KonomiTV / web-bml と同一構成であり、前例が豊富**
-
-この時点で機能要件はすべて満たされる。ここを完成させてから先へ進む。
-
-### Phase 2 — 字幕・データ放送をサイドチャネルに分離
-
-- Phase 1 では mpegts.js が字幕を TS 内から拾っているが、これを **独立した WebSocket メッセージ**に切り出す
-- コンテナ非依存になり、Phase 3 で映像形式を変えても字幕・データ放送のコードが無傷で残る
-
-### Phase 3 — AV1 + Opus / fMP4 へ移行
-
-- エンコーダとコンテナのみ差し替え。クライアントは MSE 直接 or mediabunny
-- サイドチャネルは Phase 2 のまま変更なし
-
-### Phase 4（任意） — 低遅延の追い込み
-
-- MediaMTX 経由で WebRTC/WHEP（0.2秒級）
-- または Media over QUIC（kixelated/moq, 1,431★）
+**コーデックは段階ではなく設定にする。** AV1 が回らない環境・Safari では H.264 + AAC に
+切り替える。エンコーダとコンテナ以外は共通なので、字幕もデータ放送もそのまま動く。
 
 ---
 
 ## 5. 実装詳細
 
-### 5.1 エンコード（Phase 3 想定）
+### 5.1 エンコード
 
 ```bash
 tsreadex -x 18/38/39 -n -1 -a 13 -b 5 -c 1 -u 1 - \
@@ -146,7 +159,33 @@ tsreadex -x 18/38/39 -n -1 -a 13 -b 5 -c 1 -u 1 - \
 AV1 のリアルタイムエンコードはソフトウェアでは厳しい。実運用では
 `av1_nvenc`（RTX40以降）/ `av1_qsv`（Arc・Meteor Lake以降）/ `av1_amf`（RDNA3以降）を前提とする。
 
-### 5.2 WebSocket プロトコル
+### 5.2 字幕（sub2video）
+
+tee の2本目を、映像を作らない ffmpeg に食わせる。
+
+```bash
+ffmpeg -copyts -sub_type bitmap -canvas_size 1920x1080 \
+    -font 'Rounded M+ 1m for ARIB,...' -i - \
+    -filter_complex '[0:s:0]showinfo[v]' -map '[v]' \
+    -fps_mode passthrough -f rawvideo -pix_fmt rgba pipe:1
+```
+
+- 字幕をフィルタの入力にすると、字幕1枚ごとに RGBA の映像フレームになる（sub2video）
+- 時刻と大きさは `showinfo` が標準エラーに書く（`pts_time:` と `s:WxH`）。
+  **`-copyts` を付けるので、この時刻は元TSの時間軸そのまま**になり、映像と揃う
+- `-canvas_size` は必須。指定が無いと libaribcaption は 1440x1080 (PROFILE_A) とみなすので、
+  1920x1080 の放送では字幕だけ横に伸びる
+- フレームは画面まるごとの大きさで来る。**字幕のあるところだけ切り抜いて**送る
+  （切り抜きは `src/lib/pgs.ts` の `crop` がそのまま使える）
+
+サーバ側の処理は録画と同じで、切り抜いたあとに PNG を組んで（`src/lib/ts/logo-palette.ts` の
+チャンク書き出しを流用）サイドチャネルへ流す。ブラウザは `createImageBitmap()` で受けて
+canvas に貼るだけでよい。
+
+> **字幕が1枚も来ない番組がある。** 絵は描くものがあったときだけ出るので、本編に字幕が
+> 無ければ0枚になる（録画側の実測でも同じ）。何も来ないことは異常ではない。
+
+### 5.3 WebSocket プロトコル
 
 単一接続で全チャネルを多重化する。
 
@@ -158,31 +197,37 @@ channel:
   0x01  video media  (moof + mdat)
   0x10  audio init segment
   0x11  audio media
-  0x20  ARIB B24 caption PES
+  0x20  字幕の絵     [2:x][2:y][2:w][2:h][PNG...]
+  0x21  字幕を消す   (payload なし)
   0x30  PSI/SI + データカルーセル (.psc chunk)
   0x40  制御 (チャンネル切替、EPG更新通知 等)
 ```
 
 - init セグメントは接続直後に必ず送る（再送用にサーバ側で保持）
 - MSE はバイト列をそのまま `appendBuffer()` に投げられるため、映像音声のパースは不要
+- 字幕の座標は `-canvas_size` の座標系。表示側の拡大率に合わせて canvas を伸ばす
+- 途中から入ってきた視聴者のために、**いま出ている字幕はサーバが1枚だけ保持して再送する**
 
-### 5.3 時刻同期
+### 5.4 時刻同期
 
 | 対象 | 方法 |
 | --- | --- |
 | 映像・音声 | fMP4 の timescale で自動的に整合 |
-| 字幕 | B24 の PTS を `feedB24(payload, pts, dts)` に渡す |
-| エンコード遅延補正 | aribb24.js の `FeederOption.offset.time` |
+| 字幕 | `showinfo` の `pts_time`（`-copyts` により元TSの90kHz） |
+| エンコード遅延補正 | サーバ側で字幕の PTS に一定量を足す（エンコーダの遅延ぶん） |
 | データ放送 | カルーセルは時刻同期不要（PMT/TOT/EIT の更新に追従） |
 
-### 5.4 データ放送の統合
+字幕はエンコードを通らないぶん**映像より早く届く**。映像側の遅延は使うエンコーダで変わるので、
+補正値は設定で持つ。
+
+### 5.5 データ放送の統合
 
 web-bml は Node.js サーバ + ブラウザクライアント構成（既定ポート 23234）。
 **サイドカーとして起動し、iframe で抱えるのが最も低コスト。**
 
 セルフホスト前提なので、NVRAM は web-bml の既定実装（サーバローカル保存）をそのまま使用する。
 
-### 5.5 双方向（通信系コンテンツ）プロキシ
+### 5.6 双方向（通信系コンテンツ）プロキシ
 
 放送局の通信系サーバは受信機の専用ネットワークスタックを前提としており、CORS ヘッダを返さない。
 そのため **SvelteKit サーバが中継する**。
@@ -211,6 +256,22 @@ web-bml は Node.js サーバ + ブラウザクライアント構成（既定ポ
 
 ## 6. 技術選定の記録（採用しなかったもの）
 
+### ブラウザ側での字幕デコード（aribb24.js）— 不採用
+
+B24 をそのままブラウザへ送り、`feedB24(payload, pts, dts)` に食わせる構成。
+クライアントで完結しプロセスも増えないが、**録画と live で描画系が二重になる**。
+サーバで描けば見た目が完全に一致し、外字も背景の箱も放送どおりに出る。
+帯域の増加は実測で約 1 kB/s と無視できる。
+
+サーバ負荷（live 1本につき ffmpeg がもう1プロセス）が問題になる規模なら、
+この構成へ戻す余地は残る。**サイドチャネルの形は変わらない**（B24 を 0x20 で流すだけ）。
+
+### H.264 + MPEG-TS + mpegts.js で先に全機能を通す — 不採用
+
+前例が豊富（KonomiTV / web-bml と同一構成）で、段階を踏む案として有力だった。
+**字幕の経路が録画側で先に完成した**ため、あとで捨てるコードを書く理由が無くなった。
+Safari や AV1 非対応環境のための H.264 fallback は、段階ではなく**コーデックの設定**として残す。
+
 ### GStreamer — 不採用
 
 当初は「tsdemux の private pad で B24 を映像と同一クロック上で取得でき、tee が不要になる」ことを理由に有力視した。**データ放送要件の追加によりこの論拠は失効**（psisiarc が独立プロセスで TS を読むため tee は必須）。
@@ -223,6 +284,7 @@ web-bml は Node.js サーバ + ブラウザクライアント構成（既定ポ
 - GStreamer は ARIB/ISDB の知識・前例ゼロ
 - 放送波の不安定さ（解像度変化、ステレオ⇄デュアルモノ）は tsreadex が吸収済み
 - AV1 over WebRTC は MediaMTX 経由で取得可能
+- **libaribcaption を組み込める**（`--enable-libaribcaption`。字幕の描画をそのまま使える）
 
 ### ffmpeg の WHIP muxer — 不採用
 
@@ -232,10 +294,9 @@ WebRTC が必要な場合は MediaMTX を経由する。
 ### MPEG-TS への AV1 多重 — 保留
 
 AOM 公式仕様（AOMediaCodec/av1-mpeg2-ts、stream_type 0x06 + format_identifier `AV01`）は存在するが、
-FFmpeg は PR、VLC は MR、GStreamer は WIP 段階。ブラウザ側デマクサも存在しない。
-実装が揃えば「字幕を PES private のまま素通しできる」最も綺麗な構成になるため、継続監視する。
+FFmpeg は PR、VLC は MR、GStreamer は WIP 段階。ブラウザ側デマクサも存在しない。継続監視する。
 
-### Media over QUIC — Phase 4 の候補
+### Media over QUIC — 低遅延化の候補
 
 字幕・データ放送を第一級のトラックとして扱える唯一の選択肢だが、IETF ドラフト段階。
 
@@ -245,8 +306,11 @@ FFmpeg は PR、VLC は MR、GStreamer は WIP 段階。ブラウザ側デマク
 
 | 項目 | 内容 | 対応 |
 | --- | --- | --- |
-| Safari 非対応 | Opus in mp4 / AV1 が MSE で通らない | Phase 1 の H.264+AAC 構成を fallback として残す |
-| AV1 エンコード負荷 | ソフトウェアでのリアルタイム処理は困難 | ハードウェアエンコーダ前提。非対応環境は H.264 に fallback |
+| AV1 エンコード負荷 | ソフトウェアでのリアルタイム処理は困難 | ハードウェアエンコーダ前提。非対応環境は H.264 に切り替え |
+| Safari 非対応 | Opus in mp4 / AV1 が MSE で通らない | H.264 + AAC の設定に切り替え |
+| 字幕用の2本目の ffmpeg | live 1本につきプロセスが1つ増える | 実測で負荷を確認。問題なら aribb24.js 構成へ戻す（§6） |
+| 字幕の拡大 | 絵なので、拡大すると文字も引き伸ばされる | `-canvas_size` を表示解像度に合わせる |
+| 字幕と映像のズレ | 字幕はエンコードを通らないぶん早く届く | 補正値を設定で持つ（§5.4） |
 | web-bml の実装範囲 | STD-B24 / TR-B14 / TR-B15 の部分実装。一部イベント・API 未実装 | 実際のチャンネルで動作確認。完全互換は期待しない |
 | web-bml の通信機能 | 実装の有無・範囲を未確認 | ソース（`client/`, `documents/`）で要確認 |
 | カルーセル初期表示 | 数秒周期の繰り返し送出のため初期表示に数秒かかる | 仕様上の制約。低遅延要件とは別軸として扱う |
@@ -259,20 +323,20 @@ FFmpeg は PR、VLC は MR、GStreamer は WIP 段階。ブラウザ側デマク
 
 | リポジトリ | ★ | 用途 |
 | --- | --- | --- |
-| bluenviron/mediamtx | 19,690 | WebRTC/WHEP 化（Phase 4） |
+| bluenviron/mediamtx | 19,690 | WebRTC/WHEP 化（低遅延化） |
 | video-dev/hls.js | 16,855 | HLS 経路を採る場合 |
 | pion/webrtc | 16,682 | 自前 WebRTC を書く場合 |
 | shaka-project/shaka-player | 8,187 | DASH 経路を採る場合 |
 | Vanilagy/mediabunny | 6,846 | WebCodecs 移行時のデマクサ |
 | Dash-Industry-Forum/dash.js | 5,539 | 同上 |
-| xqq/mpegts.js | 2,262 | Phase 1 の再生 |
-| kixelated/moq | 1,431 | Phase 4 の候補 |
+| kixelated/moq | 1,431 | 低遅延化の候補 |
 | tsukumijima/KonomiTV | 1,007 | 参考実装 |
 | otya128/web-bml | 246 | データ放送 |
-| xqq/libaribcaption | 127 | ネイティブ側で字幕が要る場合 |
-| monyone/aribb24.js | 57 | 字幕 |
+| xqq/libaribcaption | 127 | **字幕の描画**（denpa の ffmpeg に組み込み済み） |
 | monyone/biim | 49 | LL-HLS 化する場合 |
 | xtne6f/tsreadex | 41 | TS 整形 |
 | xtne6f/psisiarc | 19 | データ放送抽出 |
+| monyone/aribb24.js | 57 | ブラウザ側で字幕を描く場合（§6） |
+| xqq/mpegts.js | 2,262 | MPEG-TS を直接再生する場合（不採用） |
 
 ★は 2026-08-02 時点の GitHub スター数。
