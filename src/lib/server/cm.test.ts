@@ -3,7 +3,7 @@ import {
     boundaries,
     chapterMetadata,
     detectCmRanges,
-    firstLine,
+    fields,
     isCmLength,
     keepRanges,
     parseFrameRate,
@@ -100,23 +100,43 @@ describe('chapterMetadata', () => {
 });
 
 describe('ffprobe の読み取り', () => {
-    test('局が複数乗ったTSでは同じ行が並ぶので、1行目だけ読む', () => {
+    /**
+     * 実機の TOKYO MX の生TS。MX1 と MX2 が同じTSに乗っているので
+     * `-select_streams v:0` を付けても番組の数だけ並ぶ。
+     * 並び順も**頼んだ順ではない** (avg_frame_rate,width,height と頼んで幅から来る)
+     */
+    const MX = [
+        'width=1440',
+        'height=1080',
+        'avg_frame_rate=30000/1001',
+        '',
+        'width=1440',
+        'height=1080',
+        'avg_frame_rate=30000/1001',
+    ].join('\n');
+
+    test('位置ではなく鍵で読む。頼んだ順では返ってこない', () => {
         /*
-         * 実機で起きたやつ。TOKYO MX の生TSには MX1 と MX2 が乗っていて、
-         * `-select_streams v:0` を付けても ffprobe は番組ごとに1行ずつ返す。
-         * 丸ごと split('/') していた頃は分母が "1001\n30000" で NaN になり、
-         * 分子の 30000 をフレームレートとして採っていた。その結果、
-         * 30分アニメの本編4万コマが1.4秒に潰れて「番組の100%がCM」になり、
-         * jls の結果が毎回捨てられていた (録画34・35)
+         * ここを位置で受けていた頃は 1440 をフレームレートとして採り、
+         * 30分アニメの本編4万2千コマが29秒に潰れて「番組の98%がCM」になっていた。
+         * その前は丸ごと split('/') していて 30000 を採り、1.4秒 =「100%がCM」。
+         * どちらも jls の結果が毎回捨てられて無音検出に落ちていた (録画34・35・38)
          */
-        expect(parseFrameRate('30000/1001\n30000/1001')).toBeCloseTo(29.97, 2);
-        expect(firstLine('30000/1001,1440,1080\n30000/1001,1440,1080')).toBe('30000/1001,1440,1080');
+        const stream = fields(MX);
+        expect(parseFrameRate(stream.get('avg_frame_rate'))).toBeCloseTo(29.97, 2);
+        expect(Number(stream.get('width'))).toBe(1440);
+        expect(Number(stream.get('height'))).toBe(1080);
+    });
+
+    test('同じ鍵が並んだら最初のものを採る', () => {
+        expect(fields('duration=10\nduration=999').get('duration')).toBe('10');
     });
 
     test('読めなければ NaN。呼ぶ側が既定に落とす', () => {
         expect(parseFrameRate('N/A')).toBeNaN();
         expect(parseFrameRate('0/0')).toBeNaN();
         expect(parseFrameRate('')).toBeNaN();
+        expect(parseFrameRate(undefined)).toBeNaN();
     });
 
     test('分母のない書き方も読む', () => {

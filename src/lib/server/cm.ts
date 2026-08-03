@@ -213,28 +213,41 @@ export function chapterMetadata(cm: Range[], duration: number): string {
 }
 
 /**
- * ffprobe の出力の**1行目**。
+ * ffprobe の `key=value` 出力を読む。**位置では読まない。**
  *
- * 生TSには局が何本も入っていることがある (実機の TOKYO MX は MX1 と MX2 が
- * 同じTSに乗っている)。ffprobe はそれを別々の番組として読むので、
- * `-select_streams v:0` を付けても**番組の数だけ同じ行が並ぶ**。
+ * ここは実機で2回踏んでいる。どちらも「1本のTSに局が何本も乗っている」ことが効く
+ * (TOKYO MX は MX1 と MX2 が同じTSにいる):
+ *
+ * 1. **同じ行が番組の数だけ並ぶ。** `-select_streams v:0` を付けても、ffprobe は
+ *    番組ごとに v:0 を1つずつ出す。`avg_frame_rate` だけを取って丸ごと
+ *    `split('/')` していた頃は、分母が `1001\n30000` になって NaN に落ち、
+ *    分子の **30000** をフレームレートとして採っていた。
+ * 2. **`-show_entries` に書いた順では返らない。** `avg_frame_rate,width,height`
+ *    と頼んでも `1440,1080,30000/1001` (幅,高さ,fps) の順で来る。位置で受けていた
+ *    頃は **1440** をフレームレートとして採り、ついでに高さが `30000/1001` に
+ *    なっていた (字幕を焼くときの画面の大きさが壊れる)。
+ *
+ * どちらも join_logo_scp の `Trim` をコマから秒に直すところに効いて、
+ * 30分アニメの本編4万2千コマが 1.4秒 / 29秒 に潰れ、「番組の 100% / 98% がCM」で
+ * 毎回捨てられていた。ロゴは合致率79%で正しく当たっていたので、
+ * 画面からはロゴが悪いようにしか見えなかった (実機の録画34・35・38)。
+ *
+ * 鍵で引き、**同じ鍵は最初のものを採る**。
  */
-export function firstLine(out: string): string {
-    return out.split('\n')[0]?.trim() ?? '';
+export function fields(out: string): Map<string, string> {
+    const map = new Map<string, string>();
+    for (const line of out.split('\n')) {
+        const eq = line.indexOf('=');
+        if (eq === -1) continue;
+        const key = line.slice(0, eq).trim();
+        if (!map.has(key)) map.set(key, line.slice(eq + 1).trim());
+    }
+    return map;
 }
 
-/**
- * `30000/1001` の形のフレームレートを数に直す。読めなければ NaN。
- *
- * **必ず1行に切ってから割る。** 出力を丸ごと `split('/')` していた頃は、
- * 局が2本乗った MX の生TSで分母が `1001\n30000` になって NaN に落ち、
- * `den ? num / den : num` が分子の **30000** をそのままフレームレートとして
- * 返していた。30分アニメの本編1万4千コマが1.4秒に潰れ、join_logo_scp の結果は
- * 毎回「番組の100%がCM」で捨てられて無音検出に落ちていた
- * (実機の録画34・35。ロゴは合致率79%で正しく当たっていた)
- */
-export function parseFrameRate(out: string): number {
-    const [num, den] = firstLine(out).split('/').map(Number);
+/** `30000/1001` の形のフレームレートを数に直す。読めなければ NaN */
+export function parseFrameRate(value: string | undefined): number {
+    const [num, den] = (value ?? '').trim().split('/').map(Number);
     const fps = den ? num / den : num;
     return Number.isFinite(fps) && fps > 0 ? fps : NaN;
 }
@@ -263,21 +276,23 @@ export async function probeVideo(
     let width = NaN;
     let height = NaN;
     try {
-        duration = Number(await read(['-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1']));
-        // "30000/1001,1440,1080" の形で返る (局が複数乗ったTSでは同じ行が並ぶ)
-        const [rate, w, h] = firstLine(
+        // `nk=1` (鍵を出さない) にはしない。鍵で引くために必ず `key=value` で受ける
+        const format = fields(await read(['-show_entries', 'format=duration', '-of', 'default=nw=1']));
+        duration = Number(format.get('duration'));
+
+        const stream = fields(
             await read([
                 '-select_streams',
                 'v:0',
                 '-show_entries',
                 'stream=avg_frame_rate,width,height',
                 '-of',
-                'csv=p=0',
+                'default=nw=1',
             ]),
-        ).split(',');
-        fps = parseFrameRate(rate ?? '');
-        width = Number(w);
-        height = Number(h);
+        );
+        fps = parseFrameRate(stream.get('avg_frame_rate'));
+        width = Number(stream.get('width'));
+        height = Number(stream.get('height'));
     } catch {
         // ffprobe が使えない環境。呼ぶ側が NaN を見て諦める
     }
