@@ -1,6 +1,7 @@
 import type { Service } from '../types';
 import { config } from './config';
-import { database, now, queryAll } from './db';
+import { database, now, queryAll, queryOne } from './db';
+import { emit } from './events';
 import * as mirakc from './mirakc';
 import { applyRules } from './rules';
 import { resolveConflicts } from './scheduler';
@@ -89,6 +90,30 @@ function syncServices(services: mirakc.MirakcService[]): number {
         }
     });
     tx();
+    return count;
+}
+
+/**
+ * 局だけを取り込む。番組表は待たない。
+ *
+ * **mirakc は局と番組表を別々に持っている。** 知らせが飛んでくるのは番組表のぶんだけで
+ * (`epg.programs-updated`)、局が揃ったことは教えてくれない。取り込みを知らせ任せに
+ * していた頃は、初回起動やスキャン直後の「局は分かったが番組表はこれから」の間、
+ * denpa の番組表が空のままだった (実機で mirakc 側 125局 / 番組 0 のとき、
+ * denpa 側は2局)。番組表が埋まるのは数十分先なので、局だけ先に出す。
+ *
+ * 番組表を取りに行かないので軽い。局の一覧は数十KBで、10分ごとの全体取り込みの
+ * 数百分の一しかない。
+ */
+export async function syncServicesOnly(): Promise<number> {
+    const current = `SELECT COUNT(*) AS n FROM services WHERE ${CURRENT_SERVICES}`;
+    const before = queryOne<{ n: number }>(current)?.n ?? 0;
+    const count = syncServices(await mirakc.getServices());
+    /*
+     * 数が変わったときだけ知らせる。毎回知らせると、番組表を開いている端末が
+     * 何も変わっていないのに1分おきに読み直すことになる
+     */
+    if ((queryOne<{ n: number }>(current)?.n ?? 0) !== before) emit('services');
     return count;
 }
 

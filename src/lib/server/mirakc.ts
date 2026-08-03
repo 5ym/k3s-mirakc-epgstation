@@ -120,15 +120,32 @@ export function getProgram(programId: number): Promise<MirakcProgram> {
 /** 録画は2。チューナーが足りなくなったら mirakc が優先度の低いものを切り、録画を通す */
 const RECORDING_PRIORITY = 2;
 
+/**
+ * 何のために開いたかを mirakc に伝える印。
+ *
+ * mirakc のチューナー一覧には掴んでいる相手の User-Agent がそのまま出る。
+ * 何も渡していなかった頃は fetch の既定 (`Bun/1.3.14`) が並ぶだけで、
+ * 録画なのかロゴ集めなのかが画面から読めなかった。
+ *
+ * **ヘッダに載せるので ASCII だけ。** 番組名は入れず録画IDだけ渡して、
+ * 読める言葉に直すのは画面側でやる (routes/tuners/+page.server.ts)。
+ */
+export type StreamUse = `rec ${number}` | `logo ${string}`;
+
 async function openStream(
     path: string,
     signal: AbortSignal,
     priority: number,
+    use: StreamUse,
     headers: Record<string, string> = {},
 ): Promise<ReadableStream<Uint8Array>> {
     const res = await fetch(`${config.mirakcUrl}${path}`, {
         signal,
-        headers: { 'X-mirakc-Priority': String(priority), ...headers },
+        headers: {
+            'X-mirakc-Priority': String(priority),
+            'User-Agent': `denpa (${use})`,
+            ...headers,
+        },
     });
     if (!res.ok || res.body === null) {
         throw new Error(`mirakc stream ${path} -> ${res.status}`);
@@ -140,9 +157,10 @@ async function openStream(
 export function openServiceStream(
     serviceId: number,
     signal: AbortSignal,
+    use: StreamUse,
     priority = RECORDING_PRIORITY,
 ): Promise<ReadableStream<Uint8Array>> {
-    return openStream(`/api/services/${serviceId}/stream?decode=1`, signal, priority);
+    return openStream(`/api/services/${serviceId}/stream?decode=1`, signal, priority, use);
 }
 
 /**
@@ -160,6 +178,7 @@ export function openChannelStream(
     type: string,
     channel: string,
     signal: AbortSignal,
+    use: StreamUse,
     priority = RECORDING_PRIORITY,
 ): Promise<ReadableStream<Uint8Array>> {
     // decode=1 は付けない。スクランブルを解く必要があるのは映像と音声で、
@@ -168,6 +187,7 @@ export function openChannelStream(
         `/api/channels/${encodeURIComponent(type)}/${encodeURIComponent(channel)}/stream`,
         signal,
         priority,
+        use,
     );
 }
 
@@ -183,14 +203,17 @@ export function openChannelStream(
  * `uses.tuner` は空で stream_id を渡すので、チューナーは増えない)。おかげで
  * `/api/programs/:id` の時刻が放送に合わせて書き換わり、denpa 側から延長を読める。
  * 設定で立てる追従役はチューナーを1本専有するので、こちらに乗るほうが安い。
+ *
+ * 見ているのは**頭が `EPGStation/` かどうか**だけなので、後ろに用途を足しても効く。
  */
 export function openProgramStream(
     programId: number,
     signal: AbortSignal,
+    use: StreamUse,
     priority = RECORDING_PRIORITY,
 ): Promise<ReadableStream<Uint8Array>> {
-    return openStream(`/api/programs/${programId}/stream?decode=1`, signal, priority, {
-        'User-Agent': 'EPGStation/denpa',
+    return openStream(`/api/programs/${programId}/stream?decode=1`, signal, priority, use, {
+        'User-Agent': `EPGStation/denpa (${use})`,
     });
 }
 

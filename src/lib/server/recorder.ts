@@ -282,8 +282,10 @@ async function pump(recording: Recording, controller: AbortController): Promise<
             inner.abort();
         }, config.onairFallbackWait);
 
+    // 何を掴んでいるのかがチューナー画面に出る。番組名は載せず、IDだけ渡して向こうで引く
+    const use = `rec ${recording.id}` as const;
     const openService = () =>
-        openWithRetry((signal) => openServiceStream(recording.service_id, signal), controller.signal);
+        openWithRetry((signal) => openServiceStream(recording.service_id, signal, use), controller.signal);
 
     try {
         const follow = config.followOnair && recording.program_id !== null;
@@ -292,7 +294,7 @@ async function pump(recording: Recording, controller: AbortController): Promise<
         let stream: ReadableStream<Uint8Array>;
         try {
             stream = follow
-                ? await openProgramStream(recording.program_id!, inner.signal)
+                ? await openProgramStream(recording.program_id!, inner.signal, use)
                 : await openService();
             if (follow) stopFollowing = followEndTime(recording);
         } catch (error) {

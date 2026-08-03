@@ -45,9 +45,14 @@ test.describe('チューナー画面', () => {
 
         const tuners = page.getByTestId('tuner-list');
         await expect(tuners.getByTestId('tuner-row')).toHaveCount(4);
-        // 録画で掴んでいるものは誰が使っているか分かるようにする
+        /*
+         * 掴んでいる相手が何をしているのか分かるようにする。
+         *
+         * mirakc が持っているのは User-Agent だけで、渡していなかった頃は
+         * `Bun/1.3.14` と出るだけだった。録画なのかロゴ集めなのか読めない
+         */
         await expect(tuners.getByTestId('tuner-row').nth(1)).toContainText('使用中');
-        await expect(tuners.getByTestId('tuner-row').nth(1)).toContainText('denpa');
+        await expect(tuners.getByTestId('tuner-row').nth(1).getByTestId('tuner-user')).toContainText('録画');
         // 故障は空き/使用中より先に出す。直さないと録れない
         await expect(tuners.getByTestId('tuner-row').nth(3)).toContainText('故障');
 

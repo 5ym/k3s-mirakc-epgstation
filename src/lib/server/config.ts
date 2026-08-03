@@ -121,6 +121,14 @@ export const config = {
      */
     epgSyncInterval: num('EPG_SYNC_INTERVAL', 10 * MIN),
     /**
+     * 局だけを取り直す間隔。
+     *
+     * mirakc は局と番組表を別々に持っていて、**局が揃ったことは知らせてくれない**
+     * (飛んでくるのは `epg.programs-updated` だけ)。初回起動やスキャン直後は
+     * 「局は分かったが番組表はこれから」が数十分続くので、局だけ先に拾いに行く
+     */
+    serviceSyncInterval: num('SERVICE_SYNC_INTERVAL', 1 * MIN),
+    /**
      * 知らせが来てから取り直すまでの間。
      * 番組表が更新されると局の数だけ知らせが飛んでくる (実機で30件ほど連続) ので、
      * 静まるのを待ってから1回だけ取り直す

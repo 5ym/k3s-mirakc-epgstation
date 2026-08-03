@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { config } from './config';
 import { pump, requeueOrphanedJobs } from './encoder';
-import { sync } from './epg';
+import { sync, syncServicesOnly } from './epg';
 import { emit } from './events';
 import { pruneHistory, reconcile } from './files';
 import { reconcile as logoReconcile, ride, sweep } from './logo';
@@ -54,6 +54,13 @@ export function start(): void {
 
     void guard('epg', sync);
     every(config.epgSyncInterval, 'epg', sync);
+    /*
+     * 局だけを取り直す。**mirakc は局が揃ったことを知らせてくれない**ので
+     * (飛んでくるのは番組表のぶんだけ)、こちらから覗きに行くしかない。
+     * 初回起動やスキャン直後は「局は分かったが番組表はこれから」が数十分続き、
+     * 番組表を待っていると denpa の画面は空のままになる
+     */
+    every(config.serviceSyncInterval, 'services', syncServicesOnly);
     listenToMirakc();
 
     every(config.schedulerTick, 'scheduler', async () => {

@@ -1,12 +1,60 @@
 import { fail } from '@sveltejs/kit';
-import { queryAll } from '$lib/server/db';
+import { queryAll, queryOne } from '$lib/server/db';
 import { stats as logoStats, sweepGround, sweepState } from '$lib/server/logo';
-import { getChannels, getEpgProgress, getServices, getTuners, ping } from '$lib/server/mirakc';
+import {
+    getChannels,
+    getEpgProgress,
+    getServices,
+    getTuners,
+    type MirakcTuner,
+    ping,
+} from '$lib/server/mirakc';
 import { refresh, restartMirakc, start, stop } from '$lib/server/scan';
 import { cardStatus } from '$lib/server/scramble';
 import type { ChannelType, Service } from '$lib/types';
 
 const TYPES: ChannelType[] = ['GR', 'BS', 'CS'];
+
+interface TunerUser {
+    id: string;
+    priority: number;
+    agent?: string;
+    /** 画面に出す言葉。denpa 以外の相手は User-Agent をそのまま出す */
+    label: string;
+}
+
+/**
+ * 掴んでいる相手を読める言葉に直す。
+ *
+ * mirakc が持っているのは User-Agent だけで、そこには ASCII しか載せられない
+ * (ヘッダなので)。denpa は用途とIDだけを渡し、番組名はここで引き直す。
+ * `Bun/1.3.14` と出ていた頃は、録画なのかロゴ集めなのかが画面から読めなかった。
+ */
+function describe(agent: string | undefined): string {
+    const use = agent?.match(/denpa \(([^)]+)\)/)?.[1];
+    if (use === undefined) return agent ?? '不明';
+
+    const recording = use.match(/^rec (\d+)$/);
+    if (recording !== null) {
+        const row = queryOne<{ name: string }>(
+            'SELECT name FROM recordings WHERE id = ?',
+            Number(recording[1]),
+        );
+        return row === undefined ? '録画' : `録画: ${row.name}`;
+    }
+
+    const logo = use.match(/^logo \S+\/(\S+)$/);
+    if (logo !== null) return `局ロゴ収集 (${logo[1]})`;
+
+    return use;
+}
+
+function withLabels(tuners: MirakcTuner[]): (Omit<MirakcTuner, 'users'> & { users: TunerUser[] })[] {
+    return tuners.map((tuner) => ({
+        ...tuner,
+        users: (tuner.users ?? []).map((user) => ({ ...user, label: describe(user.agent) })),
+    }));
+}
 
 export async function load() {
     return {
@@ -16,7 +64,10 @@ export async function load() {
          * 以下は相手待ちなので promise のまま返して後から流し込む。
          * スキャン中は mirakc が止まっていて応答しないので、待つと画面が出ない
          */
-        tuners: getTuners().catch(() => []),
+        // 掴んでいる相手は User-Agent でしか分からない。読める言葉に直してから渡す
+        tuners: getTuners()
+            .then(withLabels)
+            .catch(() => []),
         channels: getChannels().catch(() => []),
         mirakc: ping(),
         card: cardStatus(),

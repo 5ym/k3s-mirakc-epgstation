@@ -452,8 +452,8 @@
                                             </td>
                                             <td class="text-sm">
                                                 {#each tuner.users ?? [] as user (user.id)}
-                                                    <div class="truncate">
-                                                        {user.agent ?? user.id}
+                                                    <div class="truncate" data-testid="tuner-user">
+                                                        {user.label}
                                                         <span class="text-base-content/60">
                                                             (優先度 {user.priority})
                                                         </span>

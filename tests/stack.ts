@@ -164,6 +164,8 @@ async function boot(index: number): Promise<{ stack: Stack; shutdown: () => Prom
             // 定期処理は止め、テストからボタン/APIで明示的に走らせる(タイミング依存を避ける)
             RECONCILE_INTERVAL: '86400000',
             EPG_SYNC_INTERVAL: '86400000',
+            // 局だけの取り込みも定期実行。中身は epg.test.ts で見ている
+            SERVICE_SYNC_INTERVAL: '86400000',
             SCHEDULER_TICK: '500',
             START_MARGIN: '0',
             END_MARGIN: '500',

@@ -526,7 +526,12 @@ Bun.serve({
                             ...tuner,
                             isFree: false,
                             isUsing: true,
-                            users: [{ id: 'denpa', priority: 2, agent: 'denpa' }],
+                            /*
+                             * 本物と同じく User-Agent がそのまま出る。denpa は
+                             * 用途と録画IDだけを ASCII で載せ (ヘッダなので)、
+                             * 読める言葉に直すのは画面側でやる
+                             */
+                            users: [{ id: 'denpa', priority: 2, agent: 'denpa (rec 1)' }],
                         };
                     }
                     if (tuner.index === 3) return { ...tuner, isAvailable: false, isFault: true };

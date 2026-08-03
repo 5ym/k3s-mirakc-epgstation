@@ -247,6 +247,8 @@ async function collect(target: Target, timeout: number): Promise<number> {
             target.type,
             target.channel,
             controller.signal,
+            // 何を掴んでいるのかがチューナー画面に出る
+            `logo ${target.type}/${target.channel}`,
             SWEEP_PRIORITY,
         );
         const feed = watch(target.network_id);
