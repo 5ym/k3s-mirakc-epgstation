@@ -16,7 +16,7 @@ test.describe('ダッシュボードと画面遷移', () => {
          * 番組数は番組表に出す。古いことに気づくのはこの画面なので。
          *
          * 局は4つ (データ放送の局は録画対象にならないので入らない)。
-         * うち1つは**番組表がまだ空**の局 — mirakc が集め終えていない局は
+         * うち1つは**番組表がまだ空**の局 — まだ集め終えていない局は
          * 本物でも普通にあるので、それでも画面が出ることを一緒に見ておく
          */
         await goto(page, '/guide');
@@ -34,10 +34,10 @@ test.describe('ダッシュボードと画面遷移', () => {
         }
     });
 
-    test('チューナー画面に mirakc とカードリーダーの状態が出る', async ({ page }) => {
+    test('チューナー画面にエージェントとカードリーダーの状態が出る', async ({ page }) => {
         await goto(page, '/tuners');
         // どちらも相手待ちなので後から流れてくる
-        await expect(page.getByTestId('status-mirakc')).toHaveText('3.9.0-fake');
+        await expect(page.getByTestId('status-agent')).toHaveText('チューナー 4 本');
         await expect(page.getByTestId('status-card-reader')).toHaveText('OK');
         await expect(page.getByTestId('status-card')).toContainText('Fake Card Reader');
     });

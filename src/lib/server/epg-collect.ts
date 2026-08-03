@@ -148,9 +148,21 @@ async function collectChannel(channel: AgentChannel): Promise<number> {
  * 並列数は**その種別のチューナーの本数**。エージェントが取り合いを裁くので
  * 多めに投げても壊れはしないが、録画のために空けておきたいので数は守る。
  */
-export async function collectOnce(): Promise<number> {
-    if (state.running) return 0;
+let inflight: Promise<number> | null = null;
 
+export function collectOnce(): Promise<number> {
+    /*
+     * **走っている最中に呼ばれたら、その回に相乗りする。** 断って 0 を返していると、
+     * 起動直後の1周と手で押したぶんが重なったときに「取り込めていない」ように見える
+     */
+    if (inflight !== null) return inflight;
+    inflight = run().finally(() => {
+        inflight = null;
+    });
+    return inflight;
+}
+
+async function run(): Promise<number> {
     const channels = await getChannels().catch(() => [] as AgentChannel[]);
     if (channels.length === 0) return 0;
     // 局の一覧はここでも取り込んでおく。スキャンの直後に呼ばれることがある

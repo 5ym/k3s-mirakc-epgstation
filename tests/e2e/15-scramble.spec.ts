@@ -25,7 +25,7 @@ function scrambledFiles(dir: string): string[] {
  */
 test.describe('スクランブルされたまま録れたとき', () => {
     test.afterEach(async ({ request, stack }) => {
-        await request.post(`${stack.mirakcUrl}/__control/scrambled?on=0`);
+        await request.post(`${stack.agentUrl}/__control/scrambled?on=0`);
     });
 
     test('録画は止めず、エンコードの前に自動で解除する', async ({ page, request, stack }) => {
@@ -33,7 +33,7 @@ test.describe('スクランブルされたまま録れたとき', () => {
         await syncEpg(request);
 
         // カードが読めていない状態にする
-        await request.post(`${stack.mirakcUrl}/__control/scrambled?on=1`);
+        await request.post(`${stack.agentUrl}/__control/scrambled?on=1`);
 
         const programId = await reserveSoon(page, request, 'BS');
         const row = `[data-testid="recording-row"][data-program-id="${programId}"]`;
@@ -54,7 +54,7 @@ test.describe('スクランブルされたまま録れたとき', () => {
     test('生TSを残す設定なら、残るのは解除済みのTSだけ', async ({ page, request, stack }) => {
         test.setTimeout(180_000);
         await syncEpg(request);
-        await request.post(`${stack.mirakcUrl}/__control/scrambled?on=1`);
+        await request.post(`${stack.agentUrl}/__control/scrambled?on=1`);
 
         await setRecording(request, { keepOriginal: true });
         try {

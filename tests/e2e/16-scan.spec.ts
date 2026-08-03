@@ -3,13 +3,13 @@ import { expect, goto, syncEpg, test } from './helpers';
 /**
  * チューナー画面。
  *
- * 選局するのはチューナー側のエージェント。mirakc には走査APIが無く、設定も
- * 起動時にしか読まれないので、あちらが mirakc を止めて総当たりし、書き戻して
- * から起動し直す。denpa は開始を投げて進み具合を見せるだけ。
+ * 選局するのはチューナーエージェント。あちらが物理チャンネルを総当たりして
+ * 見つかった局を書き出す。denpa は開始を投げて進み具合を見せ、終わったら
+ * 局を取り込み直して番組表を集め直す。
  */
 test.describe('チューナー画面', () => {
     test.afterEach(async ({ request, stack }) => {
-        await request.post(`${stack.mirakcUrl}/__control/tuners?busy=0`);
+        await request.post(`${stack.agentUrl}/__control/tuners?busy=0`);
     });
 
     test('チャンネルスキャンを実行でき、進み具合と結果が出る', async ({ page, request }) => {
@@ -17,8 +17,8 @@ test.describe('チューナー画面', () => {
         await goto(page, '/tuners');
 
         const card = page.getByTestId('scan-card');
-        // 何分もかかってチューナーを全部使うので、そうと分かるようにしておく
-        await expect(card).toContainText('チューナーを全部使い');
+        // 何分もかかって空きチューナーを全部使うので、そうと分かるようにしておく
+        await expect(card).toContainText('空いているチューナーを全部使います');
 
         await card.getByTestId('scan-start').click();
 
@@ -40,7 +40,7 @@ test.describe('チューナー画面', () => {
 
     test('チューナーの空きと取れているチャンネルが出る', async ({ page, request, stack }) => {
         await syncEpg(request);
-        await request.post(`${stack.mirakcUrl}/__control/tuners?busy=1`);
+        await request.post(`${stack.agentUrl}/__control/tuners?busy=1`);
         await goto(page, '/tuners');
 
         const tuners = page.getByTestId('tuner-list');
@@ -48,27 +48,24 @@ test.describe('チューナー画面', () => {
         /*
          * 掴んでいる相手が何をしているのか分かるようにする。
          *
-         * mirakc が持っているのは User-Agent だけで、渡していなかった頃は
-         * `Bun/1.3.14` と出るだけだった。録画なのかロゴ集めなのか読めない
+         * エージェントが持っているのは短い印だけ (`rec 1` / `epg BS11_0`) なので、
+         * 番組名に開くのは画面側の仕事。**何を掴んでいるか**も一緒に出す
          */
         const using = tuners.getByTestId('tuner-row').nth(0);
-        await expect(using).toContainText('使用中');
+        await expect(using).toContainText('BS11_0');
         await expect(using.getByTestId('tuner-user').first()).toContainText('録画');
-        // mirakc 自身の仕事は User-Agent が付かない。ID から読み解く
-        await expect(using.getByTestId('tuner-user').nth(1)).toContainText('mirakc: 番組表');
-        // 故障は空き/使用中より先に出す。直さないと録れない
-        await expect(tuners.getByTestId('tuner-row').nth(3)).toContainText('故障');
+        // 録画と番組表が同じ選局に相乗りしている。チューナーは増えない
+        await expect(using.getByTestId('tuner-user').nth(1)).toContainText('番組表');
 
-        // mirakc の設定に入っている物理チャンネルと、denpa が取り込んだ局名
+        // スキャンで見つかった物理チャンネルと、denpa が取り込んだ局名
         const channels = page.getByTestId('channel-list');
         await expect(channels.getByTestId('channel-row').first()).toBeVisible();
         await expect(channels).toContainText('TOKYO MX');
 
         /*
-         * どこまで進んだかを1行で出す。時間がかかるのは mirakc が1局ずつ
-         * 選局して調べるところで、denpa はその結果を取り込み直しているだけ。
-         * 表を上から下まで見ないと分からない状態だと、止まっているのか
-         * 進んでいるのか区別が付かない。
+         * どこまで進んだかを1行で出す。時間がかかるのは1チャンネルずつ選局して
+         * 番組表を読むところで、表を上から下まで見ないと分からない状態だと、
+         * 止まっているのか進んでいるのか区別が付かない。
          *
          * 周波数・局・番組表は入れ子で数がそろわないので、3つとも名前を添えて出す
          */
@@ -76,21 +73,5 @@ test.describe('チューナー画面', () => {
         await expect(coverage).toContainText('周波数');
         await expect(coverage).toContainText('そこに乗っている局');
         await expect(coverage).toContainText('番組表の届いた局');
-    });
-
-    test('mirakc を入れ直せる', async ({ page, request, stack }) => {
-        /*
-         * **局が足りないときに効くのはこれだけ。** どの局が受信できるかを調べているのは
-         * mirakc で、denpa 側で取り込み直しても mirakc がまだ知らない局は増えない。
-         * 以前ここにあった「局を取り直す」は、待っている相手を急かす力が無かった
-         */
-        const before = (await (await request.get(`${stack.mirakcUrl}/__control/restarts`)).json()).restarts;
-
-        await goto(page, '/tuners');
-        await page.getByTestId('restart-mirakc').click();
-        await expect(page.getByTestId('tuner-notice')).toContainText('入れ直しました');
-
-        const after = (await (await request.get(`${stack.mirakcUrl}/__control/restarts`)).json()).restarts;
-        expect(after).toBe(before + 1);
     });
 });
