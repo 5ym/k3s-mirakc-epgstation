@@ -140,18 +140,37 @@
                         {@const found = [...servicesByChannel.keys()].filter((key) =>
                             channels.some((c) => `${c.type}:${c.channel}` === key),
                         ).length}
+                        <!-- 番組表がもう入っている局の数。下の表の右端を全部見なくても分かるように -->
+                        {@const withEpg = mirakcServices.filter(
+                            (s) => (epgByService.get(`${s.networkId}:${s.serviceId}`)?.programs ?? 0) > 0,
+                        ).length}
                         <!--
-                            **数え方が2つ並ぶので、単位をはっきり書く。**
-                            「50 / 59 ・ 124 局」と出していた頃は、59 と 124 が
+                            **入れ子になった3つの数を、その順に並べる。**
+
+                            「50 / 59 ・ 124 局」とだけ出していた頃は、59 と 124 が
                             同じものの数に見えて「残り65はどこへ行った」となっていた。
-                            59 は電波の周波数の数 (T19 や BS15_0)、124 はそこに
-                            相乗りしている局の数で、1つの周波数に何局も乗っている
+                            この3つは入れ子で、数がそろわないのが当たり前:
+
+                              周波数 (T19, BS15_0) ┬ 局 (TOKYO MX1) ─ 番組表
+                                                  └ 局 (TOKYO MX2) ─ 番組表
+
+                            局と番組表を分けて出すのも、混ざりやすいから。
+                            局はスキャンで、番組表はそのあと mirakc が集めるもので、
+                            埋まる時期がずれる (局はあるのに番組表が空、が普通にある)
                         -->
-                        <div class="text-base-content/70 text-sm" data-testid="channel-coverage">
-                            <strong>{channels.length} 本</strong>の物理チャンネル (周波数)
-                            のうち、局を拾えたのが
-                            <strong>{found} 本</strong>。そこに乗っている局を
-                            <strong>{data.services.length} 局</strong>取り込み済みです。
+                        <div class="text-sm" data-testid="channel-coverage">
+                            <span class="text-base-content/70">周波数</span>
+                            <strong>{found} / {channels.length} 本</strong>
+                            <span class="text-base-content/40">→</span>
+                            <span class="text-base-content/70">そこに乗っている局</span>
+                            <strong>{data.services.length}</strong>
+                            <span class="text-base-content/40">→</span>
+                            <span class="text-base-content/70">番組表の届いた局</span>
+                            <strong>{withEpg}</strong>
+                        </div>
+                        <div class="text-base-content/60 text-xs">
+                            1本の周波数 (物理チャンネル)
+                            に局が何局も相乗りしているので、本数と局数はそろいません。番組表は局ごとに集めるので、局が出そろったあとを追って埋まります。
                         </div>
                         <div class="max-h-96 overflow-auto">
                             <table class="table-pin-rows table table-sm">

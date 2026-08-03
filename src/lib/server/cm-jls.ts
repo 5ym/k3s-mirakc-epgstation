@@ -76,34 +76,6 @@ export function invertRanges(keep: Range[], duration: number): Range[] {
     return cm;
 }
 
-async function probeFps(input: string): Promise<number> {
-    try {
-        const proc = Bun.spawn(
-            [
-                config.ffprobe,
-                '-v',
-                'error',
-                '-select_streams',
-                'v:0',
-                '-show_entries',
-                'stream=avg_frame_rate',
-                '-of',
-                'default=nw=1:nk=1',
-                input,
-            ],
-            { stdout: 'pipe', stderr: 'ignore' },
-        );
-        const out = (await text(proc.stdout as ReadableStream<Uint8Array>)).trim();
-        await proc.exited;
-        const [num, den] = out.split('/').map(Number);
-        const fps = den ? num / den : num;
-        if (Number.isFinite(fps) && fps > 0) return fps;
-    } catch {
-        // ffprobe が無い/失敗した場合は既定値に落とす
-    }
-    return config.cmJlsFallbackFps;
-}
-
 interface Step {
     code: number;
     stderr: string;
@@ -174,6 +146,14 @@ export interface JlsOptions {
     serviceId?: number;
     /** 手で教えてもらったロゴの位置 ("x,y,w,h") */
     area?: string;
+    /**
+     * 動画のフレームレート。join_logo_scp が返す Trim はコマ番号なので、これで秒に直す。
+     *
+     * **呼ぶ側が測ったものをもらう。** ここでも ffprobe を叩いていた頃は、
+     * 尺を測るのと合わせて同じTSを2回読んでいたうえ、読み方が2箇所に分かれていて
+     * 片方だけ直っていない状態を作った (cm.parseFrameRate の覚え書き)
+     */
+    fps?: number;
     /** いま何をしているか。数分かかる道具を3つ順に回すので、その都度伝える */
     onStep?: (label: string) => void;
 }
@@ -184,6 +164,11 @@ export async function detectWithJls(
     options: JlsOptions = {},
 ): Promise<{ cm: Range[]; note: string }> {
     const { signal, channel = '', serviceId, area = '', onStep } = options;
+    // 測れなかったときだけ既定に落とす (地上波・BS はどちらも 30000/1001)
+    const fps =
+        Number.isFinite(options.fps) && (options.fps ?? 0) > 0
+            ? Number(options.fps)
+            : config.cmJlsFallbackFps;
     const deadline = Date.now() + config.cmDetectTimeout;
     const step = onStep ?? (() => {});
     const work = workFiles(input);
@@ -284,7 +269,7 @@ export async function detectWithJls(
          * 一番直しようがなかった: 毎回 100% がCM判定で捨てられ、無音検出に落ち、
          * しかも画面には何も出ないので、位置を教える手立てが無かった
          */
-        const keep = parseTrimRanges(avs, await probeFps(input));
+        const keep = parseTrimRanges(avs, fps);
         if (keep.length === 0) {
             return {
                 cm: [],

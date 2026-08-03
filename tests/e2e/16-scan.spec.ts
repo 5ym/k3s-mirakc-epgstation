@@ -68,9 +68,14 @@ test.describe('チューナー画面', () => {
          * どこまで進んだかを1行で出す。時間がかかるのは mirakc が1局ずつ
          * 選局して調べるところで、denpa はその結果を取り込み直しているだけ。
          * 表を上から下まで見ないと分からない状態だと、止まっているのか
-         * 進んでいるのか区別が付かない
+         * 進んでいるのか区別が付かない。
+         *
+         * 周波数・局・番組表は入れ子で数がそろわないので、3つとも名前を添えて出す
          */
-        await expect(page.getByTestId('channel-coverage')).toContainText('物理チャンネル');
+        const coverage = page.getByTestId('channel-coverage');
+        await expect(coverage).toContainText('周波数');
+        await expect(coverage).toContainText('そこに乗っている局');
+        await expect(coverage).toContainText('番組表の届いた局');
     });
 
     test('mirakc を入れ直せる', async ({ page, request, stack }) => {

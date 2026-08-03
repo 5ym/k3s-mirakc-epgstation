@@ -213,6 +213,33 @@ export function chapterMetadata(cm: Range[], duration: number): string {
 }
 
 /**
+ * ffprobe の出力の**1行目**。
+ *
+ * 生TSには局が何本も入っていることがある (実機の TOKYO MX は MX1 と MX2 が
+ * 同じTSに乗っている)。ffprobe はそれを別々の番組として読むので、
+ * `-select_streams v:0` を付けても**番組の数だけ同じ行が並ぶ**。
+ */
+export function firstLine(out: string): string {
+    return out.split('\n')[0]?.trim() ?? '';
+}
+
+/**
+ * `30000/1001` の形のフレームレートを数に直す。読めなければ NaN。
+ *
+ * **必ず1行に切ってから割る。** 出力を丸ごと `split('/')` していた頃は、
+ * 局が2本乗った MX の生TSで分母が `1001\n30000` になって NaN に落ち、
+ * `den ? num / den : num` が分子の **30000** をそのままフレームレートとして
+ * 返していた。30分アニメの本編1万4千コマが1.4秒に潰れ、join_logo_scp の結果は
+ * 毎回「番組の100%がCM」で捨てられて無音検出に落ちていた
+ * (実機の録画34・35。ロゴは合致率79%で正しく当たっていた)
+ */
+export function parseFrameRate(out: string): number {
+    const [num, den] = firstLine(out).split('/').map(Number);
+    const fps = den ? num / den : num;
+    return Number.isFinite(fps) && fps > 0 ? fps : NaN;
+}
+
+/**
  * 尺とフレームレートを先に取る。
  *
  * ffmpeg の stderr に出る `Duration:` を当てにしていた頃は、TS によっては
@@ -237,8 +264,8 @@ export async function probeVideo(
     let height = NaN;
     try {
         duration = Number(await read(['-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1']));
-        // "30000/1001,1440,1080" の形で返る
-        const [rate, w, h] = (
+        // "30000/1001,1440,1080" の形で返る (局が複数乗ったTSでは同じ行が並ぶ)
+        const [rate, w, h] = firstLine(
             await read([
                 '-select_streams',
                 'v:0',
@@ -246,10 +273,9 @@ export async function probeVideo(
                 'stream=avg_frame_rate,width,height',
                 '-of',
                 'csv=p=0',
-            ])
+            ]),
         ).split(',');
-        const [num, den] = (rate ?? '').split('/').map(Number);
-        fps = den ? num / den : num;
+        fps = parseFrameRate(rate ?? '');
         width = Number(w);
         height = Number(h);
     } catch {
@@ -302,10 +328,11 @@ export async function detectCm(input: string, options: CmOptions = {}): Promise<
     let fallback = '';
     // 検出のしかたは設定画面で決める (jls は確かだが録画1本あたり数分かかる)
     if (settings().cmDetector === 'jls') {
-        const duration = await probeDuration(input);
+        // 尺とフレームレートは1回で取る。join_logo_scp の Trim をコマから秒に直すのに要る
+        const { duration, fps } = await probeVideo(input);
         if (Number.isFinite(duration)) {
             const { detectWithJls } = await import('./cm-jls');
-            const result = await detectWithJls(input, duration, options);
+            const result = await detectWithJls(input, duration, { ...options, fps });
             if (result.cm.length > 0) {
                 return { cm: result.cm, duration, note: result.note };
             }

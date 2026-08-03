@@ -1,5 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import { boundaries, chapterMetadata, detectCmRanges, isCmLength, keepRanges, parseSilences } from './cm';
+import {
+    boundaries,
+    chapterMetadata,
+    detectCmRanges,
+    firstLine,
+    isCmLength,
+    keepRanges,
+    parseFrameRate,
+    parseSilences,
+} from './cm';
 import { cmRatio, invertRanges, parseTrimRanges, tooMuchCm } from './cm-jls';
 
 describe('parseSilences', () => {
@@ -87,6 +96,31 @@ describe('chapterMetadata', () => {
         expect(meta).toContain('title=本編');
         // 本編 → CM → 本編 の3チャプター
         expect(meta.match(/\[CHAPTER\]/g)).toHaveLength(3);
+    });
+});
+
+describe('ffprobe の読み取り', () => {
+    test('局が複数乗ったTSでは同じ行が並ぶので、1行目だけ読む', () => {
+        /*
+         * 実機で起きたやつ。TOKYO MX の生TSには MX1 と MX2 が乗っていて、
+         * `-select_streams v:0` を付けても ffprobe は番組ごとに1行ずつ返す。
+         * 丸ごと split('/') していた頃は分母が "1001\n30000" で NaN になり、
+         * 分子の 30000 をフレームレートとして採っていた。その結果、
+         * 30分アニメの本編4万コマが1.4秒に潰れて「番組の100%がCM」になり、
+         * jls の結果が毎回捨てられていた (録画34・35)
+         */
+        expect(parseFrameRate('30000/1001\n30000/1001')).toBeCloseTo(29.97, 2);
+        expect(firstLine('30000/1001,1440,1080\n30000/1001,1440,1080')).toBe('30000/1001,1440,1080');
+    });
+
+    test('読めなければ NaN。呼ぶ側が既定に落とす', () => {
+        expect(parseFrameRate('N/A')).toBeNaN();
+        expect(parseFrameRate('0/0')).toBeNaN();
+        expect(parseFrameRate('')).toBeNaN();
+    });
+
+    test('分母のない書き方も読む', () => {
+        expect(parseFrameRate('25')).toBe(25);
     });
 });
 
