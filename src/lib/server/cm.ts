@@ -1,3 +1,4 @@
+import { JLS_UNUSABLE } from '../format';
 import type { CmMode } from '../types';
 import { config } from './config';
 import { settings } from './settings';
@@ -274,8 +275,6 @@ export interface CmDetection {
     cm: Range[];
     duration: number;
     note: string;
-    /** ロゴでの判定が使えなかった。位置を教えてもらえば次から効く (jls のときだけ) */
-    logoMissing: boolean;
 }
 
 export interface CmOptions {
@@ -299,8 +298,6 @@ export interface CmOptions {
  */
 export async function detectCm(input: string, options: CmOptions = {}): Promise<CmDetection> {
     const { signal, onProgress } = options;
-    /** ロゴを当てられなかったことは、無音検出に落ちたあとも伝える */
-    let logoMissing = false;
     /** jls が使えなかった理由。落ちた先の説明に足す */
     let fallback = '';
     // 検出のしかたは設定画面で決める (jls は確かだが録画1本あたり数分かかる)
@@ -309,9 +306,8 @@ export async function detectCm(input: string, options: CmOptions = {}): Promise<
         if (Number.isFinite(duration)) {
             const { detectWithJls } = await import('./cm-jls');
             const result = await detectWithJls(input, duration, options);
-            logoMissing = result.logoMissing;
             if (result.cm.length > 0) {
-                return { cm: result.cm, duration, note: result.note, logoMissing };
+                return { cm: result.cm, duration, note: result.note };
             }
             fallback = result.note;
             console.warn(`[cm] jls で検出できなかったため無音検出に切り替えます: ${result.note}`);
@@ -326,13 +322,15 @@ export async function detectCm(input: string, options: CmOptions = {}): Promise<
     const { silences, duration } = await detectSilences(input, signal, onProgress, measured);
     /*
      * 落ちた理由まで書く。「無音 8 箇所」とだけ出していた頃は、jls を選んで
-     * いるのになぜ無音検出になったのかが画面から分からなかった
+     * いるのになぜ無音検出になったのかが画面から分からなかった。
+     *
+     * **この文言から「ロゴの位置を教える口を出すか」を決める** (format.logoUnusable)。
+     * 別の列で持っていた頃は、後から条件を広げても既に録ってある分に効かなかった
      */
     const note = `無音 ${silences.length} 箇所`;
     return {
         cm: detectCmRanges(silences, duration),
         duration,
-        note: fallback === '' ? note : `${note} — ロゴでの検出をやめて無音だけで判定しました (${fallback})`,
-        logoMissing,
+        note: fallback === '' ? note : `${note} (${JLS_UNUSABLE}: ${fallback})`,
     };
 }

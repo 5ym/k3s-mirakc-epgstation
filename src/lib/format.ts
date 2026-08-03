@@ -201,6 +201,26 @@ export const CM_LABEL: Record<string, string> = {
     cut: 'カット',
 };
 
+/**
+ * ロゴでの判定が使えなかったときに、CM検出の覚え書き (`recordings.cm_note`) へ
+ * 入れる目印。無音検出に落ちた理由はこの後ろに続く。
+ */
+export const JLS_UNUSABLE = 'jls は使えず';
+
+/**
+ * その録画に「ロゴの位置を教える」口を出すか。
+ *
+ * **覚え書きから読む。別の列では持たない。** 印を立てていた頃は、後から条件を
+ * 広げても既に録ってある分には効かなかった (「結果の100%がCM判定だったので捨てた」
+ * ときも教えられるようにしたのに、実機の2本は印が 0 のままで画面に出なかった)。
+ *
+ * 落ちた理由がロゴとは限らない (無音側の道具が落ちることもある) が、そのときも
+ * 出しておく。理由は覚え書きに書いてあるし、位置を教えて損になることはない。
+ */
+export function logoUnusable(cmNote: string | null): boolean {
+    return cmNote?.includes(JLS_UNUSABLE) === true;
+}
+
 /*
  * 番組の説明に入っているURLを拾う。
  *

@@ -52,8 +52,6 @@ export const ADDED_COLUMNS: { table: string; column: string; definition: string 
     { table: 'services', column: 'logo_area', definition: 'TEXT' },
     // CM検出が何をしたか。一覧には出さず、録画の詳細で見せる
     { table: 'recordings', column: 'cm_note', definition: 'TEXT' },
-    // ロゴを当てられなかった。位置を教えてもらうために印を付ける
-    { table: 'recordings', column: 'logo_missing', definition: 'INTEGER NOT NULL DEFAULT 0' },
     /*
      * 番組のジャンル (JSON: lv1 の配列)。番組表から写しておく。
      *

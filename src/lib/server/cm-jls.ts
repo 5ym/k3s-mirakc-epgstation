@@ -104,17 +104,6 @@ async function probeFps(input: string): Promise<number> {
     return config.cmJlsFallbackFps;
 }
 
-/**
- * logoframe が「ロゴの位置を決められなかった」と言っているか。
- *
- * 自動探索は「画面の隅にずっと同じ縁があること」を手がかりにするので、
- * 薄いロゴや動くロゴだと見つけられない。そのときは位置を人に教えてもらう
- * (録画の詳細から範囲を指定できる)。
- */
-export function isLogoMissing(output: string): boolean {
-    return /no persistent edge|uniform background|too few active pixels|logo file|-logo-area/i.test(output);
-}
-
 interface Step {
     code: number;
     stderr: string;
@@ -193,7 +182,7 @@ export async function detectWithJls(
     input: string,
     duration: number,
     options: JlsOptions = {},
-): Promise<{ cm: Range[]; note: string; logoMissing: boolean }> {
+): Promise<{ cm: Range[]; note: string }> {
     const { signal, channel = '', serviceId, area = '', onStep } = options;
     const deadline = Date.now() + config.cmDetectTimeout;
     const step = onStep ?? (() => {});
@@ -239,10 +228,8 @@ export async function detectWithJls(
             signal,
             deadline,
         );
-        // ロゴを当てられたかどうかは、CM が取れたかどうかとは別に伝える
-        const logoMissing = isLogoMissing(frames.stderr);
         if (frames.code !== 0) {
-            return { cm: [], note: failure('logoframe', frames), logoMissing };
+            return { cm: [], note: failure('logoframe', frames) };
         }
 
         // 2. 無音とシーンチェンジを拾う
@@ -253,7 +240,7 @@ export async function detectWithJls(
             deadline,
         );
         if (scenes.code !== 0) {
-            return { cm: [], note: failure('chapter_exe', scenes), logoMissing };
+            return { cm: [], note: failure('chapter_exe', scenes) };
         }
 
         // 3. その2つを突き合わせて本編とCMに分ける
@@ -276,14 +263,14 @@ export async function detectWithJls(
             deadline,
         );
         if (joined.code !== 0) {
-            return { cm: [], note: failure('join_logo_scp', joined), logoMissing };
+            return { cm: [], note: failure('join_logo_scp', joined) };
         }
 
         let avs: string;
         try {
             avs = readFileSync(work.cut, 'utf8');
         } catch {
-            return { cm: [], note: `${work.cut} が作られませんでした`, logoMissing };
+            return { cm: [], note: `${work.cut} が作られませんでした` };
         }
 
         /*
@@ -304,7 +291,6 @@ export async function detectWithJls(
             return {
                 cm: [],
                 note: `${work.cut} に Trim が含まれていませんでした`,
-                logoMissing: true,
             };
         }
 
@@ -314,10 +300,9 @@ export async function detectWithJls(
             return {
                 cm: [],
                 note: `番組の ${cmRatio(cm, duration)}% がCMという結果だったので捨てました`,
-                logoMissing: true,
             };
         }
-        return { cm, note: 'join_logo_scp', logoMissing };
+        return { cm, note: 'join_logo_scp' };
     } finally {
         // 中身は使い終わっている。録画の隣に置いているので残すと生TSの置き場を圧迫する
         cleanup(input);

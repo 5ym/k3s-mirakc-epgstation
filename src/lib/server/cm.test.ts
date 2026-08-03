@@ -136,21 +136,18 @@ describe('join_logo_scp の出力', () => {
     });
 });
 
-describe('ロゴを当てられなかったとき', () => {
-    test('logoframe の言い分から判定する', async () => {
-        const { isLogoMissing } = await import('./cm-jls');
-        // 実機で出たもの。位置を教えてもらえば直る種類の失敗
-        expect(
-            isLogoMissing(
-                'error: Automatic logo position detection found no persistent edge; specify -logo-area x,y,w,h',
-            ),
-        ).toBe(true);
-        expect(isLogoMissing('error: Insufficient frames with a uniform background around the logo')).toBe(
-            true,
-        );
-        expect(isLogoMissing('error: The initial logo estimate contains too few active pixels')).toBe(true);
-        // ロゴは当てられている。ここで印を付けると、直しようのないものまで拾う
-        expect(isLogoMissing('managed logo: v0001 match=87.00% threshold=10%')).toBe(false);
-        expect(isLogoMissing('')).toBe(false);
+describe('ロゴの位置を教える口を出すか', () => {
+    test('CM検出の覚え書きから決める。別の印は持たない', async () => {
+        const { logoUnusable } = await import('../format');
+        /*
+         * 実機に残っていた文言。印を別に持っていた頃は、後から条件を広げても
+         * 既に録ってある分には効かなかった
+         */
+        expect(logoUnusable('無音 8 箇所 (jls は使えず: logoframe が失敗 (code 1): ...)')).toBe(true);
+        expect(logoUnusable('無音 30 箇所 (jls は使えず: 結果の 100% がCM判定なので使いません)')).toBe(true);
+        // ロゴで判定できている。ここで出すと、直しようのないものまで拾う
+        expect(logoUnusable('join_logo_scp')).toBe(false);
+        expect(logoUnusable('無音 8 箇所')).toBe(false);
+        expect(logoUnusable(null)).toBe(false);
     });
 });

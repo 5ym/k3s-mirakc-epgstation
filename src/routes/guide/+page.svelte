@@ -14,23 +14,6 @@
 
     const serviceName = (id: number) => data.services.find((s) => s.id === id)?.name ?? '';
 
-    /**
-     * 出せなかったロゴ。
-     *
-     * **DOM から取り除いてはいけない。** 以前は `onerror` で `img` を自分で
-     * 消していたが、それは Svelte が持っている節点なので、次に描き直したときに
-     * 見出しの並びが崩れていた。しかも一度消すと読み込み直すまで戻らない。
-     * denpa を入れ替えた直後は、読みかけの画像がまとめて途切れて全局ぶんが
-     * 消えていた (ファイルは残っているのに)。
-     *
-     * 局の一覧が入れ替わったら忘れる = 描き直しのたびにもう一度試す。
-     */
-    let brokenLogos = $state<number[]>([]);
-    $effect(() => {
-        void data.services;
-        brokenLogos = [];
-    });
-
     const TYPE_LABEL: Record<string, string> = { GR: '地上波', BS: 'BS', CS: 'CS' };
     const HOUR = 60 * 60 * 1000;
     /** 5分を1マスにする。細かすぎると行数が増えるだけ、粗いと短い番組が潰れる */
@@ -283,24 +266,26 @@
                     style="grid-column: {i + 2}; grid-row: 1;"
                     title={service.name}
                 >
-                    {#if service.has_logo && !brokenLogos.includes(service.id)}
-                        <!--
-                            ロゴを持たない局もあるので、有るものだけ出す。
-                            列が印になっているだけで実体が無いこともある (置き場ごと
-                            消えたとき)。取れなかったら黙って引っ込める
-                        -->
+                    <!--
+                        ロゴを持たない局もあるので、有るものだけ出す。場所は
+                        どちらでも空けておく — 局名の頭が列ごとにずれると、
+                        横に並べたときにどれがどの局か追いにくい。
+
+                        **出せなかったときに引っ込めない。** `onerror` で消していた頃は、
+                        Svelte が持っている節点を横から触ることになって並びが崩れ、
+                        しかも一度消すと読み込み直すまで戻らなかった。denpa を入れ替えた
+                        直後は読みかけの画像がまとめて途切れて全局ぶんが消えていた
+                        (ファイルは残っているのに)。`alt=""` なので、出せなければ
+                        場所だけが残る = 持っていない局と同じ見た目になる
+                    -->
+                    {#if service.has_logo}
                         <img
                             src="/api/services/{service.id}/logo"
                             alt=""
                             class="h-5 w-8 shrink-0 object-contain"
                             loading="lazy"
-                            onerror={() => (brokenLogos = [...brokenLogos, service.id])}
                         />
                     {:else}
-                        <!--
-                            ロゴが無くても場所は空けておく。局名の頭が列ごとにずれると、
-                            横に並べたときにどれがどの局か追いにくい
-                        -->
                         <span class="h-5 w-8 shrink-0"></span>
                     {/if}
                     <span class="truncate">{service.name}</span>

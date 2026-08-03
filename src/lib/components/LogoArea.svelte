@@ -37,9 +37,15 @@
      *
      * 局ロゴはほぼ右上にある。画面全体を出すと、その一角は指でも掴みにくいほど
      * 小さくなる。既定で寄せておき、そうでない局のために全体へ戻せるようにする。
+     *
+     * **横に伸ばすだけでは駄目。** 幅だけ広げていた頃は、切り取り窓が元の絵と同じ
+     * 高さのままだったので、見えていたのは「左端の縦長の帯」でした。窓のほうを
+     * 16:9 に保ち、中の絵を左と上へずらして**右上の角**を見せる。
      */
     let zoomed = $state(true);
     const SCALE = 2.5;
+    /** 拡大したときに絵を左へずらす量 (窓の幅に対する割合)。右端を窓の右端に合わせる */
+    const SHIFT = (SCALE - 1) * 100;
 
     /** 表示上の矩形 (画像の中の座標) */
     let box = $state<{ x: number; y: number; w: number; h: number } | null>(null);
@@ -165,9 +171,21 @@
     /** 覚えてあるものと同じか。押しても何も変わらないボタンを出さないため */
     const unchanged = $derived(value !== '' && value === area);
 
+    /**
+     * 指した点。**必ず絵の中に収める。**
+     *
+     * 掴んだまま外へ出られると、`logoframe` に画面の外の座標を渡すことになる。
+     * 掴む場所は絵より一回り大きい (取り出し中の場所取りぶん) ので、素の座標では
+     * 絵の外まで引けていた。
+     */
     function at_(event: PointerEvent): { x: number; y: number } {
         const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-        return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+        const clamp = (value: number, max: number) =>
+            max > 0 ? Math.min(Math.max(0, value), max) : Math.max(0, value);
+        return {
+            x: clamp(event.clientX - rect.left, shownWidth),
+            y: clamp(event.clientY - rect.top, shownHeight),
+        };
     }
 
     /** その点が今の枠の中か。中なら動かす、外なら引き直す */
@@ -294,13 +312,19 @@
         拡大縮小の計算が1箇所で済む)。
 
         拡大は**外側で切り取る**だけにしてある。中の画像と枠は同じ入れ物に居るので、
-        倍率が変わっても座標の計算は1つのまま
+        倍率が変わっても座標の計算は1つのまま。
+
+        切り取り窓は拡大していても **16:9 のまま**にする。窓を絵なりの高さにしていた頃は
+        縦長の帯が出ていて、しかも中の絵を寄せていなかったので左上が見えていた
     -->
-    <div class="bg-base-200 mt-2 max-w-full overflow-hidden" data-testid="logo-viewport">
+    <div
+        class="bg-base-200 mt-2 max-w-full overflow-hidden"
+        style={zoomed ? 'aspect-ratio: 16 / 9' : ''}
+        data-testid="logo-viewport"
+    >
         <div
             class="relative touch-none select-none"
-            class:ml-auto={zoomed}
-            style={zoomed ? `width:${SCALE * 100}%` : 'width:100%'}
+            style={zoomed ? `width:${SCALE * 100}%; margin-left:-${SHIFT}%` : 'width:100%'}
             onpointerdown={down}
             onpointermove={move}
             onpointerup={up}

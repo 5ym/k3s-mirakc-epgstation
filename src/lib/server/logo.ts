@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { LogoCollector } from '../ts/logo';
 import { withPalette } from '../ts/logo-palette';
+import type { ChannelType } from '../types';
 import { config } from './config';
 import { database, now, queryAll, queryOne } from './db';
 import { CURRENT_SERVICES } from './epg';
@@ -29,10 +30,11 @@ import { chunks } from './stream';
  *
  * 衛星は**1つの中継で網羅できます**。BS/CS の CDT はそのネットワークの局の
  * ぶんをまとめて流すので (Mirakurun も同じ前提)、当たれば一度に埋まります。
- * そのぶん長く開く価値があります。地上波は中継ごとに乗っている局が違うので、
- * 1つずつ回ることになり、1回を短めにして数を稼ぎます。
+ * そのぶん長く開く価値があります。地上波は中継ごとに乗っている局が違うので
+ * 1つずつ回ることになりますが、**3分では足りませんでした** — 実機で回しても
+ * ほとんど当たらないので、倍に伸ばしてあります。
  */
-const SWEEP_TIMEOUT: Record<string, number> = { GR: 3 * 60_000 };
+const SWEEP_TIMEOUT: Record<string, number> = { GR: 6 * 60_000 };
 const SWEEP_TIMEOUT_SATELLITE = 10 * 60_000;
 /**
  * 相乗りのときの上限。向こうの都合でいつ閉じてもおかしくないので短くする。
@@ -216,13 +218,45 @@ export interface Target {
     network_id: number;
 }
 
-export function missing(): Target[] {
-    return queryAll<Target>(
-        `SELECT type, channel, MIN(network_id) AS network_id FROM services
-         WHERE has_logo = 0 AND ${CURRENT_SERVICES}
-         GROUP BY type, channel
+/**
+ * ロゴを取り直すまでの間隔。
+ *
+ * **持っていない局だけを見ていた頃は、一度取れたら二度と取り直さなかった。**
+ * 局のマークは滅多に変わらないが、変わったときに永久に古いままなのは困る。
+ * 取り直しは只ではない (1チャンネルに数分開く) ので、間隔は長めにしておく。
+ *
+ * **消してから取りに行くのではない。** 来たものを上書きするだけなので、
+ * 取れなければ今のものがそのまま残る。番組表からロゴが消えることはない。
+ */
+const LOGO_MAX_AGE = 7 * 24 * 60 * 60_000;
+
+/** その局のロゴを取りに行く必要があるか。無い、または古い */
+function needsLogo(serviceId: number): boolean {
+    try {
+        return Date.now() - statSync(logoPath(serviceId)).mtimeMs > LOGO_MAX_AGE;
+    } catch {
+        return true;
+    }
+}
+
+/** いま mirakc が知っている局。取り残しは見に行かない */
+function currentServices(): { id: number; type: string; channel: string; network_id: number }[] {
+    return queryAll(
+        `SELECT id, type, channel, network_id FROM services
+         WHERE ${CURRENT_SERVICES}
          ORDER BY type, channel`,
     );
+}
+
+export function missing(): Target[] {
+    const targets = new Map<string, Target>();
+    for (const service of currentServices()) {
+        if (!needsLogo(service.id)) continue;
+        const key = `${service.type}:${service.channel}`;
+        if (targets.has(key)) continue;
+        targets.set(key, { type: service.type, channel: service.channel, network_id: service.network_id });
+    }
+    return [...targets.values()];
 }
 
 /**
@@ -252,15 +286,9 @@ function sweepTargets(): Target[] {
     });
 }
 
-/** その物理チャンネルに相乗りしている局のうち、まだロゴを持っていない数 */
+/** その物理チャンネルに相乗りしている局のうち、ロゴを取り直したい数 */
 function missingOn(channel: string): number {
-    return (
-        queryOne<{ n: number }>(
-            `SELECT COUNT(*) AS n FROM services
-             WHERE channel = ? AND has_logo = 0 AND ${CURRENT_SERVICES}`,
-            channel,
-        )?.n ?? 0
-    );
+    return currentServices().filter((s) => s.channel === channel && needsLogo(s.id)).length;
 }
 
 /**
@@ -307,13 +335,21 @@ async function collect(target: Target, timeout: number, signal?: AbortSignal): P
     return before - missingOn(target.channel);
 }
 
-/** 空いているチューナーがあるか。無ければ自分では開かない */
-async function hasFreeTuner(): Promise<boolean> {
+/**
+ * **その種別を受けられる**空きチューナーの数。無ければ自分では開かない。
+ *
+ * 種別を見ずに「1本でも空いていれば」で数えていた頃は、地上波のチューナーが
+ * 1本しか空いていなくても2チャンネルを同時に開きに行っていた。衛星用の空きは
+ * 地上波の役に立たない。
+ */
+async function freeTuners(type: string): Promise<number> {
     try {
-        return (await getTuners()).some((tuner) => tuner.isFree === true);
+        return (await getTuners()).filter(
+            (tuner) => tuner.isFree === true && tuner.types.includes(type as ChannelType),
+        ).length;
     } catch {
         // mirakc に聞けないなら開きに行かない
-        return false;
+        return 0;
     }
 }
 
@@ -391,7 +427,7 @@ async function drain(queue: Target[], parallel: number, signal: AbortSignal): Pr
         for (;;) {
             const target = queue.shift();
             if (target === undefined || signal.aborted) return;
-            if (!(await hasFreeTuner())) {
+            if ((await freeTuners(target.type)) === 0) {
                 queue.length = 0;
                 update({ message: '空いているチューナーが無くなったので途中でやめました' });
                 return;
@@ -462,7 +498,7 @@ export async function sweep(limit = 1): Promise<number> {
     const ridden = await ride();
 
     const targets = sweepTargets().slice(0, limit);
-    if (targets.length === 0 || !(await hasFreeTuner())) return ridden;
+    if (targets.length === 0 || (await freeTuners(targets[0].type)) === 0) return ridden;
     await run(targets, 1, ridden);
     return state.found;
 }
@@ -489,16 +525,25 @@ export async function sweepGround(): Promise<{ started: boolean; message: string
     reconcile();
     const targets = missing().filter((target) => target.type === 'GR');
     if (targets.length === 0) {
-        return { started: false, message: '地上波のロゴはもう全部持っています' };
+        return { started: false, message: '地上波のロゴはもう全部持っています (取り直しも要りません)' };
     }
-    if (!(await hasFreeTuner())) {
-        return { started: false, message: '空いているチューナーがありません' };
+    /*
+     * 開ける本数だけ並べる。**種別まで見る。** 「1本でも空いていれば」で数えて
+     * いた頃は、地上波が1本しか空いていなくても2チャンネルを開きに行っていた
+     * (衛星用の空きは地上波の役に立たない)
+     */
+    const free = await freeTuners('GR');
+    if (free === 0) {
+        return { started: false, message: '地上波の空いているチューナーがありません' };
     }
+    const parallel = Math.min(GROUND_TUNERS, free);
     // 終わるのは数分後。押した人を待たせず、進み具合は画面へ流す
-    void run(targets, GROUND_TUNERS, 0);
+    void run(targets, parallel, 0);
     return {
         started: true,
-        message: `地上波 ${targets.length} チャンネルぶんを取りに行きます。ロゴが流れてくるまで数分かかります`,
+        message:
+            `地上波 ${targets.length} チャンネルぶんを、チューナー ${parallel} 本で取りに行きます。` +
+            'ロゴが流れてくるまで数分かかります',
     };
 }
 

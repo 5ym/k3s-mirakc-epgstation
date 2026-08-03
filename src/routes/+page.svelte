@@ -10,6 +10,7 @@
         dateTime,
         duration,
         eta,
+        logoUnusable,
         percent,
         recordedDuration,
         rowState,
@@ -185,9 +186,9 @@
         return rec.state !== 'failed';
     }
 
-    /** ロゴを当てられなかった録画だけ、詳細に位置の指定を出す */
+    /** ロゴでCMを判定できなかった録画だけ、詳細に位置の指定を出す */
     function logoOf(rec: (typeof data.recordings)[number]): typeof detailLogo {
-        if (!rec.logo_missing || rec.deleted_at !== null) return null;
+        if (!logoUnusable(rec.cm_note) || rec.deleted_at !== null) return null;
         return {
             recordingId: rec.id,
             serviceId: rec.service_id,
@@ -486,7 +487,7 @@
                                     -->
                                     <!-- CM をどこで検出したかは行に出さない。長くて場所を食う割に
                                          普段は見ないので、行を押したときの詳細に回す -->
-                                    {#if rec.logo_missing && rec.deleted_at === null}
+                                    {#if logoUnusable(rec.cm_note) && rec.deleted_at === null}
                                         <!--
                                             ロゴでの判定が使えなかったので、無音だけでCMを判定している。
                                             精度が落ちているのを黙っていると「なぜか切れていない」に

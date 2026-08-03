@@ -577,17 +577,14 @@ async function prepareCm(
         return none;
     }
 
+    /*
+     * ロゴを使えたかどうかは覚え書きに書いてある (cm.detectCm)。別の列では持たない。
+     * 持っていた頃は、後から「位置を教える口を出す条件」を広げても、既に録ってある
+     * 分には効かなかった
+     */
     database()
-        .prepare(
-            'UPDATE recordings SET cm_ranges = ?, cm_note = ?, logo_missing = ?, updated_at = ? WHERE id = ?',
-        )
-        .run(
-            JSON.stringify(detection.cm),
-            detection.note,
-            detection.logoMissing ? 1 : 0,
-            now(),
-            recording.id,
-        );
+        .prepare('UPDATE recordings SET cm_ranges = ?, cm_note = ?, updated_at = ? WHERE id = ?')
+        .run(JSON.stringify(detection.cm), detection.note, now(), recording.id);
     database()
         .prepare('UPDATE encode_jobs SET log = ? WHERE id = ?')
         .run(`CM ${detection.cm.length} 箇所 (${detection.note})`, jobId);
@@ -697,7 +694,7 @@ function fail(jobId: number, recording: Recording, reason: string): void {
  * 出来かけの作業ファイルだけ捨てて、元の録画には触らない。
  * どの段階で止めても同じ形で畳めるように1か所にまとめてある。
  */
-function finishCanceled(jobId: number, recording: Recording, working: string | null): void {
+function finishCanceled(jobId: number, working: string | null): void {
     removeIfExists(working);
     database()
         .prepare(`UPDATE encode_jobs SET state = 'canceled', finished_at = ? WHERE id = ?`)
@@ -750,7 +747,7 @@ async function runJob(jobId: number): Promise<void> {
         if (!result.ok) {
             removeIfExists(target);
             // 中止で切ったときは失敗にしない。下の後始末で canceled として畳む
-            if (canceled.has(jobId)) return finishCanceled(jobId, recording, target);
+            if (canceled.has(jobId)) return finishCanceled(jobId, target);
             fail(jobId, recording, `スクランブルを解除できませんでした: ${result.error}`);
             return;
         }
@@ -769,7 +766,7 @@ async function runJob(jobId: number): Promise<void> {
         // コマ数は番組のジャンルで決まる。国内アニメだけ倍にしない (deinterlace)
         smoothMotion: smoothMotionFor(recording.genre_detail),
     };
-    if (canceled.has(jobId)) return finishCanceled(jobId, recording, decoded);
+    if (canceled.has(jobId)) return finishCanceled(jobId, decoded);
 
     // CMを実際に切る場合は、エンコードの前にTSの段階で切っておく。
     // エンコードのフィルタで切ると字幕のタイミングを追従させられず落とすことになる
@@ -783,7 +780,7 @@ async function runJob(jobId: number): Promise<void> {
     if (canceled.has(jobId)) {
         removeIfExists(trimmed);
         removeIfExists(encodeOptions.chaptersFile);
-        return finishCanceled(jobId, recording, decoded);
+        return finishCanceled(jobId, decoded);
     }
 
     setPhase(jobId, 'encode', '');
@@ -818,7 +815,7 @@ async function runJob(jobId: number): Promise<void> {
         removeIfExists(pgs?.path ?? null);
         removeIfExists(trimmed);
         removeIfExists(encodeOptions.chaptersFile);
-        return finishCanceled(jobId, recording, decoded);
+        return finishCanceled(jobId, decoded);
     }
 
     let result = await runFfmpeg(
@@ -854,7 +851,7 @@ async function runJob(jobId: number): Promise<void> {
     removeIfExists(decoded);
 
     // 出来かけを捨てるだけ。元のファイルには触らない
-    if (canceled.has(jobId)) return finishCanceled(jobId, recording, working);
+    if (canceled.has(jobId)) return finishCanceled(jobId, working);
 
     if (result.code !== 0) {
         removeIfExists(working);

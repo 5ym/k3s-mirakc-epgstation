@@ -96,6 +96,19 @@ export function dropStoredState(db: Database): void {
         db.exec(`UPDATE reservations SET state = 'scheduled' WHERE state IN ('recording', 'done', 'failed')`);
         console.log(`[db] 予約 ${started} 件の状態を録り始めた時刻に移しました`);
     }
+
+    /*
+     * 「ロゴを当てられなかった」も持たない。CM検出の覚え書き (`cm_note`) に
+     * ロゴを使えなかったことは必ず書いてあるので、そちらから読めばいい。
+     *
+     * 別に持っていた頃は、**後から条件を広げても古い録画に効かなかった**。
+     * 「結果の100%がCM判定だったので捨てた」ときも位置を教えられるようにしたのに、
+     * 既に録ってある分は 0 のまま残り、画面に出なかった (実機で2本)
+     */
+    if (recordings.some((c) => c.name === 'logo_missing')) {
+        db.exec('ALTER TABLE recordings DROP COLUMN logo_missing');
+        console.log('[db] recordings.logo_missing を落としました (cm_note から読みます)');
+    }
 }
 
 export function now(): number {

@@ -171,16 +171,13 @@ export interface Recording {
     cm_ranges: string | null;
     /** 番組表から写したジャンル (JSON: [{lv1, lv2}])。エンコードのコマ数を決めるのに使う */
     genre_detail: string | null;
-    /** CM検出が何をしたか。詳細で見せる */
-    cm_note: string | null;
     /**
-     * ロゴでのCM判定が使えなかった。位置を教えてもらうと次から効く。
+     * CM検出が何をしたか。詳細で見せる。
      *
-     * 見つけられなかったときだけでなく、**合致はしたのに結果が使い物にならなかった**
-     * とき (番組の 100% がCM判定など) も立てる。覚えているロゴのほうが怪しいので、
-     * 直せる見込みがあるのは同じく「位置を教える」だけ
+     * **ロゴを使えたかどうかもここから読む** (`format.logoUnusable`)。別の列で
+     * 持っていた頃は、後から条件を広げても既に録ってある分には効かなかった
      */
-    logo_missing: number;
+    cm_note: string | null;
     /** 実際に録れた長さ。取れていなければ null (古い行) */
     duration_ms: number | null;
     deleted_at: number | null;
