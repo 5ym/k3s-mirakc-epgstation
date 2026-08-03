@@ -430,7 +430,13 @@
                         {@const canPlay = link !== null}
                         {@const canReencode = canPlay && rec.job_id === null && encodeSource(rec) !== null}
                         {@const shown = rowState(rec)}
-                        <!-- 押すと再生。中身を読みたいときは行の中の「詳細」から -->
+                        <!--
+                            押すと再生。中身を読みたいときは行の中の「詳細」から。
+
+                            **吹き出し (title) は出さない。** 行に指を乗せると色が反転し、
+                            再生の印も出ているので、そこを押せば再生になることは見れば分かる。
+                            出していた頃は、行を読もうとするたびに文字の上へ札が被さっていた
+                        -->
                         <div
                             data-testid="recording-row"
                             data-recording-id={rec.id}
@@ -440,9 +446,6 @@
                             class="group hover:bg-base-200/60 relative cursor-pointer p-3"
                             role="button"
                             tabindex="0"
-                            title={link === null
-                                ? '押すと詳細が出ます'
-                                : `押すと再生します${link.note ? ` (${link.note})` : ''}`}
                             onclick={(event) => rowClick(event, link?.href ?? null, () => openRecording(rec))}
                             onkeydown={(event) =>
                                 rowClick(event, link?.href ?? null, () => openRecording(rec))}
