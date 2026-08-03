@@ -64,4 +64,20 @@ test.describe('チューナー画面', () => {
          */
         await expect(page.getByTestId('channel-coverage')).toContainText('局が取れたチャンネル');
     });
+
+    test('mirakc を入れ直せる', async ({ page, request, stack }) => {
+        /*
+         * **局が足りないときに効くのはこれだけ。** どの局が受信できるかを調べているのは
+         * mirakc で、denpa 側で取り込み直しても mirakc がまだ知らない局は増えない。
+         * 以前ここにあった「局を取り直す」は、待っている相手を急かす力が無かった
+         */
+        const before = (await (await request.get(`${stack.mirakcUrl}/__control/restarts`)).json()).restarts;
+
+        await goto(page, '/tuners');
+        await page.getByTestId('restart-mirakc').click();
+        await expect(page.getByTestId('tuner-notice')).toContainText('入れ直しました');
+
+        const after = (await (await request.get(`${stack.mirakcUrl}/__control/restarts`)).json()).restarts;
+        expect(after).toBe(before + 1);
+    });
 });

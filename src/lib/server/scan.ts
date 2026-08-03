@@ -80,128 +80,20 @@ async function watch(): Promise<void> {
         }
 
         if (current.state === 'done') {
-            // mirakc が新しい設定で起動し終わるまで待つ
-            await Bun.sleep(5000);
-            await settle();
+            /*
+             * スキャンが終わると**エージェントが mirakc を入れ直す** (覚えている局も
+             * 捨てる)。起動した mirakc は自分で局と番組表を取りに行き、揃うたびに
+             * `/events` で知らせてくるので、denpa 側は待ち構えるだけでいい。
+             *
+             * 以前は「局が増えなくなるまで50秒おきに取り込み直す」見張りを回していたが、
+             * 時間のかかる本体は mirakc 側で、こちらが何回聞き直しても速くならない。
+             * 知らせが来たときに取り込めば足りる (docs/data.md)
+             */
+            await sync().catch(() => undefined);
+            emit('services');
         }
     } finally {
         watching = false;
-    }
-}
-
-/**
- * 局が増えなくなったと判断するまでの連続回数。
- *
- * **少ないと途中で切り上げてしまう。** mirakc は1局ずつ選局して調べていて、
- * 1つに数分かかることも、しばらく増えない時間が続くこともある。3回 (90秒) では
- * その谷を「終わった」と読み違えていた。6回 = 5分ぶん増えなければ終わりとみなす
- */
-const SETTLE_STABLE = 6;
-/** 様子を見る間隔 */
-const SETTLE_INTERVAL = 50_000;
-/** 諦めるまでの上限。地上波+BS+CS を1局ずつ選局するので、それなりにかかる */
-const SETTLE_TIMEOUT = 30 * 60_000;
-
-/**
- * 取り込みの進み具合。
- *
- * 押しても数分〜数十分かかるうえ、**時間のかかる本体は mirakc 側**なので、
- * denpa の画面からは何も起きていないように見えていた。いま何局まで来ていて、
- * 最後に増えたのがいつで、あと何分静かなら終わりとみなすのかを出す。
- */
-export interface SettleState {
-    running: boolean;
-    /** いま denpa に取り込めている局数 */
-    services: number;
-    /** 始めた時刻 */
-    startedAt: number | null;
-    /** 最後に増えた (減った) 時刻 */
-    changedAt: number | null;
-    /** 増えないまま何周したか */
-    quiet: number;
-    /** 何周静かなら終わりとみなすか */
-    needed: number;
-    /** 様子を見る間隔 */
-    interval: number;
-}
-
-let settle_state: SettleState = {
-    running: false,
-    services: 0,
-    startedAt: null,
-    changedAt: null,
-    quiet: 0,
-    needed: SETTLE_STABLE,
-    interval: SETTLE_INTERVAL,
-};
-
-/** いま走っている取り込み。二重に回さない */
-let settling = false;
-
-/** 取り込みの進み具合。画面はこれを見る */
-export function settleState(): SettleState {
-    return settle_state;
-}
-
-/**
- * mirakc が局を拾い切るまで取り込み続ける。
- *
- * スキャンが見つけるのは**物理チャンネル**まで。そこに何局乗っているかは
- * mirakc が改めて1局ずつ選局して調べる (scan-services) ので、設定を書き戻して
- * 起動し直した直後は 0 局から始まり、数分〜数十分かけて埋まっていく。
- *
- * 以前は5秒待って1回取り込むだけだったので、**スキャンの直後は必ず空**になり、
- * その後は10分ごとの定期取り込みが拾うのを待つしかなかった。ここで増えなくなるまで
- * 見届ける。手動の「局を取り直す」も同じものを呼ぶ。
- */
-export async function settle(): Promise<number> {
-    if (settling) return 0;
-    settling = true;
-    const startedAt = Date.now();
-    settle_state = {
-        running: true,
-        services: 0,
-        startedAt,
-        changedAt: startedAt,
-        quiet: 0,
-        needed: SETTLE_STABLE,
-        interval: SETTLE_INTERVAL,
-    };
-    try {
-        const until = startedAt + SETTLE_TIMEOUT;
-        let last = -1;
-        let stable = 0;
-        for (;;) {
-            let count = last;
-            let failed = false;
-            try {
-                count = (await sync()).services;
-            } catch {
-                // mirakc がまだ起動途中。次の周回で繋がる
-                failed = true;
-            }
-            /*
-             * 取り込めなかった周回は数に入れない。以前はここでも「増えなかった」
-             * 扱いにしていたので、mirakc が落ちている間に終わったことにしていた
-             */
-            if (!failed) stable = count === last ? stable + 1 : 0;
-            settle_state = {
-                ...settle_state,
-                services: count,
-                quiet: stable,
-                changedAt: stable === 0 ? Date.now() : settle_state.changedAt,
-            };
-            last = count;
-            // 取り込むたびに画面へ知らせる。埋まっていく様子がそのまま出る
-            emit('services');
-            if (stable >= SETTLE_STABLE || Date.now() >= until) return count;
-            await Bun.sleep(SETTLE_INTERVAL);
-        }
-    } finally {
-        settling = false;
-        settle_state = { ...settle_state, running: false };
-        // 終わったことを画面に伝える。「取り込み中…」のままボタンが戻らない
-        emit('services');
     }
 }
 
@@ -227,6 +119,31 @@ export async function start(options: ScanOptions): Promise<{ started: boolean; m
     emit('scan');
     void watch();
     return result;
+}
+
+/**
+ * mirakc を入れ直す。
+ *
+ * **局が足りないときに効くのはこれだけ。** どの局が受信できるかを調べているのは
+ * mirakc (`scan-services`) で、denpa から番組表を取り込み直しても、mirakc が
+ * まだ知らない局は増えない。mirakc は起動したときに局と番組表を取りに行くので、
+ * 入れ直すのが一番速い道になる。
+ *
+ * 以前あった「局を取り直す」は denpa 側で50秒おきに取り込み直すだけのもので、
+ * 待っている相手 (mirakc) を急かす力は無かった。
+ */
+export async function restartMirakc(forget = false): Promise<{ ok: boolean; message: string }> {
+    try {
+        const res = await fetch(`${config.tunerAgentUrl}/denpa/mirakc/restart`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ forget }),
+            signal: AbortSignal.timeout(30_000),
+        });
+        return (await res.json()) as { ok: boolean; message: string };
+    } catch (error) {
+        return { ok: false, message: `チューナー側に繋がりません: ${error}` };
+    }
 }
 
 /**

@@ -323,6 +323,17 @@ function setPhase(jobId: number, phase: EncodePhase, log: string): void {
 }
 
 /**
+ * 段階の中で「いま何をしているか」だけ書き換える。
+ *
+ * CM検出は中で3つの道具を順に回していて、どれも数分かかる。段階の名前
+ * (「CM検出中」) だけでは、進んでいるのか止まっているのかが分からなかった。
+ */
+function setStep(jobId: number, log: string): void {
+    database().prepare('UPDATE encode_jobs SET log = ? WHERE id = ?').run(log, jobId);
+    emit('recordings');
+}
+
+/**
  * 段階の中の進み具合。エンコード以外の段階でも出せるところは出す。
  *
  * 書き戻しはエンコード中と同じ間隔まで。細かく書くと WAL が膨らむだけで、
@@ -545,6 +556,7 @@ async function prepareCm(
             recording.service_name,
             progressReporter(jobId),
             service?.logo_area ?? '',
+            (label) => setStep(jobId, label),
         );
     } catch (error) {
         console.error(`[cm] 検出に失敗したためCM処理をスキップします: ${error}`);

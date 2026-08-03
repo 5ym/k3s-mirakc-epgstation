@@ -193,6 +193,9 @@ let programStreamSilent = false;
 const trackedPrograms = new Set<number>();
 
 /** スキャンの状態。本物はチューナー側のエージェントが持っている */
+/** mirakc を入れ直した回数。テストから数えられるようにしておく */
+let restarts = 0;
+
 let scanState = {
     state: 'idle',
     phase: '',
@@ -327,8 +330,8 @@ const channelOf = (service: FakeService) => ({
     services: [serviceOf(service)],
 });
 
-const json = (body: unknown) =>
-    new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
+const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
 /*
  * 起きたことを教える口 (SSE)。本物では `/events`。**`/api` の下ではない。**
@@ -461,6 +464,20 @@ Bun.serve({
             });
         }
         if (url.pathname === '/denpa/scan') return json(scanState);
+
+        /*
+         * mirakc の入れ直し。本物は agent が mirakc を止めて起こし直す。
+         * 起きた mirakc は自分で局と番組表を取りに行くので、denpa 側は
+         * 受け付けられたことだけ分かればいい
+         */
+        if (url.pathname === '/denpa/mirakc/restart' && request.method === 'POST') {
+            if (scanState.state === 'running') {
+                return json({ ok: false, message: 'チャンネルスキャン中は入れ直せません' }, 409);
+            }
+            restarts++;
+            return json({ ok: true, message: 'mirakc を入れ直しました' });
+        }
+        if (url.pathname === '/__control/restarts') return json({ restarts });
 
         if (url.pathname === '/events') return eventStream();
 

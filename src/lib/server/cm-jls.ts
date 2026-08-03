@@ -182,8 +182,11 @@ export async function detectWithJls(
     signal?: AbortSignal,
     channel = '',
     area = '',
+    /** いま何をしているか。数分かかる道具を3つ順に回すので、その都度伝える */
+    onStep?: (label: string) => void,
 ): Promise<{ cm: Range[]; note: string; logoMissing: boolean }> {
     const deadline = Date.now() + config.cmDetectTimeout;
+    const step = onStep ?? (() => {});
     const work = workFiles(input);
     const bin = (name: string) => `${config.jlsBin}/${name}`;
     mkdirSync(config.jlsLogoDir, { recursive: true });
@@ -214,6 +217,7 @@ export async function detectWithJls(
                       // 自動で見つからなかった局だけ、画面から教わった範囲を渡す
                       ...(/^\d+,\d+,\d+,\d+$/.test(area) ? ['-logo-area', area] : []),
                   ];
+        step('局ロゴが写っているコマを探しています');
         const frames = await run(
             [bin('logoframe'), input, '-oa', work.frames, '-o', work.erase, ...logoArgs],
             signal,
@@ -226,6 +230,7 @@ export async function detectWithJls(
         }
 
         // 2. 無音とシーンチェンジを拾う
+        step('無音とシーンの切れ目を探しています');
         const scenes = await run(
             [bin('chapter_exe'), '-v', input, '-s', '8', '-e', '4', '-o', work.scenes],
             signal,
@@ -236,6 +241,7 @@ export async function detectWithJls(
         }
 
         // 3. その2つを突き合わせて本編とCMに分ける
+        step('本編とCMに分けています');
         const joined = await run(
             [
                 bin('join_logo_scp'),
@@ -272,7 +278,11 @@ export async function detectWithJls(
         // 番組の半分以上がCMになったら、その結果は捨てて無音検出に落とす (tooMuchCm)
         const cm = invertRanges(keep, duration);
         if (tooMuchCm(cm, duration)) {
-            return { cm: [], note: `結果の ${cmRatio(cm, duration)}% がCM判定なので使いません`, logoMissing };
+            return {
+                cm: [],
+                note: `番組の ${cmRatio(cm, duration)}% がCMという結果だったので捨てました`,
+                logoMissing,
+            };
         }
         return { cm, note: 'join_logo_scp', logoMissing };
     } finally {

@@ -108,15 +108,19 @@ test.describe('ルールの編集', () => {
          * 条件を作り直す、ということにならないように。押すたびにちょうど
          * 1件だけ減ることを見る (まとめて畳んでいたら一気に0になる)
          */
-        const rows = page.getByTestId('rule-pending-row');
-        await expect(rows.first()).toBeVisible();
-        const before = await rows.count();
+        /*
+         * 予約とプレビューは同じ表に出る。取り消しても**行は残る** (条件には
+         * まだ当たっているので)。減るのは取消ボタンのほうなので、そちらを数える
+         */
+        const cancels = page.getByTestId('rule-pending-cancel');
+        await expect(page.getByTestId('preview-row').first()).toBeVisible();
+        const before = await cancels.count();
         expect(before).toBeGreaterThan(2);
 
         for (let left = before; left > before - 2; left--) {
-            await page.getByTestId('rule-pending-cancel').first().click();
+            await cancels.first().click();
             // 送信中はボタンが無効になる。減るのを待たずに次を押すと空振りする
-            await expect(rows).toHaveCount(left - 1);
+            await expect(cancels).toHaveCount(left - 1);
         }
 
         // 取り消したぶんだけ予約一覧からも消える (残りはそのまま)

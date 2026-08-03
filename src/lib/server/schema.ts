@@ -175,6 +175,8 @@ CREATE TABLE IF NOT EXISTS rules (
     service_ids TEXT,                 -- JSON 配列。NULL は全チャンネル対象
     service_types TEXT,               -- JSON 配列 (GR/BS/CS)。個別チャンネルとのORで効く
     genres TEXT,                      -- JSON 配列 (lv1)。NULL は全ジャンル
+    -- 使っていない。無料放送を対象にするかは**全体設定** (settings.freeOnly) で、
+    -- ルールごとには持たない。同じ選択肢が2箇所にあると、どちらで決まったのか分からなくなる
     free_only INTEGER NOT NULL DEFAULT 1,
     enabled INTEGER NOT NULL DEFAULT 1,
     priority INTEGER NOT NULL DEFAULT 2,

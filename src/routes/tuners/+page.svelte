@@ -62,29 +62,6 @@
         const d = new Date(at);
         return `${d.getMonth() + 1}/${d.getDate()} まで`;
     }
-
-    /*
-     * 取り込みの進み具合。
-     *
-     * 押しても数分〜数十分かかるうえ、**時間のかかる本体は mirakc 側**で、
-     * denpa は取り込み直しているだけ。画面には何も起きていないように見えるので、
-     * 経過と「あとどれだけ静かなら終わりか」を出す。
-     * 秒は自分で数える (サーバからの知らせは1周ごとにしか来ない)
-     */
-    let clock = $state(Date.now());
-    $effect(() => {
-        if (!data.settle.running) return;
-        const timer = setInterval(() => (clock = Date.now()), 1000);
-        return () => clearInterval(timer);
-    });
-
-    function elapsed(from: number, to: number): string {
-        const seconds = Math.max(0, Math.round((to - from) / 1000));
-        return seconds < 60 ? `${seconds}秒` : `${Math.floor(seconds / 60)}分${seconds % 60}秒`;
-    }
-
-    /** 増えないまま、あとどれだけ静かなら終わりとみなすか */
-    const settleLeft = $derived(elapsed(0, (data.settle.needed - data.settle.quiet) * data.settle.interval));
 </script>
 
 <h1 class="mb-4 text-2xl font-bold">チューナー</h1>
@@ -103,43 +80,32 @@
                 <div class="flex flex-wrap items-center justify-between gap-2">
                     <h2 class="card-title">取れているチャンネル</h2>
                     <!--
-                        mirakc が拾った局を denpa に取り込み直す。
-                        普段は10分ごとに取り込んでいるので押す必要は無いが、
-                        スキャンの直後だけは埋まるのを待たずに追いつきたい
+                        **局を調べているのは mirakc のほう。** denpa 側で取り込み直しても
+                        mirakc がまだ知らない局は増えないので、押すのは mirakc の入れ直し。
+                        起動した mirakc は自分で局と番組表を取りに行き、揃うたびに
+                        知らせてくる (以前ここにあった「局を取り直す」は、待っている
+                        相手を急かす力が無かった)
                     -->
-                    <form method="POST" action="?/resync" use:submitting>
+                    <form method="POST" action="?/restartMirakc" use:submitting>
+                        <label class="mr-2 text-sm">
+                            <input type="checkbox" name="forget" class="checkbox checkbox-xs align-middle" />
+                            覚えている局を捨てる
+                        </label>
                         <button
                             class="btn btn-sm"
-                            disabled={data.settle.running || scan.state === 'running'}
-                            data-testid="resync-services"
+                            disabled={scan.state === 'running'}
+                            data-testid="restart-mirakc"
                         >
-                            {data.settle.running ? '取り込み中…' : '局を取り直す'}
+                            mirakc を入れ直す
                         </button>
                     </form>
                 </div>
                 <p class="text-base-content/70 text-sm">
                     mirakc の設定に入っている物理チャンネルと、mirakc がそこから
-                    今どこまで局と番組表を拾えているかです。<strong>スキャンの直後は空になり</strong
-                    >、数十分かけて埋まっていきます。スキャンが終わったあとは、増えなくなるまで denpa
-                    が自動で取り込み続けます。
+                    今どこまで局と番組表を拾えているかです。<strong>スキャンの直後は空になり</strong>、mirakc
+                    が1局ずつ選局して調べながら数十分かけて埋まっていきます。 揃うたびに denpa
+                    へ知らせが来るので、この画面は開いたままで構いません。
                 </p>
-                <!--
-                    進み具合。**チューナーを使うのは mirakc のほう**で、denpa は
-                    その結果を取り込み直しているだけ。何も出していなかった頃は、
-                    押したあと止まっているのか進んでいるのかが分からなかった
-                -->
-                {#if data.settle.running && data.settle.startedAt !== null}
-                    <div class="alert alert-info py-2 text-sm" data-testid="settle-progress">
-                        <span>
-                            取り込み中… <strong>{data.settle.services} 局</strong>
-                            / 経過 {elapsed(data.settle.startedAt, clock)}
-                            {#if data.settle.changedAt !== null}
-                                / 最後に増えてから {elapsed(data.settle.changedAt, clock)}
-                            {/if}
-                            (このまま {settleLeft} 増えなければ終わります)
-                        </span>
-                    </div>
-                {/if}
                 {#await coverage}
                     <p class="text-base-content/60 text-sm">確認中…</p>
                 {:then [channels, mirakcServices, epg]}

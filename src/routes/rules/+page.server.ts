@@ -1,6 +1,7 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { genreName } from '$lib/arib';
 import { parseSearchFields } from '$lib/search';
+import { config } from '$lib/server/config';
 import { database, now, queryAll, queryOne } from '$lib/server/db';
 import { CURRENT_SERVICES } from '$lib/server/epg';
 import { cancel } from '$lib/server/reservations';
@@ -13,8 +14,14 @@ interface Row extends Rule {
     reservations: number;
 }
 
-/** これから録るぶん。終わったものも取り消したものも数えない */
-const PENDING_STATES = "('scheduled', 'conflict', 'recording')";
+/**
+ * まだ録っていないぶん。終わったものも取り消したものも数えない。
+ *
+ * 予約の行は録り始めたかどうかを `started_at` で持っている (状態の文字列には
+ * 書かない)。`state IN ('scheduled','conflict')` だけで数えていた頃は、
+ * 録り終えた予約まで「押さえている」に入っていた
+ */
+const PENDING = "(state IN ('scheduled', 'conflict') AND started_at IS NULL)";
 
 /**
  * 入力中の条件を、保存していないルールとして組み立てる。
@@ -40,8 +47,8 @@ function conditionsFrom(params: URLSearchParams): Rule | null {
         service_ids: numbers.length === 0 ? null : JSON.stringify(numbers),
         service_types: types.length === 0 ? null : JSON.stringify(types),
         genres: genres.length === 0 ? null : JSON.stringify(genres),
-        // ルール画面のフォームから来たときだけ、チェックが無い=外したと解釈する
-        free_only: params.get('form') === 'rules' ? (params.get('freeOnly') === 'on' ? 1 : 0) : 1,
+        // 無料放送の扱いは**全体設定**。ルールごとには持たない (誰も読まない列)
+        free_only: 1,
         enabled: 1,
         priority: 2,
         encode: 1,
@@ -53,30 +60,78 @@ function conditionsFrom(params: URLSearchParams): Rule | null {
     };
 }
 
-/** 編集中のルールが押さえている予約。1件ずつ取り消せるように出す */
-export interface PendingRow {
+/**
+ * 「この条件で録れる番組」の1行。
+ *
+ * **予約とプレビューは同じ表に出す。** 別々に並べていた頃は、同じ番組が2箇所に
+ * 出るうえ、「押さえている予約」と「これから当たる番組」を頭の中で突き合わせる
+ * ことになっていた。1本の時系列にして、その番組がいまどうなっているかを行に書く。
+ */
+export interface PreviewRow {
     id: number;
     name: string;
+    service_name: string;
+    start_at: number;
+    end_at: number;
+    /** 立っている予約。取り消せるように id も持つ */
+    reservation_id: number | null;
+    reservation_state: string | null;
+    /** いまの条件に当たるか。false なら「条件から外れたが予約は残っている」 */
+    matched: boolean;
+    /** 重なっている他の予約。無ければ null */
+    conflict: string | null;
+}
+
+interface Pending {
+    id: number;
+    rule_id: number | null;
+    program_id: number;
+    name: string;
+    service_id: number;
     service_name: string;
     start_at: number;
     end_at: number;
     state: string;
+    conflict_reason: string | null;
 }
 
-export interface PreviewRow {
-    id: number;
-    name: string;
-    description: string;
-    service_name: string;
-    start_at: number;
-    end_at: number;
-    reservation_state: string | null;
+/**
+ * 時間が重なっている他の予約を探す。
+ *
+ * **前後のマージンぶんチューナーを掴む時間は延びる。** 22:00 終了と 22:00 開始は
+ * 実際には重なるので、番組の時刻そのままで見ると重なりを見落とす (conflict.ts と
+ * 同じ物差し)。同じ局のものは重ならない (mirakc がチューナーを共有する)。
+ */
+function overlapping(
+    row: { service_id: number; start_at: number; end_at: number },
+    others: Pending[],
+): string | null {
+    const from = row.start_at - config.startMargin;
+    const to = row.end_at + config.endMargin;
+    const hit = others.find(
+        (other) =>
+            other.service_id !== row.service_id &&
+            other.start_at - config.startMargin < to &&
+            other.end_at + config.endMargin > from,
+    );
+    return hit === undefined ? null : `${hit.name} (${hit.service_name})`;
 }
 
 export function load({ url }) {
     const defaults = settings();
     // ?edit=<id> のときは、そのルールをフォームに読み込んで書き換えられるようにする
     const editing = queryOne<Rule>('SELECT * FROM rules WHERE id = ?', Number(url.searchParams.get('edit')));
+
+    /** まだ録っていない予約。重なりの判定と、条件から外れた予約を出すのに使う */
+    const pending = queryAll<Pending>(
+        `SELECT r.id, r.rule_id, r.program_id, r.name, r.service_id, r.start_at, r.end_at, r.state,
+                r.conflict_reason, s.name AS service_name
+         FROM reservations r
+         JOIN services s ON s.id = r.service_id
+         WHERE r.state IN ('scheduled', 'conflict') AND r.started_at IS NULL
+         ORDER BY r.start_at`,
+    );
+    const reserved = new Map(pending.map((row) => [row.program_id, row]));
 
     /*
      * 条件が入っていれば、その条件で録れる番組を出す。
@@ -86,15 +141,12 @@ export function load({ url }) {
      * 使うと**いま画面に入っている条件ではない結果**が出てしまう。
      */
     const conditions = conditionsFrom(url.searchParams) ?? editing ?? null;
-    let preview: { total: number; programs: PreviewRow[] } | null = null;
+    let preview: { total: number; programs: PreviewRow[]; conflicts: number } | null = null;
     if (conditions !== null && url.searchParams.size > 0) {
-        const all = queryAll<
-            Program & { service_type: string; service_name: string; reservation_state: string | null }
-        >(
-            `SELECT p.*, s.type AS service_type, s.name AS service_name, r.state AS reservation_state
+        const all = queryAll<Program & { service_type: string; service_name: string }>(
+            `SELECT p.*, s.type AS service_type, s.name AS service_name
              FROM programs p
              JOIN services s ON s.id = p.service_id
-             LEFT JOIN reservations r ON r.program_id = p.id AND r.state != 'canceled'
              WHERE p.start_at > ? ORDER BY p.start_at`,
             now(),
         );
@@ -105,17 +157,66 @@ export function load({ url }) {
                 haystack(program, fields),
             ),
         );
-        preview = {
-            total: hits.length,
-            programs: hits.slice(0, 100).map((p) => ({
+
+        const rows: PreviewRow[] = hits.map((p) => {
+            const held = reserved.get(p.id) ?? null;
+            return {
                 id: p.id,
                 name: p.name,
-                description: p.description,
                 service_name: p.service_name,
                 start_at: p.start_at,
                 end_at: p.end_at,
-                reservation_state: p.reservation_state,
-            })),
+                reservation_id: held?.id ?? null,
+                reservation_state: held?.state ?? null,
+                matched: true,
+                /*
+                 * 競合は2通り。スケジューラが既にチューナー不足と判断したもの
+                 * (理由まで分かる) と、まだ予約していないが他の予約と時間が
+                 * 重なるもの。後者は録ろうとした時点で初めて分かるので、
+                 * ここで先に見せる
+                 */
+                conflict:
+                    held?.state === 'conflict'
+                        ? (held.conflict_reason ?? 'チューナーが足りません')
+                        : overlapping(
+                              { service_id: p.service_id, start_at: p.start_at, end_at: p.end_at },
+                              pending.filter((other) => other.program_id !== p.id),
+                          ),
+            };
+        });
+
+        /*
+         * 条件から外れたのに残っている予約も同じ表に混ぜる。
+         *
+         * 条件を狭めても、既に立った予約はそのまま残る (意図して個別に残している
+         * ことがあるので勝手には消さない)。別の表に出していた頃は、
+         * 同じ番組が2箇所に並び、どちらを見ればいいのか分からなかった
+         */
+        if (editing !== undefined) {
+            const shown = new Set(rows.map((row) => row.id));
+            for (const held of pending) {
+                if (shown.has(held.program_id)) continue;
+                if (held.rule_id !== editing.id) continue;
+                rows.push({
+                    id: held.program_id,
+                    name: held.name,
+                    service_name: held.service_name,
+                    start_at: held.start_at,
+                    end_at: held.end_at,
+                    reservation_id: held.id,
+                    reservation_state: held.state,
+                    matched: false,
+                    conflict:
+                        held.state === 'conflict' ? (held.conflict_reason ?? 'チューナーが足りません') : null,
+                });
+            }
+        }
+        rows.sort((a, b) => a.start_at - b.start_at);
+
+        preview = {
+            total: rows.length,
+            conflicts: rows.filter((row) => row.conflict !== null).length,
+            programs: rows.slice(0, 100),
         };
     }
     /*
@@ -130,7 +231,7 @@ export function load({ url }) {
         .prepare(
             `SELECT r.*, (
                  SELECT COUNT(*) FROM reservations
-                 WHERE rule_id = r.id AND state IN ${PENDING_STATES}
+                 WHERE rule_id = r.id AND ${PENDING}
              ) AS reservations
              FROM rules r ORDER BY r.id DESC`,
         )
@@ -139,28 +240,9 @@ export function load({ url }) {
     const services = database()
         .prepare(`SELECT * FROM services WHERE ${CURRENT_SERVICES} ORDER BY type, channel`)
         .all() as Service[];
-    /*
-     * 編集中のルールがこれから録る予定。
-     *
-     * 条件を狭めても、既に立った予約はそのまま残る(意図して個別に残していることが
-     * あるため勝手に消さない)。**1件ずつ取り消せるようにここへ並べる。**
-     * まとめて畳む口しか無かった頃は、1つだけ要らない予約を外すのに
-     * 全部消してから条件をいじり直すしかなかった
-     */
-    const pending =
-        editing === undefined
-            ? []
-            : queryAll<PendingRow>(
-                  `SELECT r.id, r.name, r.start_at, r.end_at, r.state, s.name AS service_name
-                   FROM reservations r
-                   JOIN services s ON s.id = r.service_id
-                   WHERE r.rule_id = ? AND r.state IN ${PENDING_STATES}
-                   ORDER BY r.start_at`,
-                  editing.id,
-              );
     // フォームの初期値は preview と同じものを使う。別々に組み立てると、
     // 画面に出ている結果と保存されるものがズレる
-    return { rules, services, editing: editing ?? null, seed: conditions, preview, defaults, pending };
+    return { rules, services, editing: editing ?? null, seed: conditions, preview, defaults };
 }
 
 /** 選択されたチャンネルを JSON 配列に。未選択(=全チャンネル)は NULL で表す */
@@ -253,9 +335,10 @@ export const actions = {
 
         database()
             .prepare(
+                // free_only は書かない。無料放送の扱いは全体設定で、ルールごとには持たない
                 `INSERT INTO rules (name, keyword, ignore_keyword, search_fields, service_ids, service_types,
-                                genres, free_only, enabled, priority, encode, keep_original, cm_cut, codec, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
+                                genres, enabled, priority, encode, keep_original, cm_cut, codec, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
             )
             .run(
                 name,
@@ -265,7 +348,6 @@ export const actions = {
                 ids,
                 types,
                 genreIds,
-                form.get('freeOnly') === 'on' ? 1 : 0,
                 Number(form.get('priority') ?? 2) || 2,
                 form.get('encode') === 'on' ? 1 : 0,
                 form.get('keepOriginal') === 'on' ? 1 : 0,
@@ -297,8 +379,9 @@ export const actions = {
         const current = settings();
         database()
             .prepare(
+                // free_only は触らない。無料放送の扱いは全体設定で、ルールごとには持たない
                 `UPDATE rules SET name = ?, keyword = ?, ignore_keyword = ?, search_fields = ?, service_ids = ?,
-                 service_types = ?, genres = ?, free_only = ?, priority = ?, encode = ?,
+                 service_types = ?, genres = ?, priority = ?, encode = ?,
                  keep_original = ?, cm_cut = ?, codec = ? WHERE id = ?`,
             )
             .run(
@@ -309,7 +392,6 @@ export const actions = {
                 ids,
                 types,
                 genreIds,
-                form.get('freeOnly') === 'on' ? 1 : 0,
                 Number(form.get('priority') ?? 2) || 2,
                 form.get('encode') === 'on' ? 1 : 0,
                 form.get('keepOriginal') === 'on' ? 1 : 0,

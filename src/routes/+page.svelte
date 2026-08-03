@@ -503,7 +503,9 @@
                                     <!--
                                         エンコード中だけ、割合と残りの見込みを添える。
                                         ffmpeg が回っていない段階 (解除中・CM検出中) は
-                                        進み具合が取れないので、状態だけを出す
+                                        進み具合が取れないので、代わりに**いま何をしているか**を出す。
+                                        CM検出は中で3つの道具を数分ずつ回すので、
+                                        段階の名前だけだと止まっているように見えていた
                                     -->
                                     {#if rec.job_state === 'running' && rec.job_phase === 'encode'}
                                         <div
@@ -512,6 +514,13 @@
                                         >
                                             {percent(rec.job_percent ?? 0)}
                                             {#if eta(rec.job_eta_ms)}・{eta(rec.job_eta_ms)}{/if}
+                                        </div>
+                                    {:else if rec.job_state === 'running' && rec.job_log}
+                                        <div
+                                            class="text-base-content/60 mt-0.5 text-xs"
+                                            data-testid="encode-step"
+                                        >
+                                            {rec.job_log}
                                         </div>
                                     {/if}
                                 </div>

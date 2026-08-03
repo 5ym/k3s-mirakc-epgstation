@@ -62,7 +62,20 @@ function fail(recordingId: number, error: string): void {
 function createRecording(reservation: Reservation): Recording {
     const service = queryOne<Service>('SELECT * FROM services WHERE id = ?', reservation.service_id);
     const program = queryOne<Program>('SELECT * FROM programs WHERE id = ?', reservation.program_id);
-    const parsed = parseTitle(reservation.name);
+
+    /*
+     * 名前と概要は**録り始める瞬間の番組表**から取る。
+     *
+     * 番組表は放送直前まで書き換わる (「[新]」が付く、サブタイトルが入る、
+     * 誤字が直る)。予約の行はキーワードで当てた時点の値のままで、時刻が動いた
+     * ときにしか更新していないので、そのまま写すと**古い名前で保存先に並ぶ**。
+     *
+     * 逆に、録り終えたあとは動かさない。番組表の行は24時間で消えるうえ、
+     * ファイル名も .nfo も既に書いてある (docs/data.md)
+     */
+    const name = program?.name ?? reservation.name;
+    const description = program?.description ?? reservation.description;
+    const parsed = parseTitle(name);
     const at = now();
 
     const info = database()
@@ -79,10 +92,10 @@ function createRecording(reservation: Reservation): Recording {
             reservation.program_id,
             reservation.service_id,
             service?.name ?? '',
-            reservation.name,
+            name,
             parsed.series,
             parsed.subtitle,
-            reservation.description,
+            description,
             reservation.start_at,
             reservation.end_at,
             program?.audio_type ?? null,

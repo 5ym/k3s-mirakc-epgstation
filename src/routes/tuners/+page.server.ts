@@ -2,7 +2,7 @@ import { fail } from '@sveltejs/kit';
 import { queryAll } from '$lib/server/db';
 import { stats as logoStats, sweep } from '$lib/server/logo';
 import { getChannels, getEpgProgress, getServices, getTuners, ping } from '$lib/server/mirakc';
-import { refresh, settle, settleState, start, stop } from '$lib/server/scan';
+import { refresh, restartMirakc, start, stop } from '$lib/server/scan';
 import { cardStatus } from '$lib/server/scramble';
 import type { ChannelType, Service } from '$lib/types';
 
@@ -29,8 +29,6 @@ export async function load() {
         epg: getEpgProgress().catch(() => []),
         // denpa が取り込み済みの局。mirakc が見つけたものとの差が分かる
         services: queryAll<Service>('SELECT * FROM services ORDER BY type, channel, service_id'),
-        // 局の取り込みの進み具合。押した後どうなっているのかを出すため
-        settle: settleState(),
         /*
          * 局ロゴを何局ぶん持っているか。
          *
@@ -64,15 +62,18 @@ export const actions = {
     },
 
     /**
-     * 局を取り直す。
+     * mirakc を入れ直す。
      *
-     * mirakc 側が1局ずつ選局して調べ終えるのを待つので、押した瞬間には終わらない。
-     * ここでは待たずに始めるだけにして、埋まっていく様子は画面が知らせで受け取る
-     * (取り込むたびに `services` が飛ぶ)。
+     * **局が足りないときに効くのはこれだけ。** 局を調べているのは mirakc 側で、
+     * denpa がそこから取り込み直しても mirakc が知らないものは増えない。
+     * mirakc は起動時に局と番組表を取りに行くので、入れ直すのが一番速い道になる。
+     * 揃うたびに `/events` で知らせが来るので、denpa は待ち構えるだけでいい。
      */
-    resync: () => {
-        void settle();
-        return { success: true, scan: '局を取り込んでいます。増えなくなるまで続けます' };
+    restartMirakc: async ({ request }) => {
+        const form = await request.formData();
+        const result = await restartMirakc(form.get('forget') === 'on');
+        if (!result.ok) return fail(409, { message: result.message });
+        return { success: true, scan: result.message };
     },
 
     /**

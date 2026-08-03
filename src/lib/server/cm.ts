@@ -289,6 +289,8 @@ export async function detectCm(
     channel = '',
     onProgress?: (percent: number) => void,
     area = '',
+    /** jls の中でいま何をしているか。段階の名前だけでは進み具合が分からない */
+    onStep?: (label: string) => void,
 ): Promise<CmDetection> {
     /** ロゴを当てられなかったことは、無音検出に落ちたあとも伝える */
     let logoMissing = false;
@@ -299,7 +301,7 @@ export async function detectCm(
         const duration = await probeDuration(input);
         if (Number.isFinite(duration)) {
             const { detectWithJls } = await import('./cm-jls');
-            const result = await detectWithJls(input, duration, signal, channel, area);
+            const result = await detectWithJls(input, duration, signal, channel, area, onStep);
             logoMissing = result.logoMissing;
             if (result.cm.length > 0) {
                 return { cm: result.cm, duration, note: result.note, logoMissing };
@@ -323,7 +325,7 @@ export async function detectCm(
     return {
         cm: detectCmRanges(silences, duration),
         duration,
-        note: fallback === '' ? note : `${note} (jls は使えず: ${fallback})`,
+        note: fallback === '' ? note : `${note} — ロゴでの検出をやめて無音だけで判定しました (${fallback})`,
         logoMissing,
     };
 }

@@ -26,13 +26,25 @@
 
     /** どのコマを見るか。ロゴが出ている場面まで送れるようにする */
     let at = $state(300);
-    let image = $state<HTMLImageElement | null>(null);
+    /** 画像の実寸。拡大すると変わるので、座標の戻し計算はこれを見る */
+    let shownWidth = $state(0);
+    let shownHeight = $state(0);
     /** 読み込みに失敗したコマ。位置を変えてもらう */
     let failed = $state(false);
 
+    /**
+     * 右上を拡大して出す。
+     *
+     * 局ロゴはほぼ右上にある。画面全体を出すと、その一角は指でも掴みにくいほど
+     * 小さくなる。既定で寄せておき、そうでない局のために全体へ戻せるようにする。
+     */
+    let zoomed = $state(true);
+    const SCALE = 2.5;
+
     /** 表示上の矩形 (画像の中の座標) */
     let box = $state<{ x: number; y: number; w: number; h: number } | null>(null);
-    let dragFrom: { x: number; y: number } | null = null;
+    /** 掴んでいるもの。新しく引いているのか、今の枠を動かしているのか */
+    let drag: { mode: 'draw' | 'move'; x: number; y: number; box: typeof box } | null = null;
 
     /**
      * コマを取り出して出す。
@@ -74,50 +86,95 @@
         };
     });
 
+    /** 記録されているコマの座標 ↔ 画面上の座標。倍率は横と縦で違う */
+    const scale = $derived(
+        frame === null || shownWidth === 0 || shownHeight === 0
+            ? null
+            : { x: shownWidth / frame.width, y: shownHeight / frame.height },
+    );
+
+    /**
+     * 覚えてある範囲を、そのまま掴める枠として置く。
+     *
+     * **どこに設定されているのかが画面から分からなかった。** 数字だけ出していた頃は、
+     * 直したくても一から囲い直すしかなかった。出しておけば、掴んで動かすだけで済む。
+     */
+    let placed = $state('');
+    $effect(() => {
+        const s = scale;
+        if (s === null || area === null || area === '') return;
+        // 同じ範囲を置き直さない (引いた枠を毎回上書きしてしまう)
+        if (placed === area) return;
+        const [x, y, w, h] = area.split(',').map(Number);
+        if (![x, y, w, h].every(Number.isFinite)) return;
+        placed = area;
+        box = { x: x * s.x, y: y * s.y, w: w * s.x, h: h * s.y };
+    });
+
     /** 囲ってもらった矩形を、記録されているコマの座標に直す */
     const value = $derived.by(() => {
-        if (box === null || image === null || frame === null) return '';
-        if (image.clientWidth === 0 || image.clientHeight === 0) return '';
-        // 縦横比を直してあるので、横と縦で伸び方が違う。別々に戻す
-        const x = frame.width / image.clientWidth;
-        const y = frame.height / image.clientHeight;
+        if (box === null || scale === null) return '';
         return [
-            Math.round(box.x * x),
-            Math.round(box.y * y),
-            Math.round(box.w * x),
-            Math.round(box.h * y),
+            Math.max(0, Math.round(box.x / scale.x)),
+            Math.max(0, Math.round(box.y / scale.y)),
+            Math.round(box.w / scale.x),
+            Math.round(box.h / scale.y),
         ].join(',');
     });
+
+    /** 覚えてあるものと同じか。押しても何も変わらないボタンを出さないため */
+    const unchanged = $derived(value !== '' && value === area);
 
     function at_(event: PointerEvent): { x: number; y: number } {
         const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
         return { x: event.clientX - rect.left, y: event.clientY - rect.top };
     }
 
+    /** その点が今の枠の中か。中なら動かす、外なら引き直す */
+    function inside(point: { x: number; y: number }): boolean {
+        if (box === null) return false;
+        return point.x >= box.x && point.x <= box.x + box.w && point.y >= box.y && point.y <= box.y + box.h;
+    }
+
     function down(event: PointerEvent): void {
         if (event.button !== 0) return;
-        dragFrom = at_(event);
-        box = { ...dragFrom, w: 0, h: 0 };
+        const point = at_(event);
+        drag = inside(point) ? { mode: 'move', ...point, box } : { mode: 'draw', ...point, box: null };
+        if (drag.mode === 'draw') box = { ...point, w: 0, h: 0 };
         (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
         event.preventDefault();
     }
 
     function move(event: PointerEvent): void {
-        if (dragFrom === null) return;
+        if (drag === null) return;
         const now = at_(event);
+        if (drag.mode === 'move') {
+            const from = drag.box;
+            if (from === null) return;
+            // 画像の外へは出さない。出すと logoframe に画面外の座標が渡る
+            const w = shownWidth || Number.POSITIVE_INFINITY;
+            const h = shownHeight || Number.POSITIVE_INFINITY;
+            box = {
+                ...from,
+                x: Math.min(Math.max(0, from.x + (now.x - drag.x)), Math.max(0, w - from.w)),
+                y: Math.min(Math.max(0, from.y + (now.y - drag.y)), Math.max(0, h - from.h)),
+            };
+            return;
+        }
         // どちらへ引いても同じ矩形になるようにする
         box = {
-            x: Math.min(dragFrom.x, now.x),
-            y: Math.min(dragFrom.y, now.y),
-            w: Math.abs(now.x - dragFrom.x),
-            h: Math.abs(now.y - dragFrom.y),
+            x: Math.min(drag.x, now.x),
+            y: Math.min(drag.y, now.y),
+            w: Math.abs(now.x - drag.x),
+            h: Math.abs(now.y - drag.y),
         };
     }
 
     function up(): void {
-        dragFrom = null;
-        // 押しただけ (掴み損ね) は選択とみなさない
-        if (box !== null && (box.w < 8 || box.h < 8)) box = null;
+        const mode = drag?.mode;
+        drag = null;
+        // 押しただけ (掴み損ね) は選択とみなさない。動かしたぶんには消さない
+        if (mode === 'draw' && box !== null && (box.w < 8 || box.h < 8)) box = null;
     }
 </script>
 
@@ -125,7 +182,8 @@
     <div class="text-sm font-medium">ロゴの位置を教える</div>
     <p class="text-base-content/70 mt-1 text-sm">
         {serviceName} のロゴを自動で見つけられませんでした。ロゴが出ているコマまで送って、
-        <strong>ロゴを四角で囲って</strong>ください。次のエンコードから使います。
+        <strong>ロゴを四角で囲って</strong>ください。枠は<strong>掴んで動かせます</strong>。
+        次のエンコードから使います。
     </p>
 
     <div class="mt-2 flex flex-wrap items-end gap-2">
@@ -140,41 +198,66 @@
                 data-testid="logo-at"
             />
         </label>
+        <!-- ロゴはほぼ右上。全体を出すとその一角が小さすぎて掴めない -->
+        <label class="flex items-center gap-1 text-xs">
+            <input
+                type="checkbox"
+                class="checkbox checkbox-xs"
+                bind:checked={zoomed}
+                data-testid="logo-zoom"
+            />
+            右上を拡大
+        </label>
         <span class="text-base-content/60 text-xs">ロゴが出ていない場面なら位置を変えてください</span>
     </div>
 
     <!--
         画像の上で掴んで引く。canvas は使わない (画像に重ねた div で足りるうえ、
-        拡大縮小の計算が1箇所で済む)
+        拡大縮小の計算が1箇所で済む)。
+
+        拡大は**外側で切り取る**だけにしてある。中の画像と枠は同じ入れ物に居るので、
+        倍率が変わっても座標の計算は1つのまま
     -->
-    <div
-        class="bg-base-200 relative mt-2 inline-block max-w-full touch-none select-none"
-        onpointerdown={down}
-        onpointermove={move}
-        onpointerup={up}
-        role="presentation"
-    >
-        {#if frame !== null}
-            <img
-                src={frame.url}
-                alt="ロゴの位置を選ぶためのコマ"
-                class="block max-w-full"
-                bind:this={image}
-                data-testid="logo-frame"
-            />
-        {:else}
-            <!-- 取り出している間も掴む場所を残しておく。出た瞬間に大きさが変わらないように -->
-            <div class="flex h-48 w-80 items-center justify-center text-sm" data-testid="logo-frame-loading">
-                {failed ? '' : 'コマを取り出しています…'}
-            </div>
-        {/if}
-        {#if box !== null}
-            <div
-                class="border-primary bg-primary/20 pointer-events-none absolute border-2"
-                style="left:{box.x}px; top:{box.y}px; width:{box.w}px; height:{box.h}px;"
-            ></div>
-        {/if}
+    <div class="bg-base-200 mt-2 max-w-full overflow-hidden" data-testid="logo-viewport">
+        <div
+            class="relative touch-none select-none"
+            class:ml-auto={zoomed}
+            style={zoomed ? `width:${SCALE * 100}%` : 'width:100%'}
+            onpointerdown={down}
+            onpointermove={move}
+            onpointerup={up}
+            role="presentation"
+        >
+            {#if frame !== null}
+                <img
+                    src={frame.url}
+                    alt="ロゴの位置を選ぶためのコマ"
+                    class="block w-full"
+                    bind:clientWidth={shownWidth}
+                    bind:clientHeight={shownHeight}
+                    data-testid="logo-frame"
+                />
+            {:else}
+                <!-- 取り出している間も掴む場所を残しておく。出た瞬間に大きさが変わらないように -->
+                <div class="flex h-48 items-center justify-center text-sm" data-testid="logo-frame-loading">
+                    {failed ? '' : 'コマを取り出しています…'}
+                </div>
+            {/if}
+            {#if box !== null}
+                <div
+                    class="border-primary bg-primary/20 pointer-events-none absolute border-2"
+                    style="left:{box.x}px; top:{box.y}px; width:{box.w}px; height:{box.h}px;"
+                    data-testid="logo-box"
+                ></div>
+            {/if}
+        </div>
     </div>
+    {#if zoomed}
+        <!-- 切り取って出しているので、見えていない側があることは言っておく -->
+        <p class="text-base-content/60 mt-1 text-xs">
+            右上だけを{SCALE}倍で出しています。ロゴが他の隅にある局は「右上を拡大」を外してください。
+        </p>
+    {/if}
 
     {#if failed}
         <div class="text-error mt-1 text-sm" data-testid="logo-frame-error">
@@ -185,11 +268,11 @@
     <form method="POST" action="?/logoArea" use:submitting class="mt-2 flex flex-wrap items-center gap-2">
         <input type="hidden" name="serviceId" value={serviceId} />
         <input type="hidden" name="area" {value} />
-        <button class="btn btn-sm btn-primary" disabled={value === ''} data-testid="logo-save">
+        <button class="btn btn-sm btn-primary" disabled={value === '' || unchanged} data-testid="logo-save">
             この位置で覚える
         </button>
         <span class="text-base-content/60 font-mono text-xs" data-testid="logo-value">
-            {value || (area ? `いまの設定: ${area}` : '囲ってください')}
+            {value === '' ? '囲ってください' : unchanged ? `いまの設定: ${value}` : value}
         </span>
         {#if area}
             <button

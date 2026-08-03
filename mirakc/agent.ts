@@ -302,6 +302,13 @@ async function runScan(targets: [ChannelType, string[]][]): Promise<void> {
             found,
             targets.map(([type]) => type),
         );
+        /*
+         * 覚えている局を捨ててから起こす。
+         *
+         * mirakc は**起動したときに局と番組表を取りに行く**ので、これだけで
+         * 新しいチャンネル定義に沿って集め直される。捨てないと、消えたはずの局が
+         * 番組表に出続ける
+         */
         clearEpgCache();
         push('mirakc を起動しています...', {}, { state: 'done', phase: '完了', finishedAt: Date.now() });
     } catch (error) {
@@ -311,6 +318,33 @@ async function runScan(targets: [ChannelType, string[]][]): Promise<void> {
         // 中断しても失敗しても、mirakc は必ず戻す。止まったままだと録画も番組表も死ぬ
         mirakc.start();
     }
+}
+
+/**
+ * mirakc を入れ直す。
+ *
+ * mirakc は**起動したときに局と番組表を取りに行く** (`services.json` が古ければ
+ * scan-services から始める)。denpa 側で局を取り込み直しても mirakc が知らない
+ * ものは増えないので、「局が足りない」ときに効くのはこちらだけになる。
+ *
+ * 覚えている局を捨ててから起こすかは選べる。スキャンの直後は捨てる (消えた局が
+ * 番組表に残り続けるため) が、手で押すぶんには残したまま追加ぶんだけ拾わせたい。
+ */
+async function restartMirakc(body: { forget?: unknown }): Promise<{ ok: boolean; message: string }> {
+    if (scan.state === 'running') {
+        return { ok: false, message: 'チャンネルスキャン中は入れ直せません' };
+    }
+    await mirakc.stop();
+    if (body.forget === true) clearEpgCache();
+    mirakc.start();
+    log('mirakc を入れ直しました');
+    return {
+        ok: true,
+        message:
+            body.forget === true
+                ? 'mirakc を入れ直しました (覚えている局は捨てました)'
+                : 'mirakc を入れ直しました',
+    };
 }
 
 function stopScan() {
@@ -373,6 +407,10 @@ export function serve(port = PORT): Bun.Server {
             if (pathname === '/denpa/scan/stop' && request.method === 'POST') {
                 const result = stopScan();
                 return json(result, result.stopped ? 200 : 409);
+            }
+            if (pathname === '/denpa/mirakc/restart' && request.method === 'POST') {
+                const result = await restartMirakc(await request.json().catch(() => ({})));
+                return json(result, result.ok ? 200 : 409);
             }
             return json({ ok: false, error: 'not found' }, 404);
         },

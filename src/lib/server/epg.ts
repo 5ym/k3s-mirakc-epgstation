@@ -178,19 +178,28 @@ function syncPrograms(programs: mirakc.MirakcProgram[]): number {
     return count;
 }
 
-/** 予約時刻の追従。放送時間が動いた番組の予約を新しい時刻に合わせる */
+/**
+ * 予約の追従。番組表が書き換わったぶんを、まだ始めていない予約に反映する。
+ *
+ * **時刻だけでなく名前と概要も見る。** 番組表は放送直前まで書き換わり
+ * (「[新]」が付く、サブタイトルが入る、誤字が直る)、時刻が動かないまま名前だけ
+ * 変わることがある。時刻の差だけで拾っていた頃は、予約一覧に古い名前が残り、
+ * そのまま録画の名前になっていた。
+ */
 function syncReservationTimes(): number {
     const changed = database()
         .prepare(
             `
         UPDATE reservations
-        SET start_at = p.start_at, end_at = p.end_at, name = p.name, updated_at = ?
+        SET start_at = p.start_at, end_at = p.end_at, name = p.name,
+            description = p.description, updated_at = ?
         FROM programs p
         WHERE p.id = reservations.program_id
           AND reservations.state IN ('scheduled', 'conflict')
-          -- 録り始めた予約の時刻は動かさない。延長への追従は録画の行のほうでやる
+          -- 録り始めた予約は動かさない。延長への追従は録画の行のほうでやる
           AND reservations.started_at IS NULL
-          AND (reservations.start_at != p.start_at OR reservations.end_at != p.end_at)
+          AND (reservations.start_at != p.start_at OR reservations.end_at != p.end_at
+               OR reservations.name != p.name OR reservations.description != p.description)
     `,
         )
         .run(now());

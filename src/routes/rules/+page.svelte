@@ -1,7 +1,7 @@
 <script lang="ts">
     import { submitting } from '$lib/actions';
     import { GENRE_TREE, genreName } from '$lib/arib';
-    import { CM_LABEL, dateTime } from '$lib/format';
+    import { badgeClass, CM_LABEL, dateTime, stateLabel } from '$lib/format';
     import { parseSearchFields, SEARCH_FIELD_LABEL, SEARCH_FIELDS, searchFieldLabel } from '$lib/search';
 
     let { data, form } = $props();
@@ -294,48 +294,14 @@
             条件を狭めても既に立った予約は残る (意図して個別に残していることが
             あるので勝手には消さない) ので、要らないものだけここで外す
         -->
-        {#if data.editing && data.pending.length > 0}
-            <div class="mt-4" data-testid="rule-pending">
-                <div class="text-sm font-medium">
-                    このルールが押さえている予約 ({data.pending.length} 件)
-                </div>
-                <p class="text-base-content/60 mt-1 text-xs">
-                    条件を変えても、既に立った予約はそのまま残ります。要らないものはここで取り消せます
-                    (取り消した番組をルールが取り直すことはありません)。
-                </p>
-                <div
-                    class="border-base-300 divide-base-300 mt-2 max-h-64 divide-y overflow-y-auto rounded-box border"
-                >
-                    {#each data.pending as reservation (reservation.id)}
-                        <div
-                            class="flex flex-wrap items-center gap-x-3 gap-y-1 p-2"
-                            data-testid="rule-pending-row"
-                            data-reservation-id={reservation.id}
-                        >
-                            <div class="min-w-0 flex-1 basis-48">
-                                <div class="truncate text-sm">{reservation.name}</div>
-                                <div class="text-base-content/60 text-xs">
-                                    {reservation.service_name} ・ {dateTime(reservation.start_at)}
-                                </div>
-                            </div>
-                            <form method="POST" action="?/cancelReservation" use:submitting>
-                                <input type="hidden" name="reservationId" value={reservation.id} />
-                                <button
-                                    class="btn btn-sm btn-error btn-outline"
-                                    data-testid="rule-pending-cancel"
-                                >
-                                    取消
-                                </button>
-                            </form>
-                        </div>
-                    {/each}
-                </div>
-            </div>
-        {/if}
     </div>
 </div>
 
 {#if data.preview}
+    <!--
+        **予約とプレビューは同じ表**。別々に並べていた頃は、同じ番組が2箇所に出るうえ、
+        「押さえている予約」と「これから当たる番組」を頭の中で突き合わせることになっていた
+    -->
     <div class="card bg-base-100 mb-6 shadow" data-testid="preview">
         <div class="card-body">
             <h2 class="card-title text-base">
@@ -345,20 +311,72 @@
                         (先頭 {data.preview.programs.length} 件)
                     </span>
                 {/if}
+                {#if data.preview.conflicts > 0}
+                    <span class="badge badge-sm badge-error badge-outline" data-testid="preview-conflicts">
+                        競合 {data.preview.conflicts} 件
+                    </span>
+                {/if}
             </h2>
             {#if data.preview.total === 0}
                 <p class="text-base-content/60 text-sm">
                     いまの番組表では1件も当たりません。条件を緩めてください。
                 </p>
             {:else}
-                <ul class="space-y-1" data-testid="preview-list">
+                <p class="text-base-content/60 text-xs">
+                    予約済みのものはここで取り消せます (取り消した番組をルールが取り直すことはありません)。
+                    条件を変えても既に立った予約は残るので、条件から外れたものも
+                    <span class="badge badge-xs badge-ghost">条件外</span> として並べます。
+                </p>
+                <ul class="divide-base-300 mt-1 divide-y" data-testid="preview-list">
                     {#each data.preview.programs as program (program.id)}
-                        <li class="text-sm" data-testid="preview-row">
-                            <span class="text-base-content/60">{dateTime(program.start_at)}</span>
-                            <span class="text-base-content/60">{program.service_name}</span>
-                            {program.name}
-                            {#if program.reservation_state}
-                                <span class="badge badge-sm badge-info">予約済み</span>
+                        <li
+                            class="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5 text-sm"
+                            data-testid="preview-row"
+                            data-program-id={program.id}
+                        >
+                            <div class="min-w-0 flex-1 basis-64">
+                                <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                    {#if program.reservation_state}
+                                        <span
+                                            class="badge badge-sm {badgeClass(program.reservation_state)}"
+                                            data-testid="preview-state"
+                                        >
+                                            {stateLabel(program.reservation_state)}
+                                        </span>
+                                    {/if}
+                                    {#if !program.matched}
+                                        <span class="badge badge-xs badge-ghost">条件外</span>
+                                    {/if}
+                                    <span class="truncate">{program.name}</span>
+                                </div>
+                                <div class="text-base-content/60 text-xs">
+                                    {program.service_name} ・ {dateTime(program.start_at)}
+                                </div>
+                                <!--
+                                    重なりは**録ろうとした時点で初めて分かる**ので、
+                                    ここで先に見せる。同じ局のものは重ならない
+                                    (mirakc がチューナーを共有する)
+                                -->
+                                {#if program.conflict}
+                                    <div class="text-error text-xs" data-testid="preview-conflict">
+                                        重なり: {program.conflict}
+                                    </div>
+                                {/if}
+                            </div>
+                            {#if program.reservation_id !== null}
+                                <form method="POST" action="?/cancelReservation" use:submitting>
+                                    <input
+                                        type="hidden"
+                                        name="reservationId"
+                                        value={program.reservation_id}
+                                    />
+                                    <button
+                                        class="btn btn-xs btn-error btn-outline"
+                                        data-testid="rule-pending-cancel"
+                                    >
+                                        取消
+                                    </button>
+                                </form>
                             {/if}
                         </li>
                     {/each}
