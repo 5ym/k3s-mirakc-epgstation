@@ -11,8 +11,17 @@ import { packetize, withCrc } from '../../src/lib/ts/synth';
 import { type FakeService, SERVICES } from './services';
 
 /** ロゴとして流す PNG。中身は問われないので小さいものでよい */
+/**
+ * 放送に乗るのと同じ形のロゴ (実機の地上波から拾った 48x24)。
+ *
+ * 8bit のパレット PNG だが、**色の表 (PLTE/tRNS) が入っていない。** ARIB では
+ * 色が決め打ちなので送らない決まりで、受け取った側が入れて初めて絵になる。
+ * ここを普通の PNG にしてしまうと、その入れ直しが抜けていても気づけない
+ */
 const LOGO_PNG = Uint8Array.from(
-    atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='),
+    atob(
+        'iVBORw0KGgoAAAANSUhEUgAAADAAAAAYCAMAAACLI47uAAAAo0lEQVR42r2SSwrDMAxE49UcSbOwwPc/VUcJLYXa8WRTIYwNevqMfLSHdvwfCGQgMlsm0YktkEAXAIAERuyBTCi3zqK4ByoxO1oOXQPcz1Ael58vT6XgbzM3AAfK6AJSBzX7lJgAofC4BPYAFTj71/bCArSHtrYp0HV2TWFXKGCl07IlkmkCn6HdCl+yekCVGOfiXKCxguuTu8D784Un6709Bl72jh+i3qzvNQAAAABJRU5ErkJggg==',
+    ),
     (c) => c.charCodeAt(0),
 );
 

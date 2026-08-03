@@ -31,7 +31,7 @@ export function isVideoCodec(value: unknown): value is VideoCodec {
  * 撮られたとおりの動きになる。コマ数が倍なのでエンコードの時間もサイズも
  * およそ倍になる (実測・地上波1分・AV1 10bit: 31.8秒 26MB ↔ 16.9秒 15MB)。
  *
- * **アニメだけは倍にしない。** 元が毎秒24コマ前後で描かれていて、それを
+ * **国内アニメだけは倍にしない。** 元が毎秒24コマ前後で描かれていて、それを
  * プルダウンして60フィールドに乗せているだけなので、フィールドごとにコマを
  * 起こしても同じ絵が並ぶだけになる。滑らかさは1つも増えず、時間とサイズだけ倍になる。
  */
@@ -39,22 +39,34 @@ function deinterlace(smooth: boolean): string {
     return smooth ? 'bwdif' : 'bwdif=mode=send_frame';
 }
 
-/** アニメ／特撮 (ARIB の大分類 7)。プルダウンされた24コマなのでコマ数を倍にしない */
+/**
+ * 国内アニメ (ARIB の大分類 7 / 中分類 0)。
+ *
+ * 同じ大分類でも、**海外アニメ (中分類 1) と特撮 (中分類 2) は倍にする。**
+ * 海外のものは毎秒30コマで作られていることが多く、特撮は実写なので
+ * もともと60フィールドぶんの動きが入っている。大分類だけで切っていた頃は
+ * この2つまで30コマに落としていた。
+ */
 const GENRE_ANIME = 7;
+const SUBGENRE_ANIME_JP = 0;
 
 /**
  * その録画を 60コマ/秒 で出すか。
  *
- * 番組表から写したジャンルで決める。ジャンルが分からない録画 (引き継いだもの、
- * 番組情報の無い放送) は実写として扱う — 放送の大半は実写で、
+ * 番組表から写したジャンル (中分類まで) で決める。ジャンルが分からない録画
+ * (引き継いだもの、番組情報の無い放送) は実写として扱う — 放送の大半は実写で、
  * アニメを実写扱いにしても絵は変わらない (無駄が出るだけ) が、逆は動きが落ちる。
  */
-export function smoothMotionFor(genres: string | null): boolean {
-    if (genres === null || genres === '') return true;
+export function smoothMotionFor(genreDetail: string | null): boolean {
+    if (genreDetail === null || genreDetail === '') return true;
     try {
-        const parsed = JSON.parse(genres) as unknown;
+        const parsed = JSON.parse(genreDetail) as unknown;
         if (!Array.isArray(parsed)) return true;
-        return !parsed.map(Number).includes(GENRE_ANIME);
+        return !parsed.some(
+            (genre) =>
+                Number((genre as { lv1?: unknown }).lv1) === GENRE_ANIME &&
+                Number((genre as { lv2?: unknown }).lv2) === SUBGENRE_ANIME_JP,
+        );
     } catch {
         return true;
     }
@@ -762,8 +774,8 @@ async function runJob(jobId: number): Promise<void> {
 
     const encodeOptions = {
         ...(await prepareCm(jobId, recording, sourceTs, signal)),
-        // コマ数は番組のジャンルで決まる。アニメだけ倍にしない (deinterlace)
-        smoothMotion: smoothMotionFor(recording.genres),
+        // コマ数は番組のジャンルで決まる。国内アニメだけ倍にしない (deinterlace)
+        smoothMotion: smoothMotionFor(recording.genre_detail),
     };
     if (canceled.has(jobId)) return finishCanceled(jobId, recording, decoded);
 

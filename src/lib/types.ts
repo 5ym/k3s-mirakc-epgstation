@@ -138,8 +138,8 @@ export interface Recording {
     cm_cut: CmMode;
     codec: VideoCodec;
     cm_ranges: string | null;
-    /** 番組表から写したジャンル (JSON: lv1 の配列)。エンコードのコマ数を決めるのに使う */
-    genres: string | null;
+    /** 番組表から写したジャンル (JSON: [{lv1, lv2}])。エンコードのコマ数を決めるのに使う */
+    genre_detail: string | null;
     /** CM検出が何をしたか。詳細で見せる */
     cm_note: string | null;
     /** ロゴを当てられなかった。位置を教えてもらうと次から効く */

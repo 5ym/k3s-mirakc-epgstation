@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { LogoCollector } from '../ts/logo';
+import { withPalette } from '../ts/logo-palette';
 import { config } from './config';
 import { database, now, queryAll, queryOne } from './db';
 import { CURRENT_SERVICES } from './epg';
@@ -145,6 +146,10 @@ export function watch(networkId: number): (chunk: Uint8Array) => void {
  *
  * 置き場ごと消えることは実際に起きる (PVCの作り直しなど)。
  * DBとファイルのどちらが正しいかを迷わないよう、**ファイルを正とする**。
+ *
+ * ついでに、色の表の入っていない古いファイルを直す。放送から拾ったままの
+ * PNG はパレットが抜けていて、ブラウザは何も描かない (logo-palette.ts)。
+ * 拾い直すと局によっては何時間もかかるので、置いてあるものを直す。
  */
 export function reconcile(): number {
     const rows = queryAll<{ id: number; has_logo: number }>('SELECT id, has_logo FROM services');
@@ -153,6 +158,7 @@ export function reconcile(): number {
     const tx = database().transaction(() => {
         for (const row of rows) {
             const actual = existsSync(logoPath(row.id)) ? 1 : 0;
+            if (actual === 1) repaint(row.id);
             if (actual === row.has_logo) continue;
             fix.run(actual, row.id);
             changed++;
@@ -161,6 +167,22 @@ export function reconcile(): number {
     tx();
     if (changed > 0) emit('services');
     return changed;
+}
+
+/** 置いてある PNG に色の表が入っていなければ入れ直す */
+function repaint(serviceId: number): void {
+    try {
+        const path = logoPath(serviceId);
+        const stored = readFileSync(path);
+        const fixed = withPalette(stored);
+        if (fixed.length === stored.length) return;
+        const working = `${path}.writing`;
+        writeFileSync(working, fixed);
+        renameSync(working, path);
+        console.log(`[logo] ${serviceId} の色の表を入れ直しました`);
+    } catch {
+        // 直せなくても番組表は出る。次の機会に
+    }
 }
 
 /**

@@ -89,10 +89,16 @@ async function watch(): Promise<void> {
     }
 }
 
-/** 局が増えなくなったと判断するまでの連続回数 */
-const SETTLE_STABLE = 3;
+/**
+ * 局が増えなくなったと判断するまでの連続回数。
+ *
+ * **少ないと途中で切り上げてしまう。** mirakc は1局ずつ選局して調べていて、
+ * 1つに数分かかることも、しばらく増えない時間が続くこともある。3回 (90秒) では
+ * その谷を「終わった」と読み違えていた。6回 = 5分ぶん増えなければ終わりとみなす
+ */
+const SETTLE_STABLE = 6;
 /** 様子を見る間隔 */
-const SETTLE_INTERVAL = 30_000;
+const SETTLE_INTERVAL = 50_000;
 /** 諦めるまでの上限。地上波+BS+CS を1局ずつ選局するので、それなりにかかる */
 const SETTLE_TIMEOUT = 30 * 60_000;
 
@@ -124,20 +130,28 @@ export async function settle(): Promise<number> {
         let stable = 0;
         for (;;) {
             let count = last;
+            let failed = false;
             try {
                 count = (await sync()).services;
             } catch {
                 // mirakc がまだ起動途中。次の周回で繋がる
+                failed = true;
             }
             // 取り込むたびに画面へ知らせる。埋まっていく様子がそのまま出る
             emit('services');
-            stable = count === last ? stable + 1 : 0;
+            /*
+             * 取り込めなかった周回は数に入れない。以前はここでも「増えなかった」
+             * 扱いにしていたので、mirakc が落ちている間に終わったことにしていた
+             */
+            if (!failed) stable = count === last ? stable + 1 : 0;
             last = count;
             if (stable >= SETTLE_STABLE || Date.now() >= until) return count;
             await Bun.sleep(SETTLE_INTERVAL);
         }
     } finally {
         settling = false;
+        // 終わったことを画面に伝える。「取り込み中…」のままボタンが戻らない
+        emit('services');
     }
 }
 

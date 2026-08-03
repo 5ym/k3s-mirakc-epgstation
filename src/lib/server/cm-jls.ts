@@ -164,22 +164,17 @@ export async function detectWithJls(
     mkdirSync(config.jlsLogoDir, { recursive: true });
 
     try {
-        // 1. 無音とシーンチェンジを拾う
-        const scenes = await run(
-            [bin('chapter_exe'), '-v', input, '-s', '8', '-e', '4', '-o', work.scenes],
-            signal,
-            deadline,
-        );
-        if (scenes.code !== 0) {
-            return { cm: [], note: failure('chapter_exe', scenes), logoMissing: false };
-        }
-
         /*
-         * 2. 局ロゴが写っているコマを拾う。
+         * 1. 局ロゴが写っているコマを拾う。
          *
          * 局名を渡すと logoframe が**その局のロゴデータ (.lgd) を自分で作って覚える**。
          * 1本目は作るぶん遅く、2本目からは使い回す。局が分からないときは
          * 持っているロゴを片端から当てる (無ければロゴ無しで進む)。
+         *
+         * **無音・シーンチェンジより先に回す。** 逆にしていた頃は、chapter_exe が
+         * 落ちた録画ではロゴを当てられたかどうかが分からないまま無音検出に落ちていて、
+         * 一覧に「ロゴを当てられませんでした」が出なかった (実機で2本)。
+         * ロゴの当たり外れは局ごとに決まる話なので、先に確かめて必ず伝える
          */
         const logoArgs =
             channel === ''
@@ -203,6 +198,16 @@ export async function detectWithJls(
         const logoMissing = isLogoMissing(frames.stderr);
         if (frames.code !== 0) {
             return { cm: [], note: failure('logoframe', frames), logoMissing };
+        }
+
+        // 2. 無音とシーンチェンジを拾う
+        const scenes = await run(
+            [bin('chapter_exe'), '-v', input, '-s', '8', '-e', '4', '-o', work.scenes],
+            signal,
+            deadline,
+        );
+        if (scenes.code !== 0) {
+            return { cm: [], note: failure('chapter_exe', scenes), logoMissing };
         }
 
         // 3. その2つを突き合わせて本編とCMに分ける
@@ -264,7 +269,10 @@ function cleanup(input: string): void {
     }
 }
 
-/** 落ちた段階が分かるようにする。詳細に出して原因を追えるように */
+/**
+ * 落ちた段階が分かるようにする。詳細に出して原因を追えるように。
+ * 標準エラーは末尾だけ。TSの読み込み警告が延々と並ぶので、全部載せると読めない
+ */
 function failure(step: string, result: Step): string {
-    return `${step} が失敗 (code ${result.code}): ${result.stderr.slice(-500)}`;
+    return `${step} が失敗 (code ${result.code}): ${result.stderr.trim().split('\n').at(-1) ?? ''}`;
 }

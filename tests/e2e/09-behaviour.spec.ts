@@ -82,6 +82,40 @@ test.describe('操作したときの反応', () => {
         }
     });
 
+    test('番組表は列の合計ぶんの幅を持つ', async ({ page }) => {
+        /*
+         * 時刻の列が横に付いてこられるのは、外側の枠の中にいる間だけ。
+         * 枠を画面の幅のままにして中身をはみ出させていた頃は、
+         * 「画面の幅 − 時刻の列」ぶんスクロールしたところで置いていかれていた
+         * (390px の端末で302pxから先)。枠を列の合計まで広げておけば端まで残る
+         */
+        await page.setViewportSize({ width: 320, height: 700 });
+        await goto(page, '/guide?type=GR');
+
+        const grid = page.getByTestId('guide-grid');
+        const size = await grid.evaluate((el) => ({
+            inner: Math.round(el.querySelector('[data-testid="guide-rows"]')!.getBoundingClientRect().width),
+            scroll: el.scrollWidth,
+        }));
+        expect(size.inner).toBe(size.scroll);
+    });
+
+    test('放送波を切り替えると横位置が先頭に戻る', async ({ page }) => {
+        // 局の並びは放送波ごとに別物なので、前の位置から始まると左端の局が隠れる
+        await page.setViewportSize({ width: 320, height: 700 });
+        await goto(page, '/guide?type=GR');
+
+        const grid = page.getByTestId('guide-grid');
+        await grid.evaluate((el) => {
+            el.scrollLeft = el.scrollWidth;
+        });
+        expect(await grid.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
+
+        await page.getByTestId('type-BS').click();
+        await expect(page.getByTestId('type-BS')).toHaveClass(/btn-active/);
+        await expect.poll(() => grid.evaluate((el) => el.scrollLeft)).toBe(0);
+    });
+
     test('ダッシュボードで取り消すと、その場で一覧から消える', async ({ page, request }) => {
         await reserveSoon(page, request, 'GR', 6);
 

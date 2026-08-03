@@ -31,15 +31,21 @@ describe('録画エンコードの引数', () => {
 });
 
 describe('コマ数の決め方', () => {
-    test('アニメ／特撮だけコマ数を倍にしない', () => {
+    test('国内アニメだけコマ数を倍にしない', () => {
         // 元が毎秒24コマ前後なので、フィールドごとに起こしても同じ絵が並ぶだけ
-        expect(smoothMotionFor('[7]')).toBe(false);
-        expect(smoothMotionFor('[0,7]')).toBe(false);
+        expect(smoothMotionFor('[{"lv1":7,"lv2":0}]')).toBe(false);
+        expect(smoothMotionFor('[{"lv1":0,"lv2":1},{"lv1":7,"lv2":0}]')).toBe(false);
+    });
+
+    test('海外アニメと特撮は60コマで出す', () => {
+        // 同じ大分類7でも、海外のものは毎秒30コマ、特撮は実写
+        expect(smoothMotionFor('[{"lv1":7,"lv2":1}]')).toBe(true);
+        expect(smoothMotionFor('[{"lv1":7,"lv2":2}]')).toBe(true);
     });
 
     test('それ以外は60コマで出す', () => {
-        expect(smoothMotionFor('[0]')).toBe(true);
-        expect(smoothMotionFor('[9]')).toBe(true);
+        expect(smoothMotionFor('[{"lv1":0,"lv2":0}]')).toBe(true);
+        expect(smoothMotionFor('[{"lv1":9,"lv2":0}]')).toBe(true);
     });
 
     test('ジャンルが分からないものは実写として扱う', () => {

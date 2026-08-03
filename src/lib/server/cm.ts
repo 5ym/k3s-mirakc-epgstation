@@ -292,6 +292,8 @@ export async function detectCm(
 ): Promise<CmDetection> {
     /** ロゴを当てられなかったことは、無音検出に落ちたあとも伝える */
     let logoMissing = false;
+    /** jls が使えなかった理由。落ちた先の説明に足す */
+    let fallback = '';
     // 検出のしかたは設定画面で決める (jls は確かだが録画1本あたり数分かかる)
     if (settings().cmDetector === 'jls') {
         const duration = await probeDuration(input);
@@ -302,6 +304,7 @@ export async function detectCm(
             if (result.cm.length > 0) {
                 return { cm: result.cm, duration, note: result.note, logoMissing };
             }
+            fallback = result.note;
             console.warn(`[cm] jls で検出できなかったため無音検出に切り替えます: ${result.note}`);
         }
     }
@@ -312,12 +315,15 @@ export async function detectCm(
      */
     const measured = await probeDuration(input);
     const { silences, duration } = await detectSilences(input, signal, onProgress, measured);
+    /*
+     * 落ちた理由まで書く。「無音 8 箇所」とだけ出していた頃は、jls を選んで
+     * いるのになぜ無音検出になったのかが画面から分からなかった
+     */
+    const note = `無音 ${silences.length} 箇所`;
     return {
         cm: detectCmRanges(silences, duration),
         duration,
-        note: logoMissing
-            ? `ロゴを当てられなかったので無音で検出 (無音 ${silences.length} 箇所)`
-            : `無音 ${silences.length} 箇所`,
+        note: fallback === '' ? note : `${note} (jls は使えず: ${fallback})`,
         logoMissing,
     };
 }

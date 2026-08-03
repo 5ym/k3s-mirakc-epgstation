@@ -60,7 +60,7 @@ export const ADDED_COLUMNS: { table: string; column: string; definition: string 
      * エンコードのコマ数をこれで決める (encoder.ts の deinterlace)。番組表の行は
      * 24時間で消えるので、録り直しのたびに引き直せるようにしておく必要がある
      */
-    { table: 'recordings', column: 'genres', definition: 'TEXT' },
+    { table: 'recordings', column: 'genre_detail', definition: 'TEXT' },
 ];
 
 export const SCHEMA = `
@@ -199,7 +199,8 @@ CREATE TABLE IF NOT EXISTS recordings (
     cm_cut TEXT NOT NULL DEFAULT 'chapter',
     codec TEXT NOT NULL DEFAULT 'av1',
     cm_ranges TEXT,   -- 検出したCM区間の JSON。UIでの確認用
-    genres TEXT,      -- JSON: lv1 の配列。エンコードのコマ数の判断に使う
+    -- JSON: [{lv1, lv2}]。エンコードのコマ数の判断に使う (国内アニメだけ30コマ)
+    genre_detail TEXT,
     -- 実際に録れた長さ。番組表の尺 (end_at - start_at) は予定でしかなく、
     -- 途中で止めたときやCMを切ったときは実物と合わない
     duration_ms INTEGER,

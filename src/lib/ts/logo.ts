@@ -13,6 +13,7 @@
  * 片方だけでは紐付かないので、両方見て初めて「この局のロゴ」になる。
  */
 
+import { withPalette } from './logo-palette';
 import { descriptors, PacketStream, SectionAssembler } from './psi';
 
 const PID_CDT = 0x0029;
@@ -34,7 +35,7 @@ export interface LogoData {
     logoId: number;
     logoType: number;
     logoVersion: number;
-    /** PNG そのまま */
+    /** そのまま画面に出せる PNG (色の表を入れ直したもの) */
     data: Uint8Array;
 }
 
@@ -44,6 +45,9 @@ export interface LogoData {
  * data_module_byte の中身 (ARIB STD-B21):
  *   logo_type 8 / reserved 7 + logo_id 9 / reserved 4 + logo_version 12 /
  *   data_size 16 / PNG
+ *
+ * PNG は色の表 (PLTE/tRNS) を抜いた形で流れてくるので、入れ直してから返す
+ * (logo-palette.ts)。抜けたままだとブラウザは何も描かない。
  */
 export function parseCdt(section: Uint8Array): LogoData | null {
     if (section[0] !== TABLE_CDT) return null;
@@ -61,7 +65,7 @@ export function parseCdt(section: Uint8Array): LogoData | null {
     at += 7;
     if (at + size > end) return null;
 
-    return { logoId, logoType, logoVersion, data: section.slice(at, at + size) };
+    return { logoId, logoType, logoVersion, data: withPalette(section.slice(at, at + size)) };
 }
 
 /**

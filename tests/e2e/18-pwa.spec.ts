@@ -67,6 +67,17 @@ test.describe('PWA', () => {
         await page.setViewportSize({ width: 390, height: 780 });
         await goto(page, '/');
         const menu = page.getByTestId('nav-menu');
+
+        /*
+         * テーマの切り替えはハンバーガーの**横**に置く。`<details>` は行を
+         * 占める箱なので、並べる指定が抜けていると切り替えが上の行へ押し出され、
+         * ヘッダーが2段ぶんの厚さになっていた
+         */
+        const theme = (await page.getByTestId('theme-toggle').boundingBox())!;
+        const burger = (await menu.locator('summary').boundingBox())!;
+        expect(Math.abs(theme.y - burger.y)).toBeLessThan(theme.height);
+        expect(theme.x).toBeLessThan(burger.x);
+
         await menu.locator('summary').click();
         await menu.getByRole('link', { name: '番組表' }).click();
         await page.waitForURL(/guide/);

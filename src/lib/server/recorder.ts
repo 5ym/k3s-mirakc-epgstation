@@ -66,7 +66,7 @@ export function createRecording(reservation: Reservation): Recording {
         .prepare(
             `INSERT INTO recordings
                 (reservation_id, program_id, service_id, service_name, name, series, subtitle,
-                 description, start_at, end_at, audio_type, genres, state, keep_original, cm_cut, codec,
+                 description, start_at, end_at, audio_type, genre_detail, state, keep_original, cm_cut, codec,
                  created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'recording', ?, ?, ?, ?, ?)`,
         )
@@ -83,7 +83,7 @@ export function createRecording(reservation: Reservation): Recording {
             reservation.end_at,
             program?.audio_type ?? null,
             // 番組表の行は24時間で消える。録り直しのときにも要るので写しておく
-            program?.genres ?? null,
+            program?.genre_detail ?? null,
             reservation.keep_original,
             reservation.cm_cut,
             reservation.codec,

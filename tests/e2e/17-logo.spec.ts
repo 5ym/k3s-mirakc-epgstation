@@ -33,6 +33,14 @@ test.describe('局ロゴ', () => {
             const logo = await request.get(`/api/services/${BS_SERVICE}/logo`);
             expect(logo.status()).toBe(200);
             expect(logo.headers()['content-type']).toContain('image/png');
+            /*
+             * 色の表を入れ直してあること。放送に乗るのはパレットの抜けた PNG で、
+             * そのまま置くとブラウザは何も描かない。実機では15局ぶん拾えているのに
+             * 番組表が空のままだった
+             */
+            const bytes = await logo.body();
+            expect(bytes.includes(Buffer.from('PLTE'))).toBeTruthy();
+            expect(bytes.includes(Buffer.from('tRNS'))).toBeTruthy();
         }).toPass({ timeout: 60_000 });
 
         // 何局ぶん持っているかはチューナー画面に出す。番組表にロゴが出ないとき、

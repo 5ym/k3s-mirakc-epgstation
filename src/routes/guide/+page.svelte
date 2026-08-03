@@ -37,6 +37,12 @@
 
     let grid = $state<HTMLElement | null>(null);
     let nowMark = $state<HTMLElement | null>(null);
+    /**
+     * チャンネル名の行の高さ。時刻を下ろしてくるときの上端に使う。
+     * 決め打ちの値だと、局ロゴが入ったり字の大きさが変わったりしたときに
+     * 数字が見出しの裏へ潜る
+     */
+    let headHeight = $state(0);
 
     /*
      * 開いたときに「いま」が見えている状態にする。24時間ぶん出るので、
@@ -102,6 +108,19 @@
 
     const prevHref = $derived(href({ start: String(data.start - data.hours * HOUR) }));
     const nextHref = $derived(href({ start: String(data.start + data.hours * HOUR) }));
+
+    /*
+     * 放送波を切り替えたら横位置を先頭へ戻す。
+     *
+     * 同じ画面のまま中身だけ入れ替わるので、DOM は使い回され、横スクロールの
+     * 位置がそのまま残る。地上波で右のほうを見ていたあと BS を開くと、
+     * 局の並びは別物なのに同じ位置から始まり、左端の局が隠れていた。
+     * 縦(時刻)はどの放送波でも同じ意味なので、そのままにする
+     */
+    $effect(() => {
+        data.type;
+        if (grid !== null) grid.scrollLeft = 0;
+    });
 
     /*
      * 前日・翌日を先に取り寄せておく。
@@ -216,15 +235,30 @@
         bind:this={grid}
         data-testid="guide-grid"
     >
+        <!--
+            **横幅を数えて入れておく。**
+
+            列の合計 (5688px) より外側の枠が狭いままだと、grid はそこからはみ出して
+            描かれるだけで、枠自体は画面の幅 (358px) のまま残る。`sticky` は
+            親の枠から外へは出られない決まりなので、時刻の列は
+            「画面の幅 − 列の幅」ぶんしか付いてこられず、そこから先は
+            置いていかれていた (390px の端末だと 302px スクロールしたところで脱落)。
+
+            幅を列の合計にしておけば、端まで付いてくる。局が少なくて画面のほうが
+            広いときは min-width で伸ばし、余りは 1fr が分け合う
+        -->
         <div
             class="grid"
             style="grid-template-columns: 3.5rem repeat({data.services
-                .length}, minmax(11rem, 1fr)); grid-template-rows: auto repeat({slots}, 0.75rem);"
+                .length}, minmax(11rem, 1fr)); grid-template-rows: auto repeat({slots}, 0.75rem); width: calc(3.5rem + {data
+                .services.length} * 11rem); min-width: 100%;"
+            data-testid="guide-rows"
         >
             <!-- 左上の角。時刻列とチャンネル行の交点で、どちらにも追従させる -->
             <div
                 class="bg-base-100 border-base-300 sticky top-0 left-0 z-30 border-r"
                 style="grid-column: 1; grid-row: 1;"
+                bind:clientHeight={headHeight}
             ></div>
             {#each data.services as service, i (service.id)}
                 <div
@@ -261,13 +295,16 @@
 
                 中の数字をもう一段 `sticky` にして、その1時間ぶんの領域の中で
                 下りてくるようにする。上端はチャンネル名の行のぶんだけ空ける
+                (高さは実測する。決め打ちだと1pxずれて数字が見出しの裏へ潜る)
             -->
             {#each hourMarks as mark (mark.at)}
                 <div
                     class="bg-base-100 border-base-300 sticky left-0 z-10 border-t border-r px-1 text-xs"
                     style="grid-column: 1; grid-row: {mark.row} / span {mark.span};"
                 >
-                    <span class="sticky top-9 block">{new Date(mark.at).getHours()}</span>
+                    <span class="sticky block" style="top: {headHeight}px;">
+                        {new Date(mark.at).getHours()}
+                    </span>
                 </div>
             {/each}
 

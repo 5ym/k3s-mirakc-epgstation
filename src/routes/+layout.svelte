@@ -94,7 +94,13 @@
         <div class="flex-1">
             <a class="btn btn-ghost text-xl" href="/">denpa</a>
         </div>
-        <nav class="flex-none items-center gap-1">
+        <!--
+            **横に並べる指定を忘れない。** `<details>` は行を占める箱なので、
+            flex にしていないとテーマの切り替えがその上の行に押し出され、
+            ヘッダーが2段ぶんの厚さになる。狭い画面ではテーマとハンバーガーが
+            横に並ぶ形にしたい
+        -->
+        <nav class="flex flex-none items-center gap-1">
             <button
                 class="btn btn-ghost btn-sm"
                 onclick={cycleTheme}
