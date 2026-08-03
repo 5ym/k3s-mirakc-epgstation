@@ -121,7 +121,7 @@ describe('.sup の組み立て', () => {
     const sample = bitmap(1440, 1080, { x: 100, y: 900, w: 200, h: 40, color: [255, 255, 255, 255] });
 
     test('出すのと消すので2組。並びは仕様どおり', () => {
-        const parts = segments(writeSup([{ start: 1, end: 3, bitmap: sample }]));
+        const parts = segments(writeSup([{ start: 0, end: 3, bitmap: sample }]));
         expect(parts.map((p) => p.type)).toEqual([
             0x16, // PCS 画面の構成
             0x17, // WDS 窓
@@ -136,8 +136,24 @@ describe('.sup の組み立て', () => {
 
     test('時刻は 90kHz 刻み', () => {
         const parts = segments(writeSup([{ start: 1.5, end: 3, bitmap: sample }]));
-        expect(parts[0].pts).toBe(135_000);
+        // 先頭の空を挟んだ次から本体
+        expect(parts[2].pts).toBe(135_000);
         expect(parts.at(-1)?.pts).toBe(270_000);
+    });
+
+    test('0秒から始まらないときは頭に空を置く', () => {
+        /*
+         * ffmpeg は入力ごとに「いつ始まるか」を引いて繋ぐので、置かないと
+         * 字幕全体が前へずれる (実機で1秒ずれた)
+         */
+        const parts = segments(writeSup([{ start: 1, end: 3, bitmap: sample }]));
+        expect(parts[0].pts).toBe(0);
+        expect(parts[0].type).toBe(0x16);
+        expect(parts[0].payload[10]).toBe(0); // 中身は無い
+        expect(parts[1].type).toBe(0x80);
+
+        // 0秒から始まるなら要らない
+        expect(segments(writeSup([{ start: 0, end: 3, bitmap: sample }]))[0].payload[10]).toBe(1);
     });
 
     test('窓は字幕のあるところだけ', () => {

@@ -403,6 +403,20 @@ export class SupWriter {
         const { entries, indices } = quantize(box.data, isBt709(videoHeight));
         const data = rle(indices, box.width, box.height);
 
+        /*
+         * **頭に「何も無い」を1つ置く。**
+         *
+         * ffmpeg は入力ごとに「その入力がいつ始まるか」を引き算して繋ぐので、
+         * 1本目の字幕が 1秒から始まる .sup をそのまま渡すと、字幕全体が1秒
+         * 前へずれて入る (実機で確認)。0秒に空の構成を置いておけば引かれない
+         */
+        if (this.captions === 0 && start > 0) {
+            this.parts.push(
+                segment(SEGMENT_PCS, 0, pcs(videoWidth, videoHeight, this.composition++, null)),
+                segment(SEGMENT_END, 0, new Uint8Array(0)),
+            );
+        }
+
         this.parts.push(
             segment(SEGMENT_PCS, start, pcs(videoWidth, videoHeight, this.composition++, box)),
             segment(SEGMENT_WDS, start, wds(box.x, box.y, box.width, box.height)),
