@@ -88,9 +88,59 @@ function syncServices(services: mirakc.MirakcService[]): number {
             database().prepare('DELETE FROM programs WHERE service_id = ?').run(id);
             database().prepare('DELETE FROM services WHERE id = ?').run(id);
         }
+        // この回で見かけなかった局の持ち物を片付ける
+        if (count > 0) canceled = forgetMissing(at);
     });
+    let canceled = 0;
     tx();
+    // 取り消した予約は一覧に出ている。同じものを見ている端末が食い違わないように
+    if (canceled > 0) emit('reservations');
     return count;
+}
+
+/**
+ * mirakc から消えた局の持ち物を片付ける。
+ *
+ * **局の行そのものは残す。** 消すと、その局で録った録画や過去の予約が辿れなくなる
+ * ([data.md](../../../docs/data.md))。片付けるのは番組表と、まだ始めていない予約。
+ *
+ * スキャンをやり直すと局は普通に入れ替わる。番組表を置いたままにしていた頃は、
+ * もう選局できない局の番組が数万件残り、検索にも引っかかり続けていた。予約のほうは
+ * 録りに行っても掴めないので、始まるのを待って失敗するより先に取り消しておく
+ * (取り消した予約は一覧から戻せる)。
+ *
+ * **1局も取れなかった回では何もしない** (`count > 0` のときだけ呼ぶ)。mirakc が
+ * 起動直後や不調で空を返すことはあり、それを「全部消えた」と読むと番組表ごと消える。
+ */
+function forgetMissing(at: number): number {
+    const stale = queryAll<{ id: number; name: string }>(
+        'SELECT id, name FROM services WHERE updated_at < ?',
+        at,
+    );
+    if (stale.length === 0) return 0;
+
+    const dropPrograms = database().prepare('DELETE FROM programs WHERE service_id = ?');
+    const cancel = database().prepare(
+        // 録り始めたものは触らない。取り消しても録画は戻らない
+        `UPDATE reservations SET state = 'canceled', updated_at = ?
+         WHERE service_id = ? AND state IN ('scheduled', 'conflict') AND started_at IS NULL`,
+    );
+    let programs = 0;
+    let reservations = 0;
+    const names: string[] = [];
+    for (const service of stale) {
+        const dropped = dropPrograms.run(service.id).changes;
+        const canceled = cancel.run(at, service.id).changes;
+        programs += dropped;
+        reservations += canceled;
+        if (dropped > 0 || canceled > 0) names.push(service.name);
+    }
+    if (programs === 0 && reservations === 0) return 0;
+    console.log(
+        `[epg] mirakc から消えた局を片付けました: ${names.join(', ')} ` +
+            `(番組 ${programs} 件 / 予約 ${reservations} 件を取り消し)`,
+    );
+    return reservations;
 }
 
 /**

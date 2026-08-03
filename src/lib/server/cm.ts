@@ -274,7 +274,7 @@ export interface CmDetection {
     cm: Range[];
     duration: number;
     note: string;
-    /** ロゴを当てられなかった。位置を教えてもらえば次から効く (jls のときだけ) */
+    /** ロゴでの判定が使えなかった。位置を教えてもらえば次から効く (jls のときだけ) */
     logoMissing: boolean;
 }
 

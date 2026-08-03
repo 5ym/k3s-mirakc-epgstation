@@ -304,9 +304,26 @@ export async function detectWithJls(
             return { cm: [], note: `${work.cut} が作られませんでした`, logoMissing };
         }
 
+        /*
+         * ここから先の失敗は**覚えているロゴのほうが怪しい**ので、位置を教える口を出す。
+         *
+         * logoframe は「合致した」と言っているのに区切りが出せていない状態で、
+         * 自動探索が拾えるのは画面の右上に**ずっと同じ縁があること**だけなので、
+         * ロゴではない縁 (常時出ている枠や字幕の下地) を覚えるとこうなる。
+         * 実機の TOKYO MX がこれで、覚えていたのは 1226,58 から 48x158 という
+         * 縦長の帯で、中身は絵になっていない雑音だった (濃さも 268/1000 止まり)。
+         *
+         * 「ロゴを見つけられなかった」ときしか出していなかった頃は、この状態が
+         * 一番直しようがなかった: 毎回 100% がCM判定で捨てられ、無音検出に落ち、
+         * しかも画面には何も出ないので、位置を教える手立てが無かった
+         */
         const keep = parseTrimRanges(avs, await probeFps(input));
         if (keep.length === 0) {
-            return { cm: [], note: `${work.cut} に Trim が含まれていませんでした`, logoMissing };
+            return {
+                cm: [],
+                note: `${work.cut} に Trim が含まれていませんでした`,
+                logoMissing: true,
+            };
         }
 
         // 番組の半分以上がCMになったら、その結果は捨てて無音検出に落とす (tooMuchCm)
@@ -315,7 +332,7 @@ export async function detectWithJls(
             return {
                 cm: [],
                 note: `番組の ${cmRatio(cm, duration)}% がCMという結果だったので捨てました`,
-                logoMissing,
+                logoMissing: true,
             };
         }
         return { cm, note: 'join_logo_scp', logoMissing };
