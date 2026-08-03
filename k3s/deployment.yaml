@@ -66,6 +66,37 @@ spec:
             path: /dev/dvb
             type: Directory
 ---
+# 新しいイメージを**入れ替える前に**ノードへ引いておくだけの Job。
+#
+# denpa は新旧2Podを並べられない (strategy: Recreate) ので、入れ替えの間は
+# 録画が途切れる。TSは追記で開いていて次の起動が続きから録り直すため、
+# 落ちるのはその隙間だけ。実機で測るとその隙間は**ほぼイメージの取得時間**だった:
+#
+#   ScalingReplicaSet (旧Podを削除) → Pulling → Pulled 13.6秒 → Started
+#
+# ArgoCD の PreSync フックはマニフェスト本体より先に走るので、ここで引いておけば
+# 入れ替えのときには `imagePullPolicy: IfNotPresent` が効いて取得が要らなくなる。
+# 中身は動かさない (/bin/true)。引くことだけが目的
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: denpa-prepull
+  namespace: denpa
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    # 前回の残骸は次に作るときに消す (成功したものを残しておくと様子が見られる)
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: prepull
+          image: ghcr.io/danything/denpa:sha-1de61d3bf0e6
+          imagePullPolicy: IfNotPresent
+          command: ['/bin/true']
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:

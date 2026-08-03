@@ -129,6 +129,30 @@ Kubernetes の `terminationGracePeriodSeconds` と docker compose の
 `stop_grace_period` を `SHUTDOWN_WAIT` より長くしておくこと。短いと待っている
 途中で SIGKILL され、居座った意味が無くなります。
 
+### 隙間はイメージの取得時間だった
+
+新旧の Pod を並べられないので、入れ替えの隙間はどうやっても空きます。実機で
+その中身を測ると、**ほとんどがイメージの取得**でした。
+
+```text
+ScalingReplicaSet (旧Podを削除) → Pulling → Pulled 13.6秒 → Started → bun 起動
+```
+
+そこで、**マニフェストを当てる前にイメージだけ引いておく** Job を ArgoCD の
+PreSync フックに置いています (`denpa-prepull`、中身は `/bin/true`)。
+これで入れ替えのときには `imagePullPolicy: IfNotPresent` が効いて取得が要らなくなり、
+隙間は起動そのものだけになります。イメージのタグは CI が `k3s/deployment.yaml` を
+まるごと `sed` で書き換えるので、この Job のぶんも自動で揃います。
+
+**録画そのものを引き継ぐことはしていません。** 引き継ぐには新旧のPodが同時に
+居る必要がありますが、denpa は1本のSQLiteに書き、スケジューラもEPG取得も
+エンコード待ち行列も抱えているので、2つ動くと全部が二重になります
+(どちらが主かを決める仕組みが別途要る)。
+きれいにやるなら**録画を mirakc 側に任せる**道があります (mirakc 3.4.79 には
+録画APIがあり、`recording.basedir` を設定すると `/api/recording/*` が生えます)。
+そうすれば denpa の入れ替えと録画が完全に切り離れますが、番組追従・スクランブル解除・
+保存名の付け方まで向こうの流儀に載せ替えることになるため、まだ手を付けていません。
+
 
 ## 放送の延長
 
