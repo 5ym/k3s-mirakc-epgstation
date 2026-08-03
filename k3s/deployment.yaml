@@ -90,7 +90,7 @@ spec:
       terminationGracePeriodSeconds: 21900
       containers:
         - name: denpa
-          image: ghcr.io/danything/denpa:sha-30a5f3d52ba7
+          image: ghcr.io/danything/denpa:sha-1de61d3bf0e6
           imagePullPolicy: IfNotPresent
           env:
             - name: TZ
