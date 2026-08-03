@@ -354,12 +354,31 @@
                                 </div>
                                 <!--
                                     重なりは**録ろうとした時点で初めて分かる**ので、
-                                    ここで先に見せる。同じ局のものは重ならない
-                                    (mirakc がチューナーを共有する)
+                                    ここで先に見せる。同じ物理チャンネルのものは
+                                    重ならない (mirakc がチューナーを配る)。
+
+                                    **重なっているものは全部出す。** 1件だけ出していた頃は、
+                                    3本ぶつかっていても1本しか見えず、どれを諦めれば
+                                    いいのかが読めなかった
                                 -->
-                                {#if program.conflict}
+                                {#if program.conflict_reason}
                                     <div class="text-error text-xs" data-testid="preview-conflict">
-                                        重なり: {program.conflict}
+                                        {program.conflict_reason}
+                                    </div>
+                                {/if}
+                                {#if program.conflicts.length > 0}
+                                    <!--
+                                        件数は本当の数、名前は先頭だけ。ゆるい条件だと
+                                        1つの番組に何十本もぶつかることがあり、全部並べると
+                                        1行が画面何個ぶんにもなる (件数さえ合っていれば
+                                        「多すぎる」ことは伝わる)
+                                    -->
+                                    <div class="text-error text-xs" data-testid="preview-conflict">
+                                        重なり {program.conflicts.length} 件: {program.conflicts
+                                            .slice(0, 3)
+                                            .join('、')}{program.conflicts.length > 3
+                                            ? ` ほか ${program.conflicts.length - 3} 件`
+                                            : ''}
                                     </div>
                                 {/if}
                             </div>
