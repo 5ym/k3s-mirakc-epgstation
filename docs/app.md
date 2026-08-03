@@ -37,6 +37,7 @@ EPGStation の置き換えとして作ったもので、エンコード設定は
 | `src/lib/server/logo.ts` | 局ロゴの収集と保存 (番組表に出すPNG) |
 | `src/lib/server/logo-data.ts` | logoframe が覚えたロゴ (`.lgd`) の置き場・読み取り・破棄 |
 | `src/lib/components/LogoArea.svelte` | CM検出用のロゴ位置を画面から教える |
+| `src/lib/components/Toasts.svelte` | 押した結果を画面の右下に浮かせて出す (本文を押し下げない) |
 | `src/lib/ts/psi.ts` | TS の PSI (NIT / SDT) を読む。チューナー側と共通 |
 | `src/lib/ts/logo.ts` | TS から局ロゴを読む (地上波は CDT、衛星は下記) |
 | `src/lib/ts/logo-dsmcc.ts` | 衛星の局ロゴをデータカルーセル (DSM-CC) から読む |

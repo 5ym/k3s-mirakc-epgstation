@@ -1,6 +1,7 @@
 <script lang="ts">
     import { untrack } from 'svelte';
     import { submitting } from '$lib/actions';
+    import Toasts, { type Notice } from '$lib/components/Toasts.svelte';
     import { liveUpdates } from '$lib/live-updates.svelte';
     import { EVENT_LABEL } from '$lib/webhook-events';
     import { dateTime } from '$lib/format';
@@ -11,6 +12,15 @@
 
     const migrate = $derived(data.migrate.status);
     const done = $derived(migrate.imported + migrate.skipped + migrate.missing);
+
+    /** 押した結果。引き継ぎの進み具合そのものは、そのカードの中に出したままにする */
+    const notices = $derived.by(() => {
+        const list: Notice[] = [];
+        if (form?.migrate) list.push({ key: 'migrate-started', kind: 'info', text: form.migrate });
+        if (form?.message) list.push({ key: 'settings-error', kind: 'error', text: form.message });
+        if (form?.saved) list.push({ key: 'saved-result', kind: 'success', text: '保存しました。' });
+        return list;
+    });
 
     // 引き継ぎは数百GBのコピーになる。進み具合はサーバから push される
 
@@ -48,17 +58,7 @@
 
 <h1 class="mb-4 text-2xl font-bold">設定</h1>
 
-{#if form?.migrate}
-    <div class="alert alert-info mb-4" data-testid="migrate-started">{form.migrate}</div>
-{/if}
-
-{#if form?.message}
-    <div class="alert alert-error mb-4" data-testid="settings-error">{form.message}</div>
-{/if}
-
-{#if form?.saved}
-    <div class="alert alert-success mb-4" data-testid="saved-result">保存しました。</div>
-{/if}
+<Toasts {notices} source={form} />
 
 <!--
     カードを縦に積むと1枚ずつが横に間延びして、下のほうは開かないと見えない。

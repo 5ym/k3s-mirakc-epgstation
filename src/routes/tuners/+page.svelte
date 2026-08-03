@@ -1,5 +1,6 @@
 <script lang="ts">
     import { submitting } from '$lib/actions';
+    import Toasts, { type Notice } from '$lib/components/Toasts.svelte';
     import { held, liveUpdates } from '$lib/live-updates.svelte';
 
     let { data, form } = $props();
@@ -77,16 +78,19 @@
         const d = new Date(at);
         return `${d.getMonth() + 1}/${d.getDate()} まで`;
     }
+
+    /** 押した結果。スキャンの経過そのものは下のカードに出したままにする */
+    const notices = $derived.by(() => {
+        const list: Notice[] = [];
+        if (form?.message) list.push({ key: 'tuner-error', kind: 'error', text: form.message });
+        if (form?.scan) list.push({ key: 'tuner-notice', kind: 'info', text: form.scan });
+        return list;
+    });
 </script>
 
 <h1 class="mb-4 text-2xl font-bold">チューナー</h1>
 
-{#if form?.message}
-    <div class="alert alert-error mb-4" data-testid="tuner-error">{form.message}</div>
-{/if}
-{#if form?.scan}
-    <div class="alert alert-info mb-4" data-testid="tuner-notice">{form.scan}</div>
-{/if}
+<Toasts {notices} source={form} />
 
 <div class="grid items-start gap-6 xl:grid-cols-2">
     <div class="flex flex-col gap-6">

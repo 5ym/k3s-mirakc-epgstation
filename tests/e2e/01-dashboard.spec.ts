@@ -128,6 +128,13 @@ test.describe('ダッシュボードと画面遷移', () => {
         await expect(page.getByTestId('reconcile-result')).toBeVisible();
         await expect(button).toBeEnabled();
         await expect(page.getByTestId('loading-bar')).not.toHaveAttribute('data-loading', 'true');
+
+        /*
+         * 知らせは右下に浮いていて、自分で閉じられる。
+         * 本文の上に差し込んでいた頃は、出た分だけ表が下へずれていた
+         */
+        await page.getByTestId('reconcile-result-close').click();
+        await expect(page.getByTestId('reconcile-result')).toHaveCount(0);
     });
 
     test('サーバ側の変化が通知で届く', async ({ page }) => {

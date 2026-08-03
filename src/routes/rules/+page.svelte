@@ -1,6 +1,7 @@
 <script lang="ts">
     import { submitting } from '$lib/actions';
     import { GENRE_TREE, genreName } from '$lib/arib';
+    import Toasts, { type Notice } from '$lib/components/Toasts.svelte';
     import { badgeClass, CM_LABEL, dateTime, stateLabel } from '$lib/format';
     import { parseSearchFields, SEARCH_FIELD_LABEL, SEARCH_FIELDS, searchFieldLabel } from '$lib/search';
 
@@ -55,13 +56,16 @@
             .map((type) => ({ type, services: data.services.filter((s) => s.type === type) }))
             .filter((g) => g.services.length > 0),
     );
+
+    /** 押した結果 */
+    const notices = $derived<Notice[]>(
+        form?.message ? [{ key: 'rule-error', kind: 'error', text: form.message }] : [],
+    );
 </script>
 
 <h1 class="mb-4 text-2xl font-bold">自動予約ルール</h1>
 
-{#if form?.message}
-    <div class="alert alert-error mb-4" data-testid="rule-error">{form.message}</div>
-{/if}
+<Toasts {notices} source={form} />
 
 <div class="card bg-base-100 mb-6 shadow">
     <div class="card-body">

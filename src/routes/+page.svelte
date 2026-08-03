@@ -2,6 +2,7 @@
     import { submitting } from '$lib/actions';
     import LogoArea from '$lib/components/LogoArea.svelte';
     import ProgramDetail from '$lib/components/ProgramDetail.svelte';
+    import Toasts, { type Notice } from '$lib/components/Toasts.svelte';
     import { liveUpdates } from '$lib/live-updates.svelte';
     import { detectPlatform, type Platform, playLinks, withCredentials } from '$lib/play';
     import {
@@ -56,13 +57,18 @@
     const downloadUrl = (id: number) =>
         withCredentials(`${origin}/api/recordings/${id}/file?download=1`, data.credentials);
 
-    /** 知らせを出しておく時間。読めるだけ出したら引っ込める */
-    let notice = $state(false);
-    $effect(() => {
-        if (form?.message === undefined && form?.reconcile === undefined) return;
-        notice = true;
-        const timer = setTimeout(() => (notice = false), 6000);
-        return () => clearTimeout(timer);
+    /** 押した結果。出す場所と消え方は Toasts が持っている */
+    const notices = $derived.by(() => {
+        const list: Notice[] = [];
+        if (form?.message) list.push({ key: 'dashboard-error', kind: 'error', text: form.message });
+        if (form?.reconcile) {
+            list.push({
+                key: 'reconcile-result',
+                kind: 'info',
+                text: `照合 ${form.reconcile.checked} 件 / 実体が無く削除済み ${form.reconcile.removed} 件`,
+            });
+        }
+        return list;
     });
 
     /** 行から開いた番組詳細。番組表と同じ見せ方をする */
@@ -267,23 +273,7 @@
 <div class="lg:flex lg:h-full lg:flex-col">
     <h1 class="mb-4 text-2xl font-bold">予約と録画</h1>
 
-    <!--
-    知らせは重ねて出す。一覧の上に差し込むと、その分だけ表が下にずれて
-    画面からはみ出し、外側にスクロールバーが生える。
-    ナビの下に置き、しばらくしたら自分で消える
--->
-    {#if notice}
-        <div class="toast toast-top toast-center top-20 z-50">
-            {#if form?.message}
-                <div class="alert alert-error" data-testid="dashboard-error">{form.message}</div>
-            {/if}
-            {#if form?.reconcile}
-                <div class="alert alert-info" data-testid="reconcile-result">
-                    照合 {form.reconcile.checked} 件 / 実体が無く削除済み {form.reconcile.removed} 件
-                </div>
-            {/if}
-        </div>
-    {/if}
+    <Toasts {notices} source={form} />
 
     <div class="grid gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-5">
         <!--
