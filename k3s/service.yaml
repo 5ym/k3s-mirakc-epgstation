@@ -1,16 +1,13 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: mirakc
+  name: tuner-agent
   namespace: denpa
 spec:
   selector:
-    app: mirakc
+    app: tuner-agent
   ports:
-    - name: http
-      port: 40772
-      targetPort: 40772
-    # チューナー側エージェント (mirakc/agent.py)
+    # 選局もスキャンもスクランブル解除もここ1つ。中身は素のTSと小さなJSON
     - name: agent
       port: 40773
       targetPort: 40773

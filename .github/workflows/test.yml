@@ -54,7 +54,7 @@ jobs:
       - name: Type check
         run: bun run check
 
-      # denpa 本体と、チューナー側エージェント (mirakc/) の両方
+      # denpa 本体と、チューナーエージェント (agent/) の両方
       - name: Unit tests
         run: bun run test:unit
 
@@ -82,7 +82,7 @@ jobs:
           fi
 
       # アプリを1度だけ組んでから、ワーカーの数だけ立てる。
-      # 偽mirakc・偽通知先もワーカーごとに1式ずつ (tests/stack.ts)
+      # 偽エージェント・偽通知先もワーカーごとに1式ずつ (tests/stack.ts)
       - name: E2E tests
         run: bun run test:e2e
 

@@ -7,15 +7,15 @@
 #
 # 手元に合わせるところは2つ。
 #   1. 下の devices  … チューナーとカードリーダーのデバイス
-#   2. ./config/config.yml の tuners … 初回起動で出てくるので、そこに書く
+#   2. ./config/tuners.yml … 初回起動で雛形が出てくるので、そこに機材を書く
 name: denpa
 
 services:
-    # チューナー制御・EPG・TS配信。
-    # PID 1 はエージェント (mirakc/agent.ts) で、mirakc を子として抱えます。
-    # チャンネルスキャンとB-CASカードの面倒を見るためです
-    mirakc:
-        image: ghcr.io/danything/mirakc:latest
+    # チューナーエージェント。**機材に触るのはここだけ**です。
+    # 選局・チャンネルスキャン・B-CASカード・スクランブル解除を持ち、
+    # 素のTSを denpa へ流します (番組表を読むのは denpa の仕事)
+    tuner-agent:
+        image: ghcr.io/danything/denpa-agent:latest
         restart: unless-stopped
         # チューナーとカードリーダーに触るため
         privileged: true
@@ -27,14 +27,12 @@ services:
             # 掛かったまま録れたTSを解く先。denpa と同じ実体を見せる
             RECORDED_DIR: /denpa-recorded
         volumes:
-            # 設定。初回起動で config.yml が出てくるので、tuners はここで直す。
-            # ファイル単位ではなくディレクトリで渡す (スキャン結果を書き戻すため)。
-            # /etc/mirakc は mirakc 自身の strings.yml が居るので使わない
+            # 設定。初回起動で tuners.yml の雛形が出てくるので、機材はそこに書く。
+            # スキャンの結果 (channels.json) も同じところへ書き戻される
             - ./config:/app-config
-            - mirakc-epg:/var/lib/mirakc/epg
             - denpa-recorded:/denpa-recorded
         ports:
-            - '40772:40772'
+            - '40773:40773'
 
     denpa:
         image: ghcr.io/danything/denpa:latest
@@ -44,12 +42,11 @@ services:
         # 録画していないときは即座に止まる
         stop_grace_period: 6h5m
         depends_on:
-            - mirakc
+            - tuner-agent
         environment:
             TZ: Asia/Tokyo
-            MIRAKC_URL: http://mirakc:40772
             # チューナーに触る仕事はすべて向こうに頼む
-            TUNER_AGENT_URL: http://mirakc:40773
+            TUNER_AGENT_URL: http://tuner-agent:40773
             DENPA_DB: /app/data/denpa.db
             RECORDED_DIR: /app/recorded
             LIBRARY_DIR: /library
@@ -62,8 +59,7 @@ services:
             - '3000:3000'
 
 volumes:
-    mirakc-epg:
     denpa-data:
-    # 生TSの作業領域。mirakc 側にも見せて、スクランブル解除をあちらにやらせる
+    # 生TSの作業領域。エージェント側にも見せて、スクランブル解除をあちらにやらせる
     denpa-recorded:
     denpa-library:

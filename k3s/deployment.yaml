@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: mirakc
+  name: tuner-agent
   namespace: denpa
 spec:
   replicas: 1
@@ -9,15 +9,15 @@ spec:
     type: Recreate
   selector:
     matchLabels:
-      app: mirakc
+      app: tuner-agent
   template:
     metadata:
       labels:
-        app: mirakc
+        app: tuner-agent
     spec:
       containers:
-        - name: mirakc
-          image: ghcr.io/danything/mirakc:sha-8979f2b6ff19
+        - name: tuner-agent
+          image: ghcr.io/danything/denpa-agent:sha-8979f2b6ff19
           imagePullPolicy: IfNotPresent
           securityContext:
             privileged: true
@@ -28,17 +28,13 @@ spec:
             - name: RECORDED_DIR
               value: /denpa-recorded
           ports:
-            - containerPort: 40772
-            # チューナー側エージェント。スキャン・カードの状態・スクランブル解除の窓口
+            # 選局・スキャン・カードの状態・スクランブル解除の窓口。**口はこれ1つ**
             - containerPort: 40773
           volumeMounts:
-            # 設定。スキャン結果が書き戻されるのでPVCに置く。
-            # /etc/mirakc は mirakc 自身の strings.yml が居るので使わない
-            - name: mirakc-config
+            # チューナーの定義 (人が書く) とスキャン結果 (エージェントが書く)。
+            # Pod を作り直しても残るように PVC に置く
+            - name: agent-config
               mountPath: /app-config
-            # mirakc が覚えている局・時刻・番組表。スキャンのたびに捨てて拾い直す
-            - name: mirakc-epg
-              mountPath: /var/lib/mirakc/epg
             - name: dev-bus
               mountPath: /dev/bus
             - name: dev-dvb
@@ -48,12 +44,9 @@ spec:
             - name: denpa-recorded
               mountPath: /denpa-recorded
       volumes:
-        - name: mirakc-config
+        - name: agent-config
           persistentVolumeClaim:
-            claimName: mirakc-config
-        - name: mirakc-epg
-          persistentVolumeClaim:
-            claimName: mirakc-epg
+            claimName: agent-config
         - name: denpa-recorded
           persistentVolumeClaim:
             claimName: denpa-recorded
@@ -136,7 +129,7 @@ spec:
             # kubelet のヘルスチェックは x-forwarded-host を付けないため
             - name: PROTOCOL_HEADER
               value: x-forwarded-proto
-            # mirakc の居場所も置き場所も、既定値がそのままここの構成になっている
+            # エージェントの居場所も置き場所も、既定値がそのままここの構成になっている
             # (src/lib/server/config.ts)。同じ値を書き写すと、片方だけ直したときに
             # どちらが効いているのか分からなくなる。
             # コーデック・CMの扱いも設定画面で決める
