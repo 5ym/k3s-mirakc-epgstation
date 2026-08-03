@@ -142,7 +142,16 @@ async function openStream(
     const res = await fetch(`${config.mirakcUrl}${path}`, {
         signal,
         headers: {
-            'X-mirakc-Priority': String(priority),
+            /*
+             * **`X-Mirakurun-Priority` でないと読まれない。** mirakc 独自の名前
+             * (`X-mirakc-Priority`) で渡していた頃は黙って捨てられていて、
+             * **録画も含めて全部が優先度 0** で動いていた。実機で確かめると、
+             * この名前なら `/api/tuners` の users に指定した値が出る。
+             *
+             * **0 より下は指定できない** (負の値は 0 に丸められる)。−1 は mirakc が
+             * 自分の番組表集めに使う値で、そこへは web の口から入れない
+             */
+            'X-Mirakurun-Priority': String(priority),
             'User-Agent': `denpa (${use})`,
             ...headers,
         },

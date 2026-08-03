@@ -28,9 +28,10 @@ interface TunerUser {
  * (`/api/tuners` の `users[].id` が `job:` で始まり、User-Agent は付かない)
  */
 const JOBS: Record<string, string> = {
-    'epg.scan-services': '局を調べています',
-    'epg.update-schedules': '番組表を集めています',
-    'epg.sync-clocks': '時刻を合わせています',
+    // 物理チャンネルを1つずつ選局して、そこに何局乗っているかを調べている
+    'epg.scan-services': 'どの局が受信できるか調べています',
+    'epg.update-schedules': '番組表 (EPG) を集めています',
+    'epg.sync-clocks': '放送の時刻に合わせています',
 };
 
 /**

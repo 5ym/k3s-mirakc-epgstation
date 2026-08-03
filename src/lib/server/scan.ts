@@ -71,12 +71,20 @@ async function watch(): Promise<void> {
     try {
         for (;;) {
             await Bun.sleep(2000);
+            const before = JSON.stringify(current);
             try {
                 current = await fetchStatus();
             } catch (error) {
                 current = { ...current, state: 'failed', error: String(error) };
             }
-            emit('scan');
+            /*
+             * **変わったときだけ知らせる。** 毎回流していた頃は、チューナー画面が
+             * 2秒に1回まるごと読み直されていた (知らせを受けた画面は load を
+             * やり直すので、mirakc への問い合わせも2秒ごとに走っていた)。
+             * こちら側が覗きに行くのは相手 (エージェント) に押す口が無いためで、
+             * 画面まで同じ間隔で叩く理由は無い
+             */
+            if (JSON.stringify(current) !== before) emit('scan');
             if (current.state !== 'running') break;
         }
 

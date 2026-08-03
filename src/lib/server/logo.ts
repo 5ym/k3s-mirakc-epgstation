@@ -42,17 +42,14 @@ const SWEEP_TIMEOUT_SATELLITE = 10 * 60_000;
  */
 const RIDE_TIMEOUT = 3 * 60_000;
 /**
- * ロゴを取りに行くときの優先度。**いちばん下。**
+ * ロゴを取りに行くときの優先度。**web の口から指定できるいちばん下が 0。**
  *
- * 録画 (2) はもちろん、**mirakc 自身の番組表集め (-1) にも譲る**。ロゴは
- * 出なくても番組表は読めるが、番組情報が来なければ何も予約できない。
- * 0 にしていた頃はこちらが番組表集めを追い出していて、分単位で開くぶん
- * mirakc が番組表を埋めるのを邪魔していた。
+ * −2 を渡しても mirakc は 0 に丸める (実機で確認)。−1 は mirakc が自分の
+ * 番組表集めに使う値で、そこへは外から入れない。つまり**優先度では譲れない**。
  *
- * 途中で奪われても構わない。掴めた間に来たぶんは拾ってあるし、
- * 10分ごとにまた取りに行く
+ * 代わりに `collectingEpg` で譲る。番組表を集めている間はこちらから開かない
  */
-const SWEEP_PRIORITY = -2;
+const SWEEP_PRIORITY = 0;
 /**
  * 画面から取りに行くときに同時に開く地上波の数。
  *
@@ -344,13 +341,32 @@ async function collect(target: Target, timeout: number, signal?: AbortSignal): P
  */
 async function freeTuners(type: string): Promise<number> {
     try {
-        return (await getTuners()).filter(
-            (tuner) => tuner.isFree === true && tuner.types.includes(type as ChannelType),
-        ).length;
+        const tuners = (await getTuners()).filter((tuner) => tuner.types.includes(type as ChannelType));
+        // その種別で番組表を集めている間はこちらから開かない (下記)
+        if (collectingEpg(tuners)) return 0;
+        return tuners.filter((tuner) => tuner.isFree === true).length;
     } catch {
         // mirakc に聞けないなら開きに行かない
         return 0;
     }
+}
+
+/**
+ * mirakc がいま番組表を集めているか。**渡すのはその種別のチューナーだけ。**
+ *
+ * **優先度では譲れないので、開くかどうかで譲る。** 番組表集めの優先度は −1 で、
+ * web の口から指定できるのは 0 が下限なので、こちらが空きを取ってしまうと
+ * あちらが待たされる。ロゴが出なくても番組表は読めるが、番組情報が来なければ
+ * 何も予約できない。集めている間はこちらが引く。
+ *
+ * 衛星のチューナーで集めているからといって地上波まで止める必要はないので、
+ * 種別で絞ってから見る。
+ *
+ * 見分けは掴んでいる相手のID (`job:epg....`)。mirakc 自身の仕事には
+ * User-Agent が付かない。
+ */
+function collectingEpg(tuners: MirakcTuner[]): boolean {
+    return tuners.some((tuner) => (tuner.users ?? []).some((user) => user.id.startsWith('job:epg.')));
 }
 
 /** いま mirakc が開けている物理チャンネル。選局コマンドから読む */

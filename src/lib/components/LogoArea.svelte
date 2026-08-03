@@ -95,14 +95,11 @@
     /**
      * logoframe が**いま覚えているロゴ**。
      *
-     * 覚えているものが絵になっていないことがある。自動探索は「画面の右上にずっと
-     * 同じ縁があること」しか見ないので、ロゴではない縁 (常時出ている枠や下地) を
-     * 拾うと、毎フレーム合致するのに雑音のまま残る。実機の TOKYO MX がこれで、
-     * 確かめる手立てが無いと「なぜ当たらないのか」が分からなかった。
+     * 自動探索は「画面の右上にずっと同じ縁があること」しか見ないので、ロゴでない
+     * 縁を拾うこともある。CM判定が当たらないときに、覚えているものが絵になって
+     * いるのかどうかを確かめる手立てが無いと、どこを直せばいいのか分からない。
      */
     let learned = $state<{ url: string; area: string; depth: number } | null>(null);
-    /** これを下回る濃さは、ロゴではない何かを覚えているとみなす */
-    const FAINT = 500;
     $effect(() => {
         // 位置を教え直すと覚えているものは捨てられる。保存後に消えるのが正しい
         void area;
@@ -148,12 +145,18 @@
     let placed = $state('');
     $effect(() => {
         const s = scale;
-        if (s === null || area === null || area === '') return;
+        if (s === null) return;
+        const current = area ?? '';
         // 同じ範囲を置き直さない (引いた枠を毎回上書きしてしまう)
-        if (placed === area) return;
-        const [x, y, w, h] = area.split(',').map(Number);
+        if (placed === current) return;
+        placed = current;
+        // 「自動に戻す」で消えたぶんは枠も消す。残っていると消せたのか分からない
+        if (current === '') {
+            box = null;
+            return;
+        }
+        const [x, y, w, h] = current.split(',').map(Number);
         if (![x, y, w, h].every(Number.isFinite)) return;
-        placed = area;
         box = { x: x * s.x, y: y * s.y, w: w * s.x, h: h * s.y };
     });
 
@@ -243,6 +246,15 @@
         <strong>ロゴを四角で囲って</strong>ください。枠は<strong>掴んで動かせます</strong>。
         次のエンコードから使います。
     </p>
+    <!--
+        きっちり囲うと失敗する。実機の TOKYO MX で試すと、文字ぴったりの
+        146×24 では「有効な画素が少なすぎる」と弾かれ、周りを空けた 200×70 で
+        初めて覚えられた。まわりの背景も見て判断しているらしい
+    -->
+    <p class="text-base-content/60 mt-1 text-xs">
+        <strong>ロゴのまわりを少し広めに</strong>囲ってください。文字にぴったり合わせると、
+        まわりの背景が足りずに覚えられないことがあります。
+    </p>
 
     <!--
         覚えているものを見せる。絵になっていないことがあり (ロゴではない縁を拾った)、
@@ -266,15 +278,11 @@
                 <div class="text-base-content/60" data-testid="logo-learned-depth">
                     濃さ {learned.depth} / 1000
                 </div>
-                {#if learned.depth < FAINT}
-                    <!--
-                        薄いものは、毎フレーム合致するのに絵にならない。
-                        実機の TOKYO MX は 268 で、中身は横縞の雑音だった
-                    -->
-                    <div class="text-warning mt-0.5" data-testid="logo-learned-faint">
-                        薄すぎます。ロゴではない縁を覚えている可能性が高いです
-                    </div>
-                {/if}
+                <!--
+                    濃さの低さだけでは良し悪しを決められない。半透明の細い文字の
+                    ロゴ (TOKYO MX) は、ちゃんと写っていても 241/1000 しか出ない。
+                    絵を見て判断してもらう
+                -->
                 <div class="text-base-content/60 mt-0.5">
                     濃さを明るさにした白黒です (いちばん濃いところが白)。位置を教えると覚え直します。
                 </div>

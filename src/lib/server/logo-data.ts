@@ -19,9 +19,8 @@ import { config } from './config';
  * 局ごとの入れ物にしておけば、位置を教え直したときに丸ごと捨てられる。
  *
  * **捨てられることが要る。** `-logo-area` はロゴを覚えるときにしか効かず、
- * 既に覚えているものがあれば合致率が落ちるまで作り直さない。実機では
- * TOKYO MX が「合致はしているのに結果の 100% がCM判定」のまま動かなくなり、
- * 位置を教えても覚えているほうが使われ続けていた。
+ * 既に覚えているものがあれば合致率が落ちるまで作り直さない。捨てられないと、
+ * 位置を教えても覚えているほうが使われ続ける。
  */
 export function logoRepo(serviceId: number | undefined): string {
     return serviceId === undefined ? config.jlsLogoDir : join(config.jlsLogoDir, String(serviceId));
@@ -42,9 +41,13 @@ export function forgetLogoData(serviceId: number): void {
  * 0x00 char[28] "<logo data file ver0.1>" + NUL 詰め
  * 0x1C uint32BE 入っているロゴの数 (denpa の使い方では常に1)
  * 0x20 char[32] 局名
- * 0x40 int16LE  x, y, 幅, 高さ, fi, fo, st, ed
+ * 0x40 int16LE  x, y, 高さ, 幅, fi, fo, st, ed
  * 0x50 以降     画素ごとに int16LE × 6 (dp_y, y, dp_cb, cb, dp_cr, cr)
  * ```
+ *
+ * **高さが先。** `-logo-area x,y,w,h` を渡して書かせたものと突き合わせて確かめた
+ * (`200,70` を渡すと 0x44 に 70、0x46 に 200 が入る)。逆に読んでいた頃は、
+ * 画面に出る枠も絵も転置されていた。
  *
  * 色は使われていない。実機の `.lgd` は cb/cr が全画素 0 で、意味を持つのは
  * **濃さ (dp_y)** だけだった。y は int16 の端まで振り切れていて色にならない。
@@ -65,9 +68,8 @@ export interface LearnedLogo {
     /**
      * いちばん濃いところ (0〜1000)。
      *
-     * ここが低いものは**ロゴではない何かを覚えている**。自動探索は「画面の右上に
-     * ずっと同じ縁があること」しか見ないので、常時出ている枠や下地を拾うと、
-     * 毎フレーム合致するのに絵にならない雑音が残る (実機の TOKYO MX で 268)
+     * **低い = 駄目、とは限らない。** 半透明の細い文字のロゴ (TOKYO MX) は、
+     * ちゃんと写っていても 241 しか出ない。良し悪しは絵を見て決めてもらう
      */
     depth: number;
     /**
@@ -109,8 +111,8 @@ export function readLearnedLogo(serviceId: number): LearnedLogo | null {
     const name = new TextDecoder().decode(bytes.subarray(32, 64)).replace(/\0.*$/, '');
     const x = view.getInt16(64, true);
     const y = view.getInt16(66, true);
-    const width = view.getInt16(68, true);
-    const height = view.getInt16(70, true);
+    const height = view.getInt16(68, true);
+    const width = view.getInt16(70, true);
     if (width <= 0 || height <= 0) return null;
     if (bytes.length < HEADER + width * height * PIXEL) return null;
 

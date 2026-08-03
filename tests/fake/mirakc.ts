@@ -521,7 +521,12 @@ Bun.serve({
             return json(
                 TUNERS.map((tuner) => {
                     if (!busyTuners) return tuner;
-                    if (tuner.index === 1) {
+                    /*
+                     * 塞がっているのは**衛星のチューナー**にしてある。地上波を
+                     * 塞ぐと、同時に走っている局ロゴのテストが「地上波の空きが
+                     * 無い」で始められなくなる (偽 mirakc は spec をまたいで共有)
+                     */
+                    if (tuner.index === 0) {
                         return {
                             ...tuner,
                             isFree: false,

@@ -81,6 +81,18 @@
         area: string | null;
     } | null>(null);
 
+    /**
+     * 詳細に出すロゴの設定は**その場で引き直す**。
+     *
+     * 開いたときの写しを持っていた頃は、「自動に戻す」を押しても画面には
+     * 消したはずの範囲が出たままだった (保存はできている)。
+     */
+    const detailArea = $derived(
+        detailLogo === null
+            ? null
+            : (data.recordings.find((rec) => rec.service_id === detailLogo?.serviceId)?.logo_area ?? null),
+    );
+
     /** 続けて別の行を押したとき、遅れて届いた前の結果で上書きされないようにする */
     let opened = 0;
 
@@ -668,7 +680,7 @@
                     recordingId={detailLogo.recordingId}
                     serviceId={detailLogo.serviceId}
                     serviceName={detailLogo.serviceName}
-                    area={detailLogo.area}
+                    area={detailArea}
                 />
             {/if}
         {/snippet}

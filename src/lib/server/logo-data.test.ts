@@ -27,8 +27,9 @@ function write(serviceId: number, box: { x: number; y: number; w: number; h: num
     bytes.set(new TextEncoder().encode('TEST'), 32);
     view.setInt16(64, box.x, true);
     view.setInt16(66, box.y, true);
-    view.setInt16(68, box.w, true);
-    view.setInt16(70, box.h, true);
+    // 高さが先。実機の .lgd と突き合わせて確かめた並び
+    view.setInt16(68, box.h, true);
+    view.setInt16(70, box.w, true);
     for (let i = 0; i < box.w * box.h; i++) {
         view.setInt16(HEADER + i * PIXEL, depths[i] ?? 0, true);
     }

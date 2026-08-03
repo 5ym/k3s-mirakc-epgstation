@@ -51,11 +51,11 @@ test.describe('チューナー画面', () => {
          * mirakc が持っているのは User-Agent だけで、渡していなかった頃は
          * `Bun/1.3.14` と出るだけだった。録画なのかロゴ集めなのか読めない
          */
-        const using = tuners.getByTestId('tuner-row').nth(1);
+        const using = tuners.getByTestId('tuner-row').nth(0);
         await expect(using).toContainText('使用中');
         await expect(using.getByTestId('tuner-user').first()).toContainText('録画');
         // mirakc 自身の仕事は User-Agent が付かない。ID から読み解く
-        await expect(using.getByTestId('tuner-user').nth(1)).toContainText('番組表を集めています');
+        await expect(using.getByTestId('tuner-user').nth(1)).toContainText('mirakc: 番組表');
         // 故障は空き/使用中より先に出す。直さないと録れない
         await expect(tuners.getByTestId('tuner-row').nth(3)).toContainText('故障');
 
