@@ -199,6 +199,32 @@ describe('.sup の組み立て', () => {
         expect(pds.payload).toHaveLength(2 + 256 * 5);
     });
 
+    test('同じ絵が続いたら消して出し直さず、終わりだけ延ばす', () => {
+        /*
+         * 絵は字幕が出ている間ずっと1秒おきに流れてくる。そのまま書くと
+         * 同じ時刻に「消す」と「出す」が並び、1枚30KBが毎秒増える
+         * (実機の5分の番組で57枚 → まとめると11枚)
+         */
+        const writer = new SupWriter();
+        writer.add(sample, 0, 1);
+        writer.add(sample, 1, 2);
+        writer.add(sample, 2, 3);
+        expect(writer.captions).toBe(1);
+
+        const parts = segments(writer.bytes());
+        expect(parts.map((p) => p.type)).toEqual([0x16, 0x17, 0x14, 0x15, 0x80, 0x16, 0x17, 0x80]);
+        // 消す時刻が最後まで延びている
+        expect(parts.at(-1)?.pts).toBe(3 * 90_000);
+    });
+
+    test('絵が変われば出し直す', () => {
+        const other = bitmap(1440, 1080, { x: 100, y: 900, w: 200, h: 40, color: [255, 0, 0, 255] });
+        const writer = new SupWriter();
+        writer.add(sample, 0, 1);
+        writer.add(other, 1, 2);
+        expect(writer.captions).toBe(2);
+    });
+
     test('中身の無い絵は入れない', () => {
         const writer = new SupWriter();
         writer.add({ width: 8, height: 8, data: new Uint8Array(8 * 8 * 4) }, 0, 1);

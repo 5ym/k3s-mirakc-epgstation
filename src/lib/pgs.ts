@@ -393,15 +393,40 @@ function concat(parts: Uint8Array[]): Uint8Array {
 export class SupWriter {
     private readonly parts: Uint8Array[] = [];
     private composition = 0;
+    /** 直前に入れた1枚。同じ絵が続くときに終わりだけ延ばすため */
+    private previous: { box: Cropped; end: number } | null = null;
     /** 入れた字幕の枚数。中身の無い絵は数えない */
     captions = 0;
 
     add(bitmap: Bitmap, start: number, end: number): void {
         const box = crop(bitmap);
-        if (box === null) return;
+        if (box === null) {
+            this.previous = null;
+            return;
+        }
         const { width: videoWidth, height: videoHeight } = bitmap;
         const { entries, indices } = quantize(box.data, isBt709(videoHeight));
         const data = rle(indices, box.width, box.height);
+
+        /*
+         * **同じ絵が続いたら、消して出し直さずに終わりを延ばす。**
+         *
+         * 絵は字幕が出ている間ずっと1秒おきに流れてくるので、そのまま書くと
+         * 同じ時刻に「消す」と「出す」が並び、1枚30KBが毎秒増える。実機の5分の
+         * 番組で57枚になったところが、まとめると11枚 (字幕の数そのもの) になる
+         */
+        const last = this.previous;
+        if (last !== null && last.end === start && sameImage(last.box, box)) {
+            // 直前に書いた「消す」3つを、新しい終わりの時刻で置き直す
+            this.parts.length -= 3;
+            this.parts.push(
+                segment(SEGMENT_PCS, end, pcs(videoWidth, videoHeight, this.composition++, null)),
+                segment(SEGMENT_WDS, end, wds(box.x, box.y, box.width, box.height)),
+                segment(SEGMENT_END, end, new Uint8Array(0)),
+            );
+            this.previous = { box, end };
+            return;
+        }
 
         /*
          * **頭に「何も無い」を1つ置く。**
@@ -427,12 +452,21 @@ export class SupWriter {
             segment(SEGMENT_WDS, end, wds(box.x, box.y, box.width, box.height)),
             segment(SEGMENT_END, end, new Uint8Array(0)),
         );
+        this.previous = { box, end };
         this.captions++;
     }
 
     bytes(): Uint8Array {
         return concat(this.parts);
     }
+}
+
+/** 同じ場所に同じ絵か。色まで見る (走り書きだけだと、色違いの同じ形が一致してしまう) */
+function sameImage(a: Cropped, b: Cropped): boolean {
+    if (a.x !== b.x || a.y !== b.y || a.width !== b.width || a.height !== b.height) return false;
+    if (a.data.length !== b.data.length) return false;
+    for (let i = 0; i < a.data.length; i++) if (a.data[i] !== b.data[i]) return false;
+    return true;
 }
 
 /** 並べて渡す形。試験と、短いものを一度に作るとき用 */
