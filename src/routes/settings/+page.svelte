@@ -107,6 +107,31 @@
                             </span>
                         {/if}
                     </label>
+                    <!--
+                        **並びは話題ごとに。** 2列に流し込むので、DOM の順がそのまま
+                        「どれとどれが同じ行に来るか」になる。CM の2つ (切り方・探し方) が
+                        斜めに離れていた頃は、同じ話の設定に見えなかった。
+                        1行目は「出来上がるもの」(コーデックと生TS)、2行目は CM。
+
+                        生TSを残すか・無料放送だけにするかも、ここで決める。
+                        画面に出していなかった頃は、保存を押すたびに未送信のチェックボックスとして
+                        全部 false で上書きされていた
+                    -->
+                    <label class="flex cursor-pointer items-start gap-2 sm:self-center">
+                        <input
+                            type="checkbox"
+                            name="keepOriginal"
+                            bind:checked={recording.keepOriginal}
+                            class="checkbox checkbox-sm mt-0.5"
+                            data-testid="global-keep"
+                        />
+                        <span class="text-sm">
+                            生TSも残す
+                            <span class="text-base-content/60 block text-xs">
+                                エンコードしたあとも元のTSを消しません。容量を食います
+                            </span>
+                        </span>
+                    </label>
                     <label class="flex flex-col gap-1">
                         <span class="text-sm font-medium">CM</span>
                         <select name="cmCut" class="select select-bordered w-full" data-testid="global-cmcut">
@@ -141,26 +166,6 @@
                         同じ絵が並ぶだけで時間とサイズが倍になる。番組のジャンル (中分類まで)
                         で決まる (src/lib/server/encoder.ts の smoothMotionFor)
                     -->
-                    <!--
-                        生TSを残すか・無料放送だけにするかも、ここで決める。
-                        画面に出していなかった頃は、保存を押すたびに未送信のチェックボックスとして
-                        全部 false で上書きされていた
-                    -->
-                    <label class="flex cursor-pointer items-start gap-2">
-                        <input
-                            type="checkbox"
-                            name="keepOriginal"
-                            bind:checked={recording.keepOriginal}
-                            class="checkbox checkbox-sm mt-0.5"
-                            data-testid="global-keep"
-                        />
-                        <span class="text-sm">
-                            生TSも残す
-                            <span class="text-base-content/60 block text-xs">
-                                エンコードしたあとも元のTSを消しません。容量を食います
-                            </span>
-                        </span>
-                    </label>
                     <label class="flex cursor-pointer items-start gap-2 sm:col-span-2">
                         <input
                             type="checkbox"
