@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { type Assignable, assign } from './conflict';
+import { type Assignable, assign, contending, type Occupant, rivalsOf } from './conflict';
 
 function res(over: Partial<Assignable> & { id: number }): Assignable {
     return {
@@ -134,5 +134,77 @@ describe('assign (前後マージン)', () => {
             MARGINS,
         );
         expect(accepted).toHaveLength(2);
+    });
+});
+
+/**
+ * ルール画面のプレビューが出す「チューナーの取り合い」。
+ *
+ * 数え方は `assign` と同じ。ここだけズレると、画面が競合と言っているのに
+ * スケジューラは通す (逆もある) ことになる。
+ */
+function occ(over: Partial<Occupant> & { programId: number }): Occupant {
+    return {
+        name: `番組${over.programId}`,
+        serviceName: '局',
+        type: 'GR',
+        channel: 'T16',
+        start_at: 0,
+        end_at: 60,
+        ...over,
+    };
+}
+
+const NO_MARGIN = { start: 0, end: 0 };
+
+function against(row: Occupant, others: Occupant[], capacity: Map<string, number>): string[] {
+    return contending(row, rivalsOf([row, ...others], NO_MARGIN), capacity, NO_MARGIN);
+}
+
+describe('チューナーの取り合い (プレビュー)', () => {
+    test('種別が違えば取り合わない。衛星に地上波は出さない', () => {
+        /*
+         * 実機で出ていたやつ。チューナーは GR / BS・CS で別々に刺さっているのに、
+         * 全部まとめて数えていたので衛星の番組に地上波の番組が並んでいた
+         */
+        const bs = occ({ programId: 1, type: 'BS', channel: 'BS15_0' });
+        const gr = occ({ programId: 2, type: 'GR', channel: 'T16' });
+        expect(against(bs, [gr], new Map([['BS', 1]]))).toEqual([]);
+    });
+
+    test('本数に収まっていれば、重なっていても出さない', () => {
+        const mine = occ({ programId: 1, channel: 'T16' });
+        const other = occ({ programId: 2, channel: 'T21' });
+        // 地上波2本あるので、別チャンネル2番組は録れる
+        expect(against(mine, [other], new Map([['GR', 2]]))).toEqual([]);
+        // 1本しかなければ取り合う
+        expect(against(mine, [other], new Map([['GR', 1]]))).toEqual(['番組2 (局)']);
+    });
+
+    test('同じ物理チャンネルは1本で足りるので数にも名前にも入れない', () => {
+        const mine = occ({ programId: 1, channel: 'T16' });
+        const sameCh = occ({ programId: 2, channel: 'T16' });
+        expect(against(mine, [sameCh], new Map([['GR', 1]]))).toEqual([]);
+    });
+
+    test('足りないときは相手を全部返す', () => {
+        const mine = occ({ programId: 1, channel: 'T16' });
+        const a = occ({ programId: 2, channel: 'T21' });
+        const b = occ({ programId: 3, channel: 'T25' });
+        expect(against(mine, [a, b], new Map([['GR', 1]])).sort()).toEqual(['番組2 (局)', '番組3 (局)']);
+    });
+
+    test('互いに重なっていない相手を足し合わせない', () => {
+        // 自分 0-60 / A 0-20 / B 40-60。同時に要るのは常に2チャンネルまで
+        const mine = occ({ programId: 1, channel: 'T16', start_at: 0, end_at: 60 });
+        const a = occ({ programId: 2, channel: 'T21', start_at: 0, end_at: 20 });
+        const b = occ({ programId: 3, channel: 'T25', start_at: 40, end_at: 60 });
+        expect(against(mine, [a, b], new Map([['GR', 2]]))).toEqual([]);
+    });
+
+    test('本数が分からないときは何も言わない', () => {
+        const mine = occ({ programId: 1, channel: 'T16' });
+        const other = occ({ programId: 2, channel: 'T21' });
+        expect(against(mine, [other], new Map())).toEqual([]);
     });
 });

@@ -323,8 +323,21 @@
                     bind:this={nowMark}
                     data-testid="now-line"
                 >
+                    <!--
+                        時刻の札は**横スクロールに付いてこさせる。**
+
+                        `absolute left-0` で置いていた頃は、線を引いている枠
+                        (`grid-column: 1 / -1`) の左端に貼り付くので、右へスクロールすると
+                        表の外へ流れて見えなくなっていた。線だけが残って、それが何時の線
+                        なのか読めない。
+
+                        `sticky` は流れの中に居ないと効かないので `absolute` はやめて、
+                        線の上に被せるのは負のマージンでやる。`left` は時刻の列 (3.5rem)
+                        のぶんだけ空ける — 0 にすると、同じく `sticky left-0` で
+                        置いてある時刻の列と重なって、どちらも読めなくなる
+                    -->
                     <span
-                        class="bg-error text-error-content absolute -top-2 left-0 rounded px-1 text-[10px] leading-4"
+                        class="bg-error text-error-content sticky left-14 z-20 -mt-2 inline-block rounded px-1 text-[10px] leading-4"
                     >
                         {time(clock)}
                     </span>

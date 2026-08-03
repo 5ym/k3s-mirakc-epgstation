@@ -2,11 +2,12 @@ import { fail, redirect } from '@sveltejs/kit';
 import { genreName } from '$lib/arib';
 import { parseSearchFields } from '$lib/search';
 import { config } from '$lib/server/config';
+import { contending, type Occupant, rivalsOf } from '$lib/server/conflict';
 import { database, now, queryAll, queryOne } from '$lib/server/db';
 import { CURRENT_SERVICES } from '$lib/server/epg';
 import { cancel } from '$lib/server/reservations';
 import { applyRules, compile, haystack, matchesCompiled } from '$lib/server/rules';
-import { resolveConflicts } from '$lib/server/scheduler';
+import { resolveConflicts, tunerCapacity } from '$lib/server/scheduler';
 import { settings } from '$lib/server/settings';
 import type { Program, Rule, Service } from '$lib/types';
 
@@ -78,7 +79,7 @@ export interface PreviewRow {
     reservation_state: string | null;
     /** いまの条件に当たるか。false なら「条件から外れたが予約は残っている」 */
     matched: boolean;
-    /** 重なっている他の番組。**全部**入れる。無ければ空 */
+    /** チューナーを取り合う他の番組。**全部**入れる。取り合わなければ空 */
     conflicts: string[];
     /** スケジューラが既にチューナー不足と判断していれば、その理由 */
     conflict_reason: string | null;
@@ -91,6 +92,8 @@ interface Pending {
     name: string;
     service_id: number;
     service_name: string;
+    /** チャンネル種別 (GR/BS/CS)。チューナーはこの単位で本数が決まる */
+    type: string;
     /** 物理チャンネル。同じチャンネルなら1本のチューナーで足りる */
     channel: string;
     start_at: number;
@@ -99,99 +102,23 @@ interface Pending {
     conflict_reason: string | null;
 }
 
-/**
- * 同じ時間帯にチューナーを掴むもの。
- *
- * **予約とプレビューを1つに混ぜて数える。** 立っている予約としか突き合わせて
- * いなかった頃は、**まだ保存していないルールでは重なりが1件も出なかった**
- * (予約がまだ無いので比べる相手が居ない)。ルールが同時に3本録ろうとしていても
- * 画面は静かなままで、保存して初めて競合が出ていた。
- */
-interface Occupant {
-    programId: number;
-    name: string;
-    serviceName: string;
-    channel: string;
-    start_at: number;
-    end_at: number;
-}
-
-/**
- * 時間が重なっている他の番組を**全部**返す。
- *
- * **前後のマージンぶんチューナーを掴む時間は延びる。** 22:00 終了と 22:00 開始は
- * 実際には重なるので、番組の時刻そのままで見ると重なりを見落とす (conflict.ts と
- * 同じ物差し)。
- *
- * 重ならないのは**同じ物理チャンネル**のもの (mirakc が1本のチューナーを配る)。
- * 局で見ていた頃は、テレ東1と2のように同じチャンネルに相乗りしている局まで
- * 「重なっている」と出していた。conflict.ts と同じ物差しにそろえる。
- *
- * 最初の1件しか返していなかった頃は、3本重なっていても画面には1本ぶんしか
- * 出ず、どれを諦めればいいのかが読めなかった。
- */
-function overlapping(
-    row: { programId: number; channel: string; start_at: number; end_at: number },
-    rivals: Rivals,
-): string[] {
-    const from = row.start_at - config.startMargin;
-    const to = row.end_at + config.endMargin;
-
-    const found: string[] = [];
-    // 総当たりにしない。ゆるい条件のルールは数千件に当たるので、
-    // 1件ずつ全件と突き合わせると番組表の二乗ぶん回ることになる
-    for (let at = rivals.from(from); at < rivals.list.length; at++) {
-        const other = rivals.list[at];
-        // 並びは開始順。これより後ろは全部この番組より後に始まる
-        if (other.start_at - config.startMargin >= to) break;
-        if (other.programId === row.programId || other.channel === row.channel) continue;
-        if (other.end_at + config.endMargin <= from) continue;
-        found.push(`${other.name} (${other.serviceName})`);
-    }
-    return found;
-}
-
-/**
- * 重なりを探す相手。**開始順に並べて、探し始める位置を引けるようにしておく。**
- *
- * 番組は開始順に並べられるが、終了順ではない。ある時刻に掛かっているものを
- * 探すには「いちばん長い番組のぶんだけ手前」から見れば取りこぼさない。
- */
-interface Rivals {
-    list: Occupant[];
-    /** その時刻に掛かっている可能性のある、いちばん手前の位置 */
-    from(at: number): number;
-}
-
-function rivalsOf(occupants: Iterable<Occupant>): Rivals {
-    const list = [...occupants].sort((a, b) => a.start_at - b.start_at);
-    const longest = list.reduce((max, o) => Math.max(max, o.end_at - o.start_at), 0);
-    const slack = longest + config.startMargin + config.endMargin;
-    return {
-        list,
-        from(at: number): number {
-            // 開始が (at - いちばん長い番組) より前のものは、もう終わっている
-            let low = 0;
-            let high = list.length;
-            while (low < high) {
-                const mid = (low + high) >> 1;
-                if (list[mid].start_at < at - slack) low = mid + 1;
-                else high = mid;
-            }
-            return low;
-        },
-    };
-}
-
-export function load({ url }) {
+export async function load({ url }) {
     const defaults = settings();
+    /*
+     * チューナーの本数。**スケジューラと同じところから取る。**
+     * 取れなければ空 (= 何も競合として出さない)。mirakc が落ちているときに
+     * 予約表を赤くしても直しようが無いので、スケジューラもそう振る舞う
+     */
+    const capacity = await tunerCapacity().catch(() => new Map<string, number>());
+    // 掴む区間は前後マージンぶん延びる。スケジューラと同じ物差しで数える
+    const margins = { start: config.startMargin, end: config.endMargin };
     // ?edit=<id> のときは、そのルールをフォームに読み込んで書き換えられるようにする
     const editing = queryOne<Rule>('SELECT * FROM rules WHERE id = ?', Number(url.searchParams.get('edit')));
 
     /** まだ録っていない予約。重なりの判定と、条件から外れた予約を出すのに使う */
     const pending = queryAll<Pending>(
         `SELECT r.id, r.rule_id, r.program_id, r.name, r.service_id, r.start_at, r.end_at, r.state,
-                r.conflict_reason, s.name AS service_name, s.channel AS channel
+                r.conflict_reason, s.name AS service_name, s.type AS type, s.channel AS channel
          FROM reservations r
          JOIN services s ON s.id = r.service_id
          WHERE r.state IN ('scheduled', 'conflict') AND r.started_at IS NULL
@@ -239,6 +166,7 @@ export function load({ url }) {
                 programId: p.id,
                 name: p.name,
                 serviceName: p.service_name,
+                type: p.service_type,
                 channel: p.service_channel,
                 start_at: p.start_at,
                 end_at: p.end_at,
@@ -249,12 +177,13 @@ export function load({ url }) {
                 programId: row.program_id,
                 name: row.name,
                 serviceName: row.service_name,
+                type: row.type,
                 channel: row.channel,
                 start_at: row.start_at,
                 end_at: row.end_at,
             });
         }
-        const rivals = rivalsOf(occupants.values());
+        const rivals = rivalsOf(occupants.values(), margins);
 
         const rows: PreviewRow[] = hits.map((p) => {
             const held = reserved.get(p.id) ?? null;
@@ -272,14 +201,17 @@ export function load({ url }) {
                  * スケジューラが既にチューナー不足と判断していれば、その理由も
                  * 添える (何本足りないのかはあちらしか知らない)
                  */
-                conflicts: overlapping(
+                conflicts: contending(
                     {
                         programId: p.id,
+                        type: p.service_type,
                         channel: p.service_channel,
                         start_at: p.start_at,
                         end_at: p.end_at,
                     },
                     rivals,
+                    capacity,
+                    margins,
                 ),
                 conflict_reason:
                     held?.state === 'conflict' ? (held.conflict_reason ?? 'チューナーが足りません') : null,
@@ -307,14 +239,17 @@ export function load({ url }) {
                     reservation_id: held.id,
                     reservation_state: held.state,
                     matched: false,
-                    conflicts: overlapping(
+                    conflicts: contending(
                         {
                             programId: held.program_id,
+                            type: held.type,
                             channel: held.channel,
                             start_at: held.start_at,
                             end_at: held.end_at,
                         },
                         rivals,
+                        capacity,
+                        margins,
                     ),
                     conflict_reason:
                         held.state === 'conflict' ? (held.conflict_reason ?? 'チューナーが足りません') : null,

@@ -357,11 +357,13 @@
                                     {program.service_name} ・ {dateTime(program.start_at)}
                                 </div>
                                 <!--
-                                    重なりは**録ろうとした時点で初めて分かる**ので、
-                                    ここで先に見せる。同じ物理チャンネルのものは
-                                    重ならない (mirakc がチューナーを配る)。
+                                    チューナーの取り合いは**録ろうとした時点で初めて分かる**
+                                    ので、ここで先に見せる。出すのは本数が足りなくなるものだけ
+                                    (`contending`)。ただ時間が重なっているだけのものを
+                                    出していた頃は、地上波チューナーが2本あって録れる組にも、
+                                    そもそも別のチューナーを使う衛星の番組にも印が付いていた。
 
-                                    **重なっているものは全部出す。** 1件だけ出していた頃は、
+                                    **足りなくなるものは全部出す。** 1件だけ出していた頃は、
                                     3本ぶつかっていても1本しか見えず、どれを諦めれば
                                     いいのかが読めなかった
                                 -->
@@ -378,7 +380,7 @@
                                         「多すぎる」ことは伝わる)
                                     -->
                                     <div class="text-error text-xs" data-testid="preview-conflict">
-                                        重なり {program.conflicts.length} 件: {program.conflicts
+                                        チューナーの取り合い {program.conflicts.length} 件: {program.conflicts
                                             .slice(0, 3)
                                             .join('、')}{program.conflicts.length > 3
                                             ? ` ほか ${program.conflicts.length - 3} 件`
