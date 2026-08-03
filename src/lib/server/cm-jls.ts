@@ -25,6 +25,12 @@ import { text } from './stream';
 
 const TRIM = /Trim\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)/g;
 
+/**
+ * これ以上がCM判定になったら、その結果は信じない。
+ * 無音検出の既定 (cm.detectCmRanges の maxRatio) と同じ値にそろえてある
+ */
+const MAX_CM_RATIO = 0.5;
+
 /** avs の Trim(開始,終了) はフレーム番号かつ終端を含む。秒の半開区間に直す */
 export function parseTrimRanges(avs: string, fps: number): Range[] {
     const ranges: Range[] = [];
@@ -35,6 +41,25 @@ export function parseTrimRanges(avs: string, fps: number): Range[] {
         ranges.push({ start: from / fps, end: (to + 1) / fps });
     }
     return ranges;
+}
+
+/** CM判定が占める割合 (%) */
+export function cmRatio(cm: Range[], duration: number): number {
+    if (!Number.isFinite(duration) || duration <= 0) return 0;
+    const total = cm.reduce((sum, range) => sum + (range.end - range.start), 0);
+    return Math.round((total / duration) * 100);
+}
+
+/**
+ * CM判定が多すぎないか。
+ *
+ * ロゴを覚えたてのときなど、join_logo_scp が「頭の2秒だけ本編」のような結果を
+ * 返すことがある。実機では30分アニメ2本が丸ごとCM扱いになっていた
+ * (`Trim(0,59)` の1つだけ = CM 2秒〜1802秒)。
+ * 無音検出と同じ判断にそろえてある。本編を削るよりCMが残るほうが被害が小さい
+ */
+export function tooMuchCm(cm: Range[], duration: number): boolean {
+    return cmRatio(cm, duration) > MAX_CM_RATIO * 100;
 }
 
 /** 残す区間(Trim)の裏返し = CM区間 */
@@ -243,7 +268,13 @@ export async function detectWithJls(
         if (keep.length === 0) {
             return { cm: [], note: `${work.cut} に Trim が含まれていませんでした`, logoMissing };
         }
-        return { cm: invertRanges(keep, duration), note: 'join_logo_scp', logoMissing };
+
+        // 番組の半分以上がCMになったら、その結果は捨てて無音検出に落とす (tooMuchCm)
+        const cm = invertRanges(keep, duration);
+        if (tooMuchCm(cm, duration)) {
+            return { cm: [], note: `結果の ${cmRatio(cm, duration)}% がCM判定なので使いません`, logoMissing };
+        }
+        return { cm, note: 'join_logo_scp', logoMissing };
     } finally {
         // 中身は使い終わっている。録画の隣に置いているので残すと生TSの置き場を圧迫する
         cleanup(input);

@@ -36,6 +36,14 @@ test.describe('エンコードの失敗', () => {
             .first();
         await expect(failed.getByTestId('recording-state')).toHaveText('失敗');
 
+        /*
+         * **落ちたのは焼き直しのほうで、生TSは無事。** 観られるしダウンロードもできる。
+         * 状態が 'failed' になるからと弾いていた頃は、中身のあるTSを持っているのに
+         * どちらも出せなかった
+         */
+        await expect(failed.getByTestId('play-hint')).toHaveCount(1);
+        await expect(failed.getByTestId('download-link')).toHaveCount(1);
+
         // 理由は行の「詳細」から。ffmpeg の出力は長いので一覧には貼らない
         await failed.getByTestId('detail-button').click();
         const detail = page.getByTestId('program-detail');

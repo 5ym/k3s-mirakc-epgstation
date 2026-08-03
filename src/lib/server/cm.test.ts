@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { boundaries, chapterMetadata, detectCmRanges, isCmLength, keepRanges, parseSilences } from './cm';
-import { invertRanges, parseTrimRanges } from './cm-jls';
+import { cmRatio, invertRanges, parseTrimRanges, tooMuchCm } from './cm-jls';
 
 describe('parseSilences', () => {
     test('silencedetect のログから無音区間と尺を取る', () => {
@@ -100,6 +100,27 @@ describe('join_logo_scp の出力', () => {
 
     test('Trim が無ければ空', () => {
         expect(parseTrimRanges('# no trim here', 29.97)).toEqual([]);
+    });
+
+    test('番組の半分以上がCMになったら信じない', () => {
+        /*
+         * 実機で起きたやつ。ロゴを覚えたての回で join_logo_scp が Trim(0,59) だけを
+         * 返し、30分アニメが丸ごとCM扱いになっていた
+         */
+        const whole = invertRanges(parseTrimRanges('Trim(0,59)', 30000 / 1001), 1802);
+        expect(cmRatio(whole, 1802)).toBe(100);
+        expect(tooMuchCm(whole, 1802)).toBe(true);
+
+        // まともな結果 (本編4ブロック) は通す
+        const normal = invertRanges(
+            parseTrimRanges(
+                'Trim(52,7513) ++ Trim(9313,20520) ++ Trim(22320,46354) ++ Trim(48154,48602)',
+                30000 / 1001,
+            ),
+            1802,
+        );
+        expect(tooMuchCm(normal, 1802)).toBe(false);
+        expect(cmRatio(normal, 1802)).toBeLessThan(30);
     });
 
     test('残す区間を裏返してCM区間にする', () => {

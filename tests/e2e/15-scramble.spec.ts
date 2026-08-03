@@ -68,6 +68,13 @@ test.describe('スクランブルされたまま録れたとき', () => {
 
             // 掛かったままのTSを取っておいても、あとから解ける保証は無いので置き換える
             expect(scrambledFiles(stack.recordedDir)).toEqual([]);
+
+            /*
+             * 生TSを残しているなら、その大きさも行に出す。
+             * エンコード済みのぶんしか出していなかった頃は、消していいのか・
+             * どれだけ空くのかが画面から分からなかった
+             */
+            await expect(page.locator(row).getByTestId('row-body')).toContainText('生TS');
         } finally {
             await setRecording(request);
         }

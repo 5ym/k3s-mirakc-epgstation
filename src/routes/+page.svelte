@@ -168,15 +168,21 @@
     /**
      * 観られる録画かどうか。
      *
-     * **失敗したものは観られない。** 途中まで書けたファイルが残っていることは
-     * あるが、頭からスクランブルが掛かっていたり中身が空だったりで、押しても
-     * プレイヤーが黙って閉じるだけだった。録り直しの口も同じ理由で出さない
+     * **録画そのものが失敗したものは観られない。** 途中まで書けたファイルが
+     * 残っていることはあるが、頭からスクランブルが掛かっていたり中身が空だったりで、
+     * 押してもプレイヤーが黙って閉じるだけだった。録り直しの口も同じ理由で出さない
      * (元になる生TSが使えないので、やり直しても同じところで失敗する)
      */
     function playable(rec: (typeof data.recordings)[number]): boolean {
-        return (
-            rec.deleted_at === null && rec.state !== 'failed' && (rec.library_path ?? rec.ts_path) !== null
-        );
+        if (rec.deleted_at !== null) return false;
+        if ((rec.library_path ?? rec.ts_path) === null) return false;
+        /*
+         * **エンコードの失敗は別。** 落ちたのは焼き直しのほうで、生TSは無事なので
+         * 観られるし、やり直しもできる。エンコードで落ちると録画の状態まで
+         * 'failed' になる (encoder.fail) ため、状態だけで弾いていた頃は
+         * 中身のあるTSを持っているのに再生もダウンロードもできなかった
+         */
+        return rec.state !== 'failed' || Boolean(rec.encode_error);
     }
 
     /** ロゴを当てられなかった録画だけ、詳細に位置の指定を出す */
@@ -477,7 +483,14 @@
                                         // 番組表の尺ではなく実際に録れた長さ。
                                         // 途中で止めたときやCMを切ったときは合わない
                                         `${dateTime(rec.start_at)} (${recordedDuration(rec)})`,
-                                        size(rec.ts_size),
+                                        /*
+                                         * 生TSを残しているときは両方出す。片方しか
+                                         * 出していなかった頃は、消していいのか・
+                                         * どれだけ空くのかが画面から分からなかった
+                                         */
+                                        rec.raw_size === null
+                                            ? size(rec.ts_size)
+                                            : `${size(rec.ts_size)} (生TS ${size(rec.raw_size)})`,
                                         rec.deleted_at !== null ? `${date(rec.deleted_at)} に削除` : '',
                                     ])}
                                     <!--

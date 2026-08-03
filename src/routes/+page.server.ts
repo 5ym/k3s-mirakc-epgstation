@@ -1,3 +1,4 @@
+import { statSync } from 'node:fs';
 import { fail } from '@sveltejs/kit';
 import { detectPlatform } from '$lib/play';
 import { enabled as authEnabled } from '$lib/server/auth';
@@ -22,11 +23,34 @@ interface RecordingRow extends Recording {
     job_log: string | null;
     /** その局に入れてあるロゴの位置。詳細で指定し直せるように渡す */
     logo_area: string | null;
+    /**
+     * 生TSの大きさ。エンコード済みと**両方ある**ときだけ入る。
+     *
+     * `ts_size` はいま配っているファイルの大きさで、エンコードが終わると
+     * mkv のものに書き換わる。生TSを残す設定だと「消していいのか、どれだけ
+     * 空くのか」が画面から分からなかった
+     */
+    raw_size: number | null;
 }
 
 interface ReservationRow extends Reservation {
     service_name: string;
     rule_name: string | null;
+}
+
+/**
+ * 生TSの大きさ。エンコード済みと両方あるときだけ測る。
+ *
+ * 片方しか無ければ `ts_size` がそのファイルの大きさなので、二重に出す意味がない。
+ * 実ファイルを見るのは、外から消されていることがあるため (files.reconcile)。
+ */
+function rawSize(row: Recording): number | null {
+    if (row.ts_path === null || row.library_path === null) return null;
+    try {
+        return statSync(row.ts_path).size;
+    } catch {
+        return null;
+    }
 }
 
 /**
@@ -106,6 +130,7 @@ export function load({ url, request }) {
              LIMIT 300`,
         )
         .all() as RecordingRow[];
+    for (const row of recordings) row.raw_size = rawSize(row);
 
     return {
         reservations,
