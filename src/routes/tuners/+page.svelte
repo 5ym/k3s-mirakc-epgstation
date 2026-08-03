@@ -7,7 +7,8 @@
     // スキャンは数十分かかることがある。進み具合はサーバから push される。
     // 局の取り込みも1回では終わらないので、増えるたびに描き直す。
     // ロゴ取得も1チャンネルに数分かかるので、同じように流してもらう
-    liveUpdates(['scan', 'services', 'logos']);
+    // mirakc の入れ直しも: 止まっている間と戻ってきたところを、読み込み直さずに出す
+    liveUpdates(['scan', 'services', 'logos', 'tuners']);
     const scan = $derived(data.scan);
 
     const TYPE_LABEL: Record<string, string> = { GR: '地上波', BS: 'BS', CS: 'CS' };

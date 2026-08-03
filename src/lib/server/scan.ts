@@ -2,6 +2,7 @@ import type { ChannelType } from '../types';
 import { config } from './config';
 import { sync } from './epg';
 import { emit } from './events';
+import { ping } from './mirakc';
 
 /**
  * チャンネルスキャン。
@@ -133,6 +134,7 @@ export async function start(options: ScanOptions): Promise<{ started: boolean; m
  * 待っている相手 (mirakc) を急かす力は無かった。
  */
 export async function restartMirakc(forget = false): Promise<{ ok: boolean; message: string }> {
+    let result: { ok: boolean; message: string };
     try {
         const res = await fetch(`${config.tunerAgentUrl}/denpa/mirakc/restart`, {
             method: 'POST',
@@ -140,9 +142,48 @@ export async function restartMirakc(forget = false): Promise<{ ok: boolean; mess
             body: JSON.stringify({ forget }),
             signal: AbortSignal.timeout(30_000),
         });
-        return (await res.json()) as { ok: boolean; message: string };
+        result = (await res.json()) as { ok: boolean; message: string };
     } catch (error) {
         return { ok: false, message: `チューナー側に繋がりません: ${error}` };
+    }
+    if (result.ok) {
+        // 止まっているところまでは今すぐ見せる。戻ってきたらまた知らせる
+        emit('tuners');
+        void waitForMirakc();
+    }
+    return result;
+}
+
+/** 起動を待つ上限。実機で数秒だが、番組表を抱えていると読み込みに時間がかかる */
+const RESTART_WAIT = 3 * 60_000;
+const RESTART_POLL = 2000;
+let waiting = false;
+
+/**
+ * 入れ直した mirakc が戻ってくるのを待って、画面へ知らせる。
+ *
+ * 押した直後は当然まだ止まっていて、画面には「NG」が出る。戻ったことを
+ * 知らせていなかった頃は、**自分で読み込み直すまで NG のまま**だった。
+ * 起動した mirakc は局と番組表を取りに行くので、そこも1回取り込んでおく
+ * (番組表のぶんは知らせが来るが、局が揃ったことは知らせてくれない)。
+ */
+async function waitForMirakc(): Promise<void> {
+    if (waiting) return;
+    waiting = true;
+    try {
+        const deadline = Date.now() + RESTART_WAIT;
+        while (Date.now() < deadline) {
+            await Bun.sleep(RESTART_POLL);
+            if (!(await ping()).ok) continue;
+            emit('tuners');
+            await sync().catch(() => undefined);
+            emit('services');
+            return;
+        }
+        // 上がってこない。画面は「NG」のままで、その理由も出ている
+        emit('tuners');
+    } finally {
+        waiting = false;
     }
 }
 

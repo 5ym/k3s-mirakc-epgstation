@@ -225,6 +225,11 @@ export async function detectWithJls(
                       repo,
                       '-logo-samples',
                       String(config.jlsLogoSamples),
+                      // 弱い縁を拾わせない / 合わなくなったら覚え直させる (config の覚え書き)
+                      '-logo-edge-threshold',
+                      String(config.jlsLogoEdgeThreshold),
+                      '-logo-match',
+                      String(config.jlsLogoMatch),
                       // 自動で見つからなかった局だけ、画面から教わった範囲を渡す
                       ...(/^\d+,\d+,\d+,\d+$/.test(area) ? ['-logo-area', area] : []),
                   ];

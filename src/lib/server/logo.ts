@@ -215,6 +215,33 @@ export function missing(): Target[] {
     );
 }
 
+/**
+ * 衛星で開く中継の数。**1つのネットワークにつきこれだけ。**
+ *
+ * BS/CS の CDT は**そのネットワークの局のぶんをまとめて流す**ので、どの中継を
+ * 開いても同じものが来る。実機の BS はネットワーク4に26の中継があり、
+ * 順に10分ずつ開くと4時間かかっていた (`BS19_1` を開いているのはこれ)。
+ * 来ないときは中継を替えても来ないので、2つ試して駄目なら次の機会に回す。
+ */
+const SATELLITE_CHANNELS = 2;
+
+/**
+ * 自分で開きに行く先。衛星は中継を絞る。
+ *
+ * 相乗り (`ride`) では絞らない。あちらは mirakc が既に開いているものに混ぜる
+ * だけで只なので、どの中継でも来たものを拾えばいい。
+ */
+function sweepTargets(): Target[] {
+    const seen = new Map<string, number>();
+    return missing().filter((target) => {
+        if (target.type === 'GR') return true;
+        const key = `${target.type}:${target.network_id}`;
+        const count = (seen.get(key) ?? 0) + 1;
+        seen.set(key, count);
+        return count <= SATELLITE_CHANNELS;
+    });
+}
+
 /** その物理チャンネルに相乗りしている局のうち、まだロゴを持っていない数 */
 function missingOn(channel: string): number {
     return (
@@ -238,10 +265,13 @@ function missingOn(channel: string): number {
  * 流れていて、ロゴは局ごとに別々のタイミングで来る。せっかく開いたのだから、
  * 揃うか時間切れになるまで読む。
  */
-async function collect(target: Target, timeout: number): Promise<number> {
+async function collect(target: Target, timeout: number, signal?: AbortSignal): Promise<number> {
     const before = missingOn(target.channel);
     const controller = new AbortController();
     const stop = setTimeout(() => controller.abort(), timeout);
+    // 外から止められるようにする。衛星に10分かけている最中でも譲れるように
+    const give = () => controller.abort();
+    signal?.addEventListener('abort', give, { once: true });
     try {
         const stream = await openChannelStream(
             target.type,
@@ -261,6 +291,7 @@ async function collect(target: Target, timeout: number): Promise<number> {
         // 取れなければ次の機会に。チューナーが空いていないだけのことも多い
     } finally {
         clearTimeout(stop);
+        signal?.removeEventListener('abort', give);
         controller.abort();
     }
     return before - missingOn(target.channel);
@@ -345,18 +376,18 @@ function update(patch: Partial<SweepState>): void {
  * 1つ取りかかるたびに空きを見る。録画が始まったのに開きに行くと、掴めないまま
  * 3分待つことを人数ぶん繰り返すことになる。
  */
-async function drain(queue: Target[], parallel: number): Promise<void> {
+async function drain(queue: Target[], parallel: number, signal: AbortSignal): Promise<void> {
     const worker = async () => {
         for (;;) {
             const target = queue.shift();
-            if (target === undefined) return;
+            if (target === undefined || signal.aborted) return;
             if (!(await hasFreeTuner())) {
                 queue.length = 0;
                 update({ message: '空いているチューナーが無くなったので途中でやめました' });
                 return;
             }
             update({ channels: [...state.channels, target.channel] });
-            const got = await collect(target, timeoutFor(target.type));
+            const got = await collect(target, timeoutFor(target.type), signal);
             update({
                 channels: state.channels.filter((channel) => channel !== target.channel),
                 done: state.done + 1,
@@ -420,7 +451,7 @@ export async function sweep(limit = 1): Promise<number> {
     // 開いているチューナーがあるなら、まずそちらに乗る。只で読める
     const ridden = await ride();
 
-    const targets = missing().slice(0, limit);
+    const targets = sweepTargets().slice(0, limit);
     if (targets.length === 0 || !(await hasFreeTuner())) return ridden;
     await run(targets, 1, ridden);
     return state.found;
@@ -434,7 +465,17 @@ export async function sweep(limit = 1): Promise<number> {
  * そちらは10分ごとの定期取得に任せる (1つの中継で網羅できるので、いつかは埋まる)。
  */
 export async function sweepGround(): Promise<{ started: boolean; message: string }> {
-    if (state.running) return { started: false, message: 'もう取りに行っています' };
+    /*
+     * 定期取得が回っていても譲ってもらう。
+     *
+     * **衛星は1チャンネルに10分開く。** その間ずっと押せないままだった
+     * (押した人が待たされる相手は、たいてい自分の見たい局ではない)。
+     * 只で読める相乗り (ride) は別勘定なので、ここでは触らない
+     */
+    if (state.running) {
+        inflight?.abort();
+        if (!(await settled())) return { started: false, message: 'まだ前の取得が終わっていません' };
+    }
     reconcile();
     const targets = missing().filter((target) => target.type === 'GR');
     if (targets.length === 0) {
@@ -451,8 +492,19 @@ export async function sweepGround(): Promise<{ started: boolean; message: string
     };
 }
 
+/** 走っている取得を外から止めるための口。譲ってもらうときに使う */
+let inflight: AbortController | null = null;
+
+/** 止まるのを待つ。開いているストリームを畳むだけなのですぐ終わる */
+async function settled(): Promise<boolean> {
+    for (let i = 0; i < 50 && state.running; i++) await Bun.sleep(100);
+    return !state.running;
+}
+
 /** 実際に回すところ。走っている印を立て、終わったら結果を残す */
 async function run(targets: Target[], parallel: number, found: number): Promise<void> {
+    const controller = new AbortController();
+    inflight = controller;
     state = {
         running: true,
         channels: [],
@@ -465,9 +517,10 @@ async function run(targets: Target[], parallel: number, found: number): Promise<
     };
     emit('logos');
     try {
-        await drain([...targets], parallel);
+        await drain([...targets], parallel, controller.signal);
     } finally {
-        const left = missing().length;
+        inflight = null;
+        const left = sweepTargets().length;
         update({
             running: false,
             channels: [],

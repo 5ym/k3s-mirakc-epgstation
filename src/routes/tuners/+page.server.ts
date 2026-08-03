@@ -24,15 +24,32 @@ interface TunerUser {
 }
 
 /**
+ * mirakc が自分で回している仕事。掴んでいるのが denpa とは限らない。
+ * (`/api/tuners` の `users[].id` が `job:` で始まり、User-Agent は付かない)
+ */
+const JOBS: Record<string, string> = {
+    'epg.scan-services': '局を調べています',
+    'epg.update-schedules': '番組表を集めています',
+    'epg.sync-clocks': '時刻を合わせています',
+};
+
+/**
  * 掴んでいる相手を読める言葉に直す。
  *
  * mirakc が持っているのは User-Agent だけで、そこには ASCII しか載せられない
  * (ヘッダなので)。denpa は用途とIDだけを渡し、番組名はここで引き直す。
  * `Bun/1.3.14` と出ていた頃は、録画なのかロゴ集めなのかが画面から読めなかった。
+ *
+ * **mirakc 自身の仕事には User-Agent が無い。** 「不明」と出していた頃は、
+ * いちばんよく居座っている相手 (番組表集め) が誰なのか分からなかった。
  */
-function describe(agent: string | undefined): string {
-    const use = agent?.match(/denpa \(([^)]+)\)/)?.[1];
-    if (use === undefined) return agent ?? '不明';
+function describe(user: { id: string; agent?: string }): string {
+    const use = user.agent?.match(/denpa \(([^)]+)\)/)?.[1];
+    if (use === undefined) {
+        const job = user.id.match(/^job:(.+)$/)?.[1];
+        if (job !== undefined) return `mirakc: ${JOBS[job] ?? job}`;
+        return user.agent ?? user.id;
+    }
 
     const recording = use.match(/^rec (\d+)$/);
     if (recording !== null) {
@@ -52,7 +69,7 @@ function describe(agent: string | undefined): string {
 function withLabels(tuners: MirakcTuner[]): (Omit<MirakcTuner, 'users'> & { users: TunerUser[] })[] {
     return tuners.map((tuner) => ({
         ...tuner,
-        users: (tuner.users ?? []).map((user) => ({ ...user, label: describe(user.agent) })),
+        users: (tuner.users ?? []).map((user) => ({ ...user, label: describe(user) })),
     }));
 }
 

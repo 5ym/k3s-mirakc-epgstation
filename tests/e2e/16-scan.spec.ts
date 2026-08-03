@@ -53,6 +53,10 @@ test.describe('チューナー画面', () => {
          */
         await expect(tuners.getByTestId('tuner-row').nth(1)).toContainText('使用中');
         await expect(tuners.getByTestId('tuner-row').nth(1).getByTestId('tuner-user')).toContainText('録画');
+        // mirakc 自身の仕事は User-Agent が付かない。ID から読み解く
+        await expect(tuners.getByTestId('tuner-row').nth(2).getByTestId('tuner-user')).toContainText(
+            '番組表を集めています',
+        );
         // 故障は空き/使用中より先に出す。直さないと録れない
         await expect(tuners.getByTestId('tuner-row').nth(3)).toContainText('故障');
 
