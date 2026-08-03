@@ -8,8 +8,8 @@
     // スキャンは数十分かかることがある。進み具合はサーバから push される。
     // 局の取り込みも1回では終わらないので、増えるたびに描き直す。
     // ロゴ取得も1チャンネルに数分かかるので、同じように流してもらう
-    // mirakc の入れ直しも: 止まっている間と戻ってきたところを、読み込み直さずに出す
-    liveUpdates(['scan', 'services', 'logos', 'tuners']);
+    // 番組表を集めている最中の様子も 'tuners' で流れてくる
+    liveUpdates(['scan', 'services', 'logos', 'tuners', 'programs']);
     const scan = $derived(data.scan);
 
     const TYPE_LABEL: Record<string, string> = { GR: '地上波', BS: 'BS', CS: 'CS' };
@@ -35,10 +35,10 @@
     });
 
     /*
-     * チャンネル・局・番組表は別々に届く。1つの表に混ぜて出すので、
-     * 揃うまで待ってから描く (バラバラに出ると列が入れ替わって見える)
+     * 物理チャンネルと、そこに乗っている局。**スキャンの結果そのもの。**
+     * 番組表の集まり具合は denpa 自身のDBから数えたものが `data.epg` で来る
      */
-    const coverage = $derived(Promise.all([data.channels, data.mirakcServices, data.epg]));
+    const coverage = $derived(data.channels);
 
     /*
      * **読み直しの間も前の中身を出したままにする。**
@@ -50,28 +50,18 @@
      */
     const shownCoverage = held(() => coverage);
     const shownTuners = held(() => data.tuners);
-    const shownMirakc = held(() => data.mirakc);
+    const shownAgent = held(() => data.agent);
     const shownCard = held(() => data.card);
 
     /**
      * 局名は取り込み済みのものがあればそちらを出す。
      * 放送波の局名は全角英数まじりなので、denpa は取り込むときに直している。
-     * mirakc の生の名前をそのまま出すと、他の画面と字面が変わって別の局に見える
+     * 生の名前をそのまま出すと、他の画面と字面が変わって別の局に見える
      */
     const importedById = $derived(new Map(data.services.map((s) => [s.id, s])));
 
-    /** mirakc が拾えている局を物理チャンネルごとにまとめる */
-    function groupByChannel<T extends { channel?: { type: string; channel: string } }>(
-        services: T[],
-    ): Map<string, T[]> {
-        const map = new Map<string, T[]>();
-        for (const service of services) {
-            if (service.channel === undefined) continue;
-            const key = `${service.channel.type}:${service.channel.channel}`;
-            map.set(key, [...(map.get(key) ?? []), service]);
-        }
-        return map;
-    }
+    /** 局の内部ID。エージェントが返すのは ARIB のサービスIDなので組み立て直す */
+    const keyOf = (networkId: number, serviceId: number) => networkId * 100000 + serviceId;
 
     /** 番組表がどこまで埋まっているか。「8/9 まで」の形で出す */
     function until(at: number): string {
@@ -96,58 +86,34 @@
     <div class="flex flex-col gap-6">
         <section class="card bg-base-100 shadow" data-testid="channel-card">
             <div class="card-body">
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                    <h2 class="card-title">取れているチャンネル</h2>
-                    <!--
-                        **局を調べているのは mirakc のほう。** denpa 側で取り込み直しても
-                        mirakc がまだ知らない局は増えないので、押すのは mirakc の入れ直し。
-                        起動した mirakc は自分で局と番組表を取りに行き、揃うたびに
-                        知らせてくる (以前ここにあった「局を取り直す」は、待っている
-                        相手を急かす力が無かった)
-                    -->
-                    <form method="POST" action="?/restartMirakc" use:submitting>
-                        <label class="mr-2 text-sm">
-                            <input type="checkbox" name="forget" class="checkbox checkbox-xs align-middle" />
-                            覚えている局を捨てる
-                        </label>
-                        <button
-                            class="btn btn-sm"
-                            disabled={scan.state === 'running'}
-                            data-testid="restart-mirakc"
-                        >
-                            mirakc を入れ直す
-                        </button>
-                    </form>
-                </div>
+                <h2 class="card-title">取れているチャンネル</h2>
                 <p class="text-base-content/70 text-sm">
-                    mirakc の設定に入っている物理チャンネルと、mirakc がそこから
-                    今どこまで局と番組表を拾えているかです。<strong>スキャンの直後は空になり</strong>、mirakc
-                    が1局ずつ選局して調べながら数十分かけて埋まっていきます。 揃うたびに denpa
-                    へ知らせが来るので、この画面は開いたままで構いません。
+                    チャンネルスキャンで見つかった物理チャンネルと、そこに乗っている局です。
+                    <strong>局はスキャンが終わった時点で出そろいます</strong>が、番組表はそのあと denpa
+                    が1チャンネルずつ開いて集めるので、少し遅れて埋まります。
+                    集まるたびに知らせが来るので、この画面は開いたままで構いません。
                 </p>
+                {#if data.collect.running}
+                    <!-- 番組表を集めている最中。1チャンネルに数分かかるので、黙っていると止まって見える -->
+                    <div class="text-base-content/70 text-sm" data-testid="epg-collect">
+                        番組表を集めています ({data.collect.active.join(', ') || '準備中'}) ・ 残り {data
+                            .collect.pending} チャンネル
+                    </div>
+                {/if}
                 {#if shownCoverage.value === undefined}
                     <p class="text-base-content/60 text-sm">確認中…</p>
                 {:else}
-                    {@const [channels, mirakcServices, epg] = shownCoverage.value}
+                    {@const channels = shownCoverage.value}
                     {#if channels.length === 0}
                         <p class="text-base-content/60 text-sm" data-testid="channel-empty">
                             まだ1つもありません。チャンネルスキャンを実行してください。
                         </p>
                     {:else}
-                        {@const epgByService = new Map(epg.map((e) => [e.key, e]))}
-                        {@const servicesByChannel = groupByChannel(mirakcServices)}
-                        <!--
-                            物理チャンネルのうち、mirakc が局を拾えたものの数。
-                            時間がかかっているのはここで、1つずつ選局して調べている。
-                            表を上から下まで見なくても、どこまで進んだか分かるようにする
-                        -->
-                        {@const found = [...servicesByChannel.keys()].filter((key) =>
-                            channels.some((c) => `${c.type}:${c.channel}` === key),
-                        ).length}
+                        {@const all = channels.flatMap((c) =>
+                            c.services.map((sv) => keyOf(c.networkId, sv.serviceId)),
+                        )}
                         <!-- 番組表がもう入っている局の数。下の表の右端を全部見なくても分かるように -->
-                        {@const withEpg = mirakcServices.filter(
-                            (s) => (epgByService.get(`${s.networkId}:${s.serviceId}`)?.programs ?? 0) > 0,
-                        ).length}
+                        {@const withEpg = all.filter((id) => (data.epg[id]?.programs ?? 0) > 0).length}
                         <!--
                             **入れ子になった3つの数を、その順に並べる。**
 
@@ -159,15 +125,15 @@
                                                   └ 局 (TOKYO MX2) ─ 番組表
 
                             局と番組表を分けて出すのも、混ざりやすいから。
-                            局はスキャンで、番組表はそのあと mirakc が集めるもので、
+                            局はスキャンで、番組表はそのあと denpa が集めるもので、
                             埋まる時期がずれる (局はあるのに番組表が空、が普通にある)
                         -->
                         <div class="text-sm" data-testid="channel-coverage">
                             <span class="text-base-content/70">周波数</span>
-                            <strong>{found} / {channels.length} 本</strong>
+                            <strong>{channels.length} 本</strong>
                             <span class="text-base-content/40">→</span>
                             <span class="text-base-content/70">そこに乗っている局</span>
-                            <strong>{data.services.length}</strong>
+                            <strong>{all.length}</strong>
                             <span class="text-base-content/40">→</span>
                             <span class="text-base-content/70">番組表の届いた局</span>
                             <strong>{withEpg}</strong>
@@ -189,17 +155,16 @@
                                 <tbody data-testid="channel-list">
                                     {#each channels as channel (`${channel.type}:${channel.channel}`)}
                                         {@const key = `${channel.type}:${channel.channel}`}
-                                        {@const found = servicesByChannel.get(key) ?? []}
                                         {@const imported = byChannel.get(key) ?? []}
-                                        {@const stats = found.map(
-                                            (s) =>
-                                                epgByService.get(`${s.networkId}:${s.serviceId}`) ?? {
+                                        {@const stats = channel.services.map(
+                                            (sv) =>
+                                                data.epg[keyOf(channel.networkId, sv.serviceId)] ?? {
                                                     programs: 0,
                                                     until: 0,
                                                 },
                                         )}
-                                        {@const programs = stats.reduce((sum, s) => sum + s.programs, 0)}
-                                        {@const last = Math.max(0, ...stats.map((s) => s.until))}
+                                        {@const programs = stats.reduce((sum, e) => sum + e.programs, 0)}
+                                        {@const last = Math.max(0, ...stats.map((e) => e.until))}
                                         <tr data-testid="channel-row" data-channel={channel.channel}>
                                             <td class="whitespace-nowrap text-sm">
                                                 {TYPE_LABEL[channel.type] ?? channel.type}
@@ -208,30 +173,37 @@
                                                 {channel.channel}
                                             </td>
                                             <td class="text-sm">
-                                                {#if found.length > 0}
+                                                {#if channel.services.length > 0}
                                                     <div data-testid="channel-services">
-                                                        {found
+                                                        {channel.services
                                                             .map(
-                                                                (s) => importedById.get(s.id)?.name ?? s.name,
+                                                                (sv) =>
+                                                                    importedById.get(
+                                                                        keyOf(
+                                                                            channel.networkId,
+                                                                            sv.serviceId,
+                                                                        ),
+                                                                    )?.name ?? sv.name,
                                                             )
                                                             .join(', ')}
                                                     </div>
                                                     <!--
-                                                        denpa 側の取り込みは10分ごとなので、
-                                                        mirakc が見つけた直後は必ず差が出る。
+                                                        denpa 側の取り込みは1分ごとなので、
+                                                        スキャンの直後は差が出る。
                                                         隠すと「取り込まれない」と区別が付かない
                                                     -->
-                                                    {#if imported.length < found.length}
+                                                    {#if imported.length < channel.services.length}
                                                         <div
                                                             class="text-base-content/60 text-xs"
                                                             data-testid="channel-pending"
                                                         >
-                                                            denpa への取り込み待ち ({imported.length}/{found.length})
+                                                            denpa への取り込み待ち ({imported.length}/{channel
+                                                                .services.length})
                                                         </div>
                                                     {/if}
                                                 {:else}
                                                     <span class="text-base-content/60">
-                                                        mirakc がまだ局を拾えていません
+                                                        録れる局がありません
                                                     </span>
                                                 {/if}
                                             </td>
@@ -260,9 +232,8 @@
                 <h2 class="card-title">チャンネルスキャン</h2>
                 <p class="text-base-content/70 text-sm">
                     受信できるチャンネルを実際に選局して探します。<strong
-                        >その間チューナーを全部使い、mirakc も止まります</strong
-                    >ので、録画の予定が無いときに実行してください。 見つかったものは mirakc
-                    の設定に書き戻し、終わると番組表も取り直します。
+                        >空いているチューナーを全部使います</strong
+                    >が、<strong>録画中でも実行できます</strong> (録画のほうが強いので、そのチューナーは 使いません)。見つかったものは保存され、終わると番組表も集め直します。
                 </p>
 
                 <form method="POST" action="?/scan" use:submitting class="mt-2 space-y-3">
@@ -354,27 +325,24 @@
                 <h2 class="card-title">つながり具合</h2>
                 <dl class="space-y-3">
                     <div class="flex flex-wrap items-center gap-2">
-                        <dt class="w-28 text-sm font-medium">mirakc</dt>
-                        {#if shownMirakc.value === undefined}
-                            <dd class="badge badge-ghost" data-testid="status-mirakc">確認中</dd>
+                        <dt class="w-28 text-sm font-medium">エージェント</dt>
+                        {#if shownAgent.value === undefined}
+                            <dd class="badge badge-ghost" data-testid="status-agent">確認中</dd>
                         {:else}
-                            {@const mirakc = shownMirakc.value}
+                            {@const agent = shownAgent.value}
                             <dd
-                                class="badge {mirakc.ok ? 'badge-success' : 'badge-error'}"
-                                data-testid="status-mirakc"
+                                class="badge {agent.ok ? 'badge-success' : 'badge-error'}"
+                                data-testid="status-agent"
                             >
-                                {mirakc.ok ? (mirakc.version ?? 'OK') : 'NG'}
+                                {agent.ok ? `チューナー ${agent.tuners} 本` : 'NG'}
                             </dd>
-                            {#if !mirakc.ok}
-                                <!-- スキャン中は止めてあるので、繋がらないのが正しい -->
-                                <dd class="text-base-content/60 w-full text-xs">
-                                    {scan.state === 'running' ? 'スキャン中のため止めています' : mirakc.error}
-                                </dd>
+                            {#if !agent.ok}
+                                <dd class="text-base-content/60 w-full text-xs">{agent.error}</dd>
                             {/if}
                         {/if}
                     </div>
                     <!--
-                        局ロゴ。mirakc は集めないので denpa が放送波から拾っている。
+                        局ロゴ。放送波から拾うしかない。
                         番組表に出ないとき、取れていないのか出し方が悪いのかを
                         ここで見分けられるようにする
                     -->
@@ -407,8 +375,8 @@
                         <dd class="text-base-content/60 w-full text-xs">
                             ロゴが放送波に流れてくるのは数十秒〜数分に一度、
                             <strong>衛星は十数分に一度</strong>です。普段は
-                            <strong>mirakc が番組表を集めるための選局に相乗りして</strong>拾うので、 denpa
-                            がチューナーを掴むことはありません。一度取れたものも1週間経ったら取り直します。
+                            <strong>番組表を集めるための選局に相乗りして</strong>拾うので、 denpa
+                            がロゴのためにチューナーを増やすことはありません。一度取れたものも1週間経ったら取り直します。
                             「今すぐ取りに行く」を押したときは衛星も回ります。<strong
                                 >BS も CS も同じ1つの中継から降ってくる</strong
                             >ので、そこだけ最大20分開きます (他の中継は数秒で見切ります)。
@@ -488,9 +456,7 @@
                     {@const tuners = shownTuners.value}
                     {#if tuners.length === 0}
                         <p class="text-base-content/60 text-sm" data-testid="tuner-empty">
-                            チューナーが取れません。{scan.state === 'running'
-                                ? 'スキャン中は mirakc を止めています。'
-                                : 'mirakc の設定を確認してください。'}
+                            チューナーが取れません。エージェントの tuners.yml を確認してください。
                         </p>
                     {:else}
                         <div class="overflow-x-auto">
@@ -511,19 +477,24 @@
                                                 {tuner.types.map((t) => TYPE_LABEL[t] ?? t).join('/')}
                                             </td>
                                             <td class="whitespace-nowrap">
-                                                <!-- 故障は空き/使用中より先に出す。直さないと録れない -->
-                                                {#if tuner.isFault}
-                                                    <span class="badge badge-sm badge-error">故障</span>
-                                                {:else if tuner.isUsing}
-                                                    <span class="badge badge-sm badge-warning">使用中</span>
-                                                {:else if tuner.isAvailable}
-                                                    <span class="badge badge-sm badge-success">空き</span>
+                                                <!-- 何を掴んでいるかも出す。空き/使用中だけでは追えない -->
+                                                {#if tuner.disabled}
+                                                    <span class="badge badge-sm badge-ghost">無効</span>
+                                                {:else if tuner.channel !== null}
+                                                    <span class="badge badge-sm badge-warning">
+                                                        {tuner.channel.channel}
+                                                    </span>
                                                 {:else}
-                                                    <span class="badge badge-sm badge-ghost">使えません</span>
+                                                    <span class="badge badge-sm badge-success">空き</span>
+                                                {/if}
+                                                {#if tuner.error !== null && tuner.channel === null}
+                                                    <div class="text-error text-xs" data-testid="tuner-error">
+                                                        {tuner.error}
+                                                    </div>
                                                 {/if}
                                             </td>
                                             <td class="text-sm">
-                                                {#each tuner.users ?? [] as user (user.id)}
+                                                {#each tuner.users as user (user.use)}
                                                     <div class="truncate" data-testid="tuner-user">
                                                         {user.label}
                                                         <span class="text-base-content/60">

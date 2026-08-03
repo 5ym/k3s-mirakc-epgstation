@@ -1,25 +1,25 @@
 import { describe, expect, test } from 'bun:test';
-import { blocks, parseBlock } from './mirakc-events';
+import { blocks, parseBlock } from './agent-events';
 
-describe('mirakc の知らせ', () => {
+describe('エージェントの知らせ', () => {
     test('event と data を取り出す', () => {
-        expect(parseBlock('event: epg.programs-updated\ndata: {"serviceId":3274201073}')).toEqual({
-            name: 'epg.programs-updated',
-            data: { serviceId: 3274201073 },
+        expect(parseBlock('event: tuners\ndata: {"index":0}')).toEqual({
+            name: 'tuners',
+            data: { index: 0 },
         });
     });
 
     test('data が無くても名前だけで通す', () => {
-        expect(parseBlock('event: tuner.status-changed')).toEqual({
-            name: 'tuner.status-changed',
+        expect(parseBlock('event: channels')).toEqual({
+            name: 'channels',
             data: {},
         });
     });
 
     test('data が壊れていても名前は活かす', () => {
         // 知らない形が来ても、聞くのをやめてしまうより名前だけでも拾うほうがいい
-        expect(parseBlock('event: epg.programs-updated\ndata: {壊れている')).toEqual({
-            name: 'epg.programs-updated',
+        expect(parseBlock('event: scan\ndata: {壊れている')).toEqual({
+            name: 'scan',
             data: {},
         });
     });
@@ -49,9 +49,8 @@ describe('mirakc の知らせ', () => {
     test('途中で切れたブロックは次の分と繋ぐ', async () => {
         // TCP の切れ目はイベントの切れ目と関係が無い。持ち越さないと1件落ちる
         const got: string[] = [];
-        for await (const block of blocks(streamOf('event: epg.pro', 'grams-updated\ndata: {}\n\n')))
-            got.push(block);
-        expect(got).toEqual(['event: epg.programs-updated\ndata: {}']);
+        for await (const block of blocks(streamOf('event: chan', 'nels\ndata: {}\n\n'))) got.push(block);
+        expect(got).toEqual(['event: channels\ndata: {}']);
     });
 
     test('区切りの来ていない残りは渡さない', async () => {

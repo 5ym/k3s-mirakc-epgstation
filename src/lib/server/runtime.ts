@@ -1,12 +1,13 @@
 import { mkdirSync } from 'node:fs';
+import { listen } from './agent-events';
 import { config } from './config';
 import { pump, requeueOrphanedJobs } from './encoder';
 import { sync, syncServicesOnly } from './epg';
+import { collectOnce } from './epg-collect';
 import { emit } from './events';
 import { pruneHistory, reconcile } from './files';
 import { reconcile as logoReconcile, ride, sweep } from './logo';
-import { listen } from './mirakc-events';
-import { activeRecordingIds, onOnairChanged, recoverOrphanedRecordings } from './recorder';
+import { activeRecordingIds, recoverOrphanedRecordings } from './recorder';
 import { tick } from './scheduler';
 import { beginDraining } from './shutdown';
 
@@ -52,16 +53,22 @@ export function start(): void {
         return;
     }
 
-    void guard('epg', sync);
-    every(config.epgSyncInterval, 'epg', sync);
     /*
-     * 局だけを取り直す。**mirakc は局が揃ったことを知らせてくれない**ので
-     * (飛んでくるのは番組表のぶんだけ)、こちらから覗きに行くしかない。
-     * 初回起動やスキャン直後は「局は分かったが番組表はこれから」が数十分続き、
-     * 番組表を待っていると denpa の画面は空のままになる
+     * 局を取り込んで、溜まっている番組表で予約を組み直す。
+     * 局の一覧はエージェントが持っている (スキャンの結果) ので、そこから取る
      */
-    every(config.serviceSyncInterval, 'services', syncServicesOnly);
-    listenToMirakc();
+    void guard('epg', sync);
+    every(config.channelSyncInterval, 'services', syncServicesOnly);
+
+    /*
+     * **番組表を自分で集める。** mirakc の `epg.update-schedules` に当たるもの。
+     * チューナーが空いているだけ並列に回し、薄い局から先に行く (epg-collect.ts)。
+     * 起動直後に1回走らせるので、初回は数分で番組表が出る
+     */
+    void guard('epg-collect', collectOnce);
+    every(config.epgCollectInterval, 'epg-collect', collectOnce);
+
+    listenToAgent();
 
     every(config.schedulerTick, 'scheduler', async () => {
         await tick();
@@ -86,9 +93,8 @@ export function start(): void {
     every(config.reconcileInterval, 'prune', pruneHistory);
 
     /*
-     * 局ロゴ。mirakc は Mirakurun と違って TS から集めてくれないので、
-     * 持っていない局のぶんを少しずつ取りに行く。1回に1局だけ開く
-     * (チューナーを塞がないため。録画のついでにも拾っている)
+     * 局ロゴ。放送波から拾うしかないので、持っていない局のぶんを少しずつ取りに行く。
+     * 開いている選局に相乗りするだけなので、チューナーは増えない
      *
      * 起動のたびに、印 (`has_logo`) とファイルを突き合わせ直す。置き場ごと
      * 消えることは実際にあり、印だけ残っていると番組表に壊れた画像が並ぶ
@@ -102,50 +108,38 @@ export function start(): void {
 }
 
 /**
- * mirakc からの知らせを受け取る。
+ * エージェントからの知らせを受け取る。
  *
- * 番組表の取り直しも放送の延長も、これまでは決まった間隔で覗きに行っていた。
+ * チューナーの様子もスキャンの進み具合も、これまでは決まった間隔で覗きに行っていた。
  * 覗きに行く方式だと「変わってから気付くまで」が必ず空くうえ、
  * 何も変わっていない時間帯も同じだけ叩くことになる。
  *
  * 上の定期実行は残してある。知らせは繋ぎ直しはするものの、黙って止まる
  * 可能性まで消せるわけではないので、保険として置いておく。
  */
-function listenToMirakc(): void {
-    /*
-     * 番組表の取り直しは、まとめて1回にする。
-     * 番組表が更新されると局の数だけ知らせが飛んでくる (実機で30件ほど連続)。
-     * 1件ごとに全件取り直すと同じことを30回やることになる
-     */
-    let pending: ReturnType<typeof setTimeout> | undefined;
-    const syncSoon = () => {
-        clearTimeout(pending);
-        pending = setTimeout(() => void guard('epg', sync), config.epgEventDebounce);
-        pending.unref?.();
-    };
-
+function listenToAgent(): void {
     unlisten = listen((event) => {
         switch (event.name) {
-            case 'epg.programs-updated':
-                syncSoon();
-                break;
-            case 'onair.program-changed': {
-                // いま流れている番組が変わった。録画中なら終わりが動いているかもしれない
-                const serviceId = Number(event.data.serviceId);
-                if (Number.isFinite(serviceId)) onOnairChanged(serviceId);
-                break;
-            }
-            case 'tuner.status-changed':
+            case 'tuners':
                 emit('tuners');
                 /*
-                 * mirakc が番組表を集めるために自分でチューナーを開いた、かもしれない。
-                 * そこへ同じチャンネルを要求すると新しいチューナーは掴まれないので、
-                 * ロゴを只で読める。開いた瞬間に来る知らせなので、ここで乗る
+                 * 誰かがチューナーを開いた、かもしれない。そこへ同じチャンネルを
+                 * 要求するとエージェントが相乗りさせるので、ロゴを只で読める。
+                 * 開いた瞬間に来る知らせなので、ここで乗る
                  */
                 void guard('logo', ride);
                 break;
+            case 'scan':
+                emit('scan');
+                break;
+            case 'channels':
+                // スキャンで局が入れ替わった。取り込み直して番組表も集め直す
+                void guard('epg', async () => {
+                    await sync();
+                    await collectOnce();
+                });
+                break;
             default:
-                // mirakc 自身の録画・タイムシフトの知らせ。denpa は使わない
                 break;
         }
     });

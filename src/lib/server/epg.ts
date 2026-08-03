@@ -1,26 +1,25 @@
+import type { EitEvent } from '../ts/eit';
 import type { Service } from '../types';
 import { config } from './config';
 import { database, now, queryAll, queryOne } from './db';
 import { emit } from './events';
-import * as mirakc from './mirakc';
 import { applyRules } from './rules';
 import { resolveConflicts } from './scheduler';
 import { toHalfWidth } from './title';
-
-const CHANNEL_TYPES = new Set(['GR', 'BS', 'CS', 'SKY']);
+import { type AgentChannel, getChannels, programKey, serviceKey } from './tuner';
 
 /**
  * 録画できるサービスかどうか。ARIB のサービス種別 (STD-B10) で決める。
  *
- * mirakc はデータ放送(NHKデータ1、Gガイド)もワンセグ(tvkワンセグ1)も
- * ラジオも同じ一覧で返す。これらを録っても映像は入っておらず、
+ * スキャンはデータ放送(NHKデータ1、Gガイド)もワンセグ(tvkワンセグ1)も
+ * ラジオも同じ一覧に入れる。これらを録っても映像は入っておらず、
  * データ放送は番組表上「24時間ぶんの1番組」になっていたりする。
  * ルールが引っかけて録画が失敗するので、取り込む時点で落とす。
  */
 const DIGITAL_TV = 1;
 
 /**
- * 「いま mirakc が知っている局」だけに絞る条件。
+ * 「いまエージェントが知っている局」だけに絞る条件。
  *
  * 局の行は消さない。消すと、その局で録った録画や過去の予約が辿れなくなるため
  * ([data.md](../../../docs/data.md))。代わりに、**直近の取り込みで見かけなかった
@@ -29,12 +28,12 @@ const DIGITAL_TV = 1;
  * 取り込みでは同じ時刻を全件に入れるので、いちばん新しい `updated_at` が
  * 「最後に取り込んだ時刻」になる。それに満たないものが取り残しにあたる。
  *
- * 実機では、スキャンをやり直した結果 mirakc が知っているのは32局なのに
- * denpa 側には120局が残っていて、番組表に空の列が並んでいた。
+ * 実機では、スキャンをやり直した結果 知っているのは32局なのに denpa 側には
+ * 120局が残っていて、番組表に空の列が並んでいた。
  */
 export const CURRENT_SERVICES = 'updated_at >= (SELECT MAX(updated_at) FROM services)';
 
-function syncServices(services: mirakc.MirakcService[]): number {
+export function syncServices(channels: AgentChannel[]): number {
     const stmt = database().prepare(`
         INSERT INTO services (id, service_id, network_id, name, type, service_type, channel,
                               remote_control_key, has_logo, updated_at)
@@ -59,28 +58,30 @@ function syncServices(services: mirakc.MirakcService[]): number {
      */
     const seen = new Set<number>();
     const tx = database().transaction(() => {
-        for (const s of services) {
-            if (s.channel === undefined || !CHANNEL_TYPES.has(s.channel.type)) continue;
-            // 映像の入っていないサービスは録っても仕方がない
-            if (s.type !== DIGITAL_TV) {
-                dropped.push(s.id);
-                continue;
+        for (const channel of channels) {
+            for (const service of channel.services) {
+                const id = serviceKey(channel.networkId, service.serviceId);
+                // 映像の入っていないサービスは録っても仕方がない
+                if (service.serviceType !== DIGITAL_TV) {
+                    dropped.push(id);
+                    continue;
+                }
+                seen.add(id);
+                stmt.run(
+                    id,
+                    service.serviceId,
+                    channel.networkId,
+                    toHalfWidth(service.name),
+                    channel.type,
+                    service.serviceType,
+                    channel.channel,
+                    channel.remoteControlKeyId,
+                    // ロゴは放送波から拾ったときに立てる (logo.ts)
+                    0,
+                    at,
+                );
+                count++;
             }
-            seen.add(s.id);
-            stmt.run(
-                s.id,
-                s.serviceId,
-                s.networkId,
-                toHalfWidth(s.name ?? ''),
-                s.channel.type,
-                s.type,
-                s.channel.channel,
-                s.remoteControlKeyId ?? null,
-                // ロゴは mirakc からは取れない。denpa が放送波から拾ったときに立てる
-                0,
-                at,
-            );
-            count++;
         }
         // 以前の取り込みで入ってしまったデータ放送やワンセグを片付ける。
         // 残っていると番組表に並び続け、ルールが引っかけて録画が失敗する
@@ -106,7 +107,7 @@ function syncServices(services: mirakc.MirakcService[]): number {
 }
 
 /**
- * mirakc から消えた局の持ち物を片付ける。
+ * 選局できなくなった局の持ち物を片付ける。
  *
  * **局の行そのものは残す。** 消すと、その局で録った録画や過去の予約が辿れなくなる
  * ([data.md](../../../docs/data.md))。片付けるのは番組表と、まだ始めていない予約。
@@ -116,7 +117,7 @@ function syncServices(services: mirakc.MirakcService[]): number {
  * 録りに行っても掴めないので、始まるのを待って失敗するより先に取り消しておく
  * (取り消した予約は一覧から戻せる)。
  *
- * **1局も取れなかった回では何もしない** (`count > 0` のときだけ呼ぶ)。mirakc が
+ * **1局も取れなかった回では何もしない** (`count > 0` のときだけ呼ぶ)。エージェントが
  * 起動直後や不調で空を返すことはあり、それを「全部消えた」と読むと番組表ごと消える。
  */
 function forgetMissing(at: number, seen: Set<number>): number {
@@ -143,28 +144,23 @@ function forgetMissing(at: number, seen: Set<number>): number {
     }
     if (programs === 0 && reservations === 0) return 0;
     console.log(
-        `[epg] mirakc から消えた局を片付けました: ${names.join(', ')} ` +
+        `[epg] 選局できなくなった局を片付けました: ${names.join(', ')} ` +
             `(番組 ${programs} 件 / 予約 ${reservations} 件を取り消し)`,
     );
     return reservations;
 }
 
 /**
- * 局だけを取り込む。番組表は待たない。
+ * 局の一覧をエージェントから取り込む。番組表は待たない。
  *
- * **mirakc は局と番組表を別々に持っている。** 知らせが飛んでくるのは番組表のぶんだけで
- * (`epg.programs-updated`)、局が揃ったことは教えてくれない。取り込みを知らせ任せに
- * していた頃は、初回起動やスキャン直後の「局は分かったが番組表はこれから」の間、
- * denpa の番組表が空のままだった (実機で mirakc 側 125局 / 番組 0 のとき、
- * denpa 側は2局)。番組表が埋まるのは数十分先なので、局だけ先に出す。
- *
- * 番組表を取りに行かないので軽い。局の一覧は数十KBで、10分ごとの全体取り込みの
- * 数百分の一しかない。
+ * **どの局が居るかはスキャンで決まる。** 番組表を集めるのはそのあとで、
+ * 局によっては数分かかる。局だけ先に出しておかないと、スキャンの直後に
+ * 番組表が空のまま何も出ない時間が続く。
  */
 export async function syncServicesOnly(): Promise<number> {
     const current = `SELECT COUNT(*) AS n FROM services WHERE ${CURRENT_SERVICES}`;
     const before = queryOne<{ n: number }>(current)?.n ?? 0;
-    const count = syncServices(await mirakc.getServices());
+    const count = syncServices(await getChannels());
     /*
      * 数が変わったときだけ知らせる。毎回知らせると、番組表を開いている端末が
      * 何も変わっていないのに1分おきに読み直すことになる
@@ -173,26 +169,20 @@ export async function syncServicesOnly(): Promise<number> {
     return count;
 }
 
-/** デュアルモノ判定に使う componentType。enc.js が AUDIOCOMPONENTTYPE を見ているのと同じ値 */
-function audioType(p: mirakc.MirakcProgram): number | null {
-    if (p.audio?.componentType !== undefined) return p.audio.componentType;
-    if (p.audios !== undefined && p.audios.length > 0) return p.audios[0].componentType;
-    return null;
-}
-
 /**
  * 番組の serviceId を services.id に読み替える表を作る。
  *
- * mirakc の `Program.serviceId` は **ARIB のサービスID**(例: 23608)で、
- * `Service.id` の内部ID(例: 3239123608)とは別物。そのまま入れると番組表の
- * JOIN が1件も当たらず、番組が丸ごと出なくなる。networkId と合わせて引き直す。
+ * EIT が持っているのは **ARIB のサービスID**(例: 23608)で、`Service.id` の
+ * 内部ID(例: 3239123608)とは別物。そのまま入れると番組表の JOIN が1件も当たらず、
+ * 番組が丸ごと出なくなる。networkId と合わせて引き直す。
  */
 function serviceIdIndex(): Map<string, number> {
     const services = queryAll<Service>('SELECT id, network_id, service_id FROM services');
     return new Map(services.map((s) => [`${s.network_id}:${s.service_id}`, s.id]));
 }
 
-function syncPrograms(programs: mirakc.MirakcProgram[]): number {
+/** 読み取った番組をDBへ。取り込めた件数を返す */
+export function savePrograms(events: EitEvent[]): number {
     const index = serviceIdIndex();
     const stmt = database().prepare(`
         INSERT INTO programs (id, service_id, network_id, event_id, start_at, end_at,
@@ -221,35 +211,34 @@ function syncPrograms(programs: mirakc.MirakcProgram[]): number {
     const at = now();
     let count = 0;
     const tx = database().transaction(() => {
-        for (const p of programs) {
-            // duration 0 は「終了時刻未定」を意味する。録画時間が決まらないので扱わない
-            if (!p.duration) continue;
+        for (const event of events) {
+            // 開始も尺も決まっていないものは録画の時刻が決まらない
+            if (event.startAt === null || event.duration === null || event.duration === 0) continue;
             // チャンネル設定に無いサービスの番組は録れないので捨てる
-            const serviceId = index.get(`${p.networkId}:${p.serviceId}`);
+            const serviceId = index.get(`${event.originalNetworkId}:${event.serviceId}`);
             if (serviceId === undefined) continue;
+            const extended = Object.keys(event.extended).length === 0 ? null : event.extended;
             stmt.run(
-                p.id,
+                programKey(event.originalNetworkId, event.serviceId, event.eventId),
                 serviceId,
-                p.networkId,
-                p.eventId,
-                p.startAt,
-                p.startAt + p.duration,
-                toHalfWidth(p.name ?? ''),
-                toHalfWidth(p.description ?? ''),
-                p.extended === undefined ? null : JSON.stringify(p.extended),
-                p.genres === undefined ? null : JSON.stringify(p.genres.map((g) => g.lv1)),
-                p.genres === undefined
-                    ? null
-                    : JSON.stringify(p.genres.map((g) => ({ lv1: g.lv1, lv2: g.lv2 }))),
-                p.isFree ? 1 : 0,
-                audioType(p),
-                p.audios === undefined
+                event.originalNetworkId,
+                event.eventId,
+                event.startAt,
+                event.startAt + event.duration,
+                toHalfWidth(event.name),
+                toHalfWidth(event.description),
+                extended === null ? null : JSON.stringify(extended),
+                event.genres.length === 0 ? null : JSON.stringify(event.genres.map((g) => g.lv1)),
+                event.genres.length === 0 ? null : JSON.stringify(event.genres),
+                event.isFree ? 1 : 0,
+                event.audios[0]?.componentType ?? null,
+                event.audios.length === 0
                     ? null
                     : JSON.stringify(
-                          p.audios.map((a) => ({ componentType: a.componentType, langs: a.langs })),
+                          event.audios.map((a) => ({ componentType: a.componentType, langs: a.langs })),
                       ),
-                p.video?.type ?? null,
-                p.video?.resolution ?? null,
+                event.video?.type ?? null,
+                event.video?.resolution ?? null,
                 at,
             );
             count++;
@@ -301,16 +290,35 @@ export interface SyncResult {
     reserved: number;
 }
 
-export async function sync(): Promise<SyncResult> {
-    const [services, programs] = await Promise.all([mirakc.getServices(), mirakc.getPrograms()]);
+/**
+ * 番組表が変わったあとの片付け。
+ *
+ * ルールを当て直し、予約の時刻を合わせ、古い番組を捨て、取り合いを裁き直す。
+ * **番組を読むところとは分けてある** — 1チャンネル集めるたびに全部やり直すと、
+ * 52チャンネルぶん同じことを52回することになる。
+ */
+export function settle(programs = 0): SyncResult {
     const result: SyncResult = {
-        services: syncServices(services),
-        programs: syncPrograms(programs),
+        services: 0,
+        programs,
         retimed: syncReservationTimes(),
         pruned: pruneOldPrograms(),
-        reserved: 0,
+        reserved: applyRules(),
     };
-    result.reserved = applyRules();
+    emit('programs');
+    return result;
+}
+
+/**
+ * 局と番組表を取り込み直す。手で押したときと、起動直後に1回。
+ *
+ * 番組そのものを集めるのは `epg-collect.ts` で、こちらは**溜まっているものを
+ * 使って予約を組み直すだけ**。
+ */
+export async function sync(): Promise<SyncResult> {
+    const services = syncServices(await getChannels());
+    const result = settle();
+    result.services = services;
     await resolveConflicts();
     return result;
 }

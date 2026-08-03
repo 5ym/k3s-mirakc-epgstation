@@ -7,13 +7,13 @@ import { config } from './config';
 import { database, queryAll } from './db';
 import { CURRENT_SERVICES } from './epg';
 import { emit } from './events';
-import { getTuners, type MirakcTuner, openChannelStream } from './mirakc';
 import { chunks } from './stream';
+import { type AgentTuner, getTuners, openChannelStream } from './tuner';
 
 /**
  * 局ロゴを集める。
  *
- * mirakc は Mirakurun と違って**ロゴを TS から集めない**ので、denpa が拾う。
+ * 放送波の CDT (地上波) とデータカルーセル (衛星) に流れてくるものを拾う。
  * 集め方は Mirakurun と同じで、開いているストリームに相乗りする。
  *
  * ロゴは滅多に変わらないうえ、放送波に流れてくるのは数十秒〜数分に一度なので、
@@ -59,23 +59,22 @@ const SATELLITE_TIMEOUT = 20 * 60_000;
 const SATELLITE_QUIET = 15_000;
 /**
  * 相乗りのときの上限。向こうの都合でいつ閉じてもおかしくないので短くする。
- * こちらはチューナーを増やさない (同じチャンネルなら mirakc が配っているものへ混ぜる)
+ * こちらはチューナーを増やさない (同じチャンネルなら**エージェントが相乗りさせる**)
  *
- * **実際に集めているのはほぼこちら。** 実機では、BS の38局ぶんが mirakc の
- * 局調べに相乗りした一度で全部揃った (denpa が自分でチューナーを開いた記録は
- * 残っていない)。mirakc は番組表と局を集めるために全チャンネルを定期的に
- * 開くので、こちらはそこに乗っているだけで只で埋まる。
+ * **実際に集めているのはほぼこちら。** 実機では、BS の38局ぶんが番組表集めに
+ * 相乗りした一度で全部揃った (denpa が自分でチューナーを開いた記録は残っていない)。
+ * 番組表集めは全チャンネルを定期的に開くので、こちらはそこに乗っているだけで只で埋まる。
  */
 const RIDE_TIMEOUT = 3 * 60_000;
 /**
- * ロゴを取りに行くときの優先度。**web の口から指定できるいちばん下が 0。**
+ * ロゴを取りに行くときの優先度。**いちばん下。**
  *
- * −2 を渡しても mirakc は 0 に丸める (実機で確認)。−1 は mirakc が自分の
- * 番組表集めに使う値で、そこへは外から入れない。つまり**優先度では譲れない**。
- *
- * 代わりに `collectingEpg` で譲る。番組表を集めている間はこちらから開かない
+ * mirakc の頃は 0 が下限で、番組表集め (−1) には譲れなかった。エージェントに
+ * 移ってからは番号をこちらで決められるので、素直に「録画 > スキャン >
+ * 番組表 > ロゴ」と並べてある (`config.priority`)。ロゴが出なくても番組表は
+ * 読めるが、番組情報が来なければ何も予約できない
  */
-const SWEEP_PRIORITY = 0;
+const SWEEP_PRIORITY = config.priority.logo;
 /**
  * 画面から取りに行くときに同時に開く数。
  *
@@ -101,7 +100,7 @@ function logoDir(): string {
     return join(config.dataDir, 'logos');
 }
 
-/** サービスIDごとのファイル。mirakc の内部IDをそのまま名前にする */
+/** サービスIDごとのファイル。局の内部IDをそのまま名前にする */
 function logoPath(serviceId: number): string {
     return join(logoDir(), `${serviceId}.png`);
 }
@@ -231,7 +230,7 @@ function store(networkId: number, serviceIds: number[], data: Uint8Array): numbe
             writeFileSync(working, data);
             renameSync(working, logoPath(id));
             /*
-             * **`updated_at` は触らない。** あれは「最後に mirakc から取り込んだ
+             * **`updated_at` は触らない。** あれは「最後に取り込んだ
              * 時刻」で、番組表は *いちばん新しいものと同じ時刻の局だけ* を出す
              * (`CURRENT_SERVICES`)。ロゴを1局ぶん保存するたびにここを進めていた
              * 頃は、**その局だけが「いまの局」になって番組表から他が消えていた**
@@ -348,7 +347,7 @@ function repaint(serviceId: number): void {
 /**
  * ロゴをまだ持っていない局。
  *
- * いま mirakc が知っている局だけを対象にする。取り残しの局まで見に行くと、
+ * いま選局できる局だけを対象にする。取り残しの局まで見に行くと、
  * もう選局できないチャンネルを1局ずつ60秒かけて開いては諦めることになり、
  * 本当に要る局まで順番が回ってこない。
  */
@@ -380,7 +379,7 @@ function needsLogo(serviceId: number): boolean {
     }
 }
 
-/** いま mirakc が知っている局。取り残しは見に行かない */
+/** いま選局できる局。取り残しは見に行かない */
 function currentServices(): { id: number; type: string; channel: string; network_id: number }[] {
     return queryAll(
         `SELECT id, type, channel, network_id FROM services
@@ -452,19 +451,18 @@ function missingSatellites(): number {
  * いま開いて読んでいる物理チャンネル。
  *
  * **相乗り (`ride`) が自分の開けたものに乗らないように持つ。** こちらが開くと
- * mirakc が `tuner.status-changed` を飛ばし、それを合図に相乗りが走って、
- * 同じチャンネルをもう1本開いていた。チューナーは増えないが、同じものを二重に
- * 読むだけで、画面にも同じ中継が2つ並ぶ (実機で `BS01_1` が2つ出ていた)。
+ * エージェントが `tuners` を飛ばし、それを合図に相乗りが走って、同じチャンネルを
+ * もう1本開いていた。チューナーは増えないが、同じものを二重に読むだけで、
+ * 画面にも同じ中継が2つ並ぶ (実機で `BS01_1` が2つ出ていた)。
  */
 const collecting = new Set<string>();
 
 /**
  * 1つの物理チャンネルを開いて、そこに乗っている局のロゴを拾う。
  *
- * **サービス単位では開かない。** mirakc はサービス単位のストリームでは
- * その局に要るPIDだけを通すので、ロゴを載せている CDT (PID 0x0029) は
- * どの局のPMTにも載っていない都合でまるごと落ちる。実機で確かめると、
- * BS をサービス単位で3分・427MB 読んでも CDT は1つも来なかった。
+ * **物理チャンネルを丸ごと開く。** 局を選り分けてしまうと、ロゴを載せている
+ * CDT (PID 0x0029) はどの局のPMTにも載っていない都合でまるごと落ちる。
+ * 実機で確かめると、局単位で3分・427MB 読んでも CDT は1つも来なかった。
  *
  * **1局取れた時点でも閉じない。** 1つのTSにはその物理チャンネルの局が全部
  * 流れていて、ロゴは局ごとに別々のタイミングで来る。せっかく開いたのだから、
@@ -556,43 +554,28 @@ async function collect(target: Target, timeout: number, signal?: AbortSignal): P
  * 種別を見ずに「1本でも空いていれば」で数えていた頃は、地上波のチューナーが
  * 1本しか空いていなくても2チャンネルを同時に開きに行っていた。衛星用の空きは
  * 地上波の役に立たない。
+ *
+ * **番組表集めに譲るための特別扱いは要らなくなった。** ロゴの優先度がいちばん下
+ * なので、空きが無ければエージェントが断るし、開いている最中でも番組表のほうが
+ * 強ければ蹴られる。
  */
 async function freeTuners(type: string): Promise<number> {
     try {
-        const tuners = (await getTuners()).filter((tuner) => tuner.types.includes(type as ChannelType));
-        // その種別で番組表を集めている間はこちらから開かない (下記)
-        if (collectingEpg(tuners)) return 0;
-        return tuners.filter((tuner) => tuner.isFree === true).length;
+        const tuners = await getTuners();
+        return tuners.filter(
+            (tuner) => !tuner.disabled && tuner.types.includes(type as ChannelType) && tuner.channel === null,
+        ).length;
     } catch {
-        // mirakc に聞けないなら開きに行かない
+        // エージェントに聞けないなら開きに行かない
         return 0;
     }
 }
 
-/**
- * mirakc がいま番組表を集めているか。**渡すのはその種別のチューナーだけ。**
- *
- * **優先度では譲れないので、開くかどうかで譲る。** 番組表集めの優先度は −1 で、
- * web の口から指定できるのは 0 が下限なので、こちらが空きを取ってしまうと
- * あちらが待たされる。ロゴが出なくても番組表は読めるが、番組情報が来なければ
- * 何も予約できない。集めている間はこちらが引く。
- *
- * 衛星のチューナーで集めているからといって地上波まで止める必要はないので、
- * 種別で絞ってから見る。
- *
- * 見分けは掴んでいる相手のID (`job:epg....`)。mirakc 自身の仕事には
- * User-Agent が付かない。
- */
-function collectingEpg(tuners: MirakcTuner[]): boolean {
-    return tuners.some((tuner) => (tuner.users ?? []).some((user) => user.id.startsWith('job:epg.')));
-}
-
-/** いま mirakc が開けている物理チャンネル。選局コマンドから読む */
-function openChannels(tuners: MirakcTuner[]): Set<string> {
+/** いまエージェントが開けている物理チャンネル */
+function openChannels(tuners: AgentTuner[]): Set<string> {
     const open = new Set<string>();
     for (const tuner of tuners) {
-        const channel = tuner.command?.match(/--channel\s+(\S+)/)?.[1];
-        if (channel !== undefined) open.add(channel);
+        if (tuner.channel !== null) open.add(tuner.channel.channel);
     }
     return open;
 }
@@ -693,12 +676,11 @@ async function drain(queue: Target[], parallel: number, signal: AbortSignal): Pr
 /**
  * **いま開いている選局に相乗りして**ロゴを拾う。
  *
- * mirakc は番組表を集めるために自分でチューナーを開く。そこへ同じチャンネルの
- * サービスを要求すると、mirakc は**新しいチューナーを掴まずに配っているものへ混ぜる**
- * ので、こちらは只で電波を読める。空いた時間に自分で開き直すより早く埋まり、
- * チューナーの取り合いも起きない。
+ * 番組表集めも録画も、物理チャンネルを丸ごと開く。そこへ同じチャンネルを要求すると
+ * **エージェントは新しいチューナーを掴まずに相乗りさせる**ので、こちらは只で電波を
+ * 読める。空いた時間に自分で開き直すより早く埋まり、チューナーの取り合いも起きない。
  *
- * 合図は `tuner.status-changed`。開いた瞬間に呼ばれるので、閉じるまでの間に読み切る。
+ * 合図はエージェントの `tuners`。開いた瞬間に飛んでくるので、閉じるまでの間に読み切る。
  */
 export async function ride(): Promise<number> {
     if (riding) return 0;
@@ -720,7 +702,7 @@ export async function ride(): Promise<number> {
         }
         return found;
     } catch {
-        // mirakc に聞けなければ何もしない。次の知らせでまた来る
+        // エージェントに聞けなければ何もしない。次の知らせでまた来る
         return 0;
     } finally {
         riding = false;
@@ -730,9 +712,9 @@ export async function ride(): Promise<number> {
 /**
  * 定期の見回り。**相乗りだけで、自分ではチューナーを開かない。**
  *
- * mirakc は番組表と局を調べるために全チャンネルを定期的に開く。その選局へ
+ * 番組表集めは全チャンネルを定期的に開く。その選局へ
  * 混ぜてもらえば只で読めるので、**実際に集まっているのはほぼこちら**だった。
- * 実機で確かめると、BS の38局ぶんは mirakc の局調べに相乗りした一度で全部
+ * 実機で確かめると、BS の38局ぶんは局調べに相乗りした一度で全部
  * 揃っていて、denpa が自分でチューナーを開いて拾えた記録は残っていない。
  *
  * 自分でも開いていた頃は、10分ごとに1チャンネルを数分掴んでいた。相乗りで

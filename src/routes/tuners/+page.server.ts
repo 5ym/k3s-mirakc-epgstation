@@ -1,57 +1,29 @@
 import { fail } from '@sveltejs/kit';
 import { queryAll, queryOne } from '$lib/server/db';
+import { collectState } from '$lib/server/epg-collect';
 import { stats as logoStats, sweepNow, sweepState } from '$lib/server/logo';
-import {
-    getChannels,
-    getEpgProgress,
-    getServices,
-    getTuners,
-    type MirakcTuner,
-    ping,
-} from '$lib/server/mirakc';
-import { refresh, restartMirakc, start, stop } from '$lib/server/scan';
+import { refresh, start, stop } from '$lib/server/scan';
 import { cardStatus } from '$lib/server/scramble';
+import { type AgentTuner, getChannels, getTuners, ping } from '$lib/server/tuner';
 import type { ChannelType, Service } from '$lib/types';
 
 const TYPES: ChannelType[] = ['GR', 'BS', 'CS'];
 
 interface TunerUser {
-    id: string;
+    use: string;
     priority: number;
-    agent?: string;
-    /** 画面に出す言葉。denpa 以外の相手は User-Agent をそのまま出す */
+    /** 画面に出す言葉 */
     label: string;
 }
 
 /**
- * mirakc が自分で回している仕事。掴んでいるのが denpa とは限らない。
- * (`/api/tuners` の `users[].id` が `job:` で始まり、User-Agent は付かない)
- */
-const JOBS: Record<string, string> = {
-    // 物理チャンネルを1つずつ選局して、そこに何局乗っているかを調べている
-    'epg.scan-services': 'どの局が受信できるか調べています',
-    'epg.update-schedules': '番組表 (EPG) を集めています',
-    'epg.sync-clocks': '放送の時刻に合わせています',
-};
-
-/**
  * 掴んでいる相手を読める言葉に直す。
  *
- * mirakc が持っているのは User-Agent だけで、そこには ASCII しか載せられない
- * (ヘッダなので)。denpa は用途とIDだけを渡し、番組名はここで引き直す。
- * `Bun/1.3.14` と出ていた頃は、録画なのかロゴ集めなのかが画面から読めなかった。
- *
- * **mirakc 自身の仕事には User-Agent が無い。** 「不明」と出していた頃は、
- * いちばんよく居座っている相手 (番組表集め) が誰なのか分からなかった。
+ * エージェントが持っているのは用途の印だけで、そこには ASCII しか載せられない
+ * (以前は HTTP ヘッダに載せていた名残で、いまも短いままにしてある)。
+ * 番組名はここで引き直す。
  */
-function describe(user: { id: string; agent?: string }): string {
-    const use = user.agent?.match(/denpa \(([^)]+)\)/)?.[1];
-    if (use === undefined) {
-        const job = user.id.match(/^job:(.+)$/)?.[1];
-        if (job !== undefined) return `mirakc: ${JOBS[job] ?? job}`;
-        return user.agent ?? user.id;
-    }
-
+function describe(use: string): string {
     const recording = use.match(/^rec (\d+)$/);
     if (recording !== null) {
         const row = queryOne<{ name: string }>(
@@ -64,46 +36,61 @@ function describe(user: { id: string; agent?: string }): string {
     const logo = use.match(/^logo \S+\/(\S+)$/);
     if (logo !== null) return `局ロゴ収集 (${logo[1]})`;
 
+    const epg = use.match(/^epg (\S+)$/);
+    if (epg !== null) return `番組表 (${epg[1]})`;
+
+    const scan = use.match(/^scan (\S+)$/);
+    if (scan !== null) return `チャンネルスキャン (${scan[1]})`;
+
     return use;
 }
 
-function withLabels(tuners: MirakcTuner[]): (Omit<MirakcTuner, 'users'> & { users: TunerUser[] })[] {
+function withLabels(tuners: AgentTuner[]): (Omit<AgentTuner, 'users'> & { users: TunerUser[] })[] {
     return tuners.map((tuner) => ({
         ...tuner,
-        users: (tuner.users ?? []).map((user) => ({ ...user, label: describe(user) })),
+        users: tuner.users.map((user) => ({ ...user, label: describe(user.use) })),
     }));
+}
+
+/**
+ * 局ごとの番組表の集まり具合。**denpa 自身のDBから数える。**
+ *
+ * mirakc に全件 (数MB) を聞いていた頃は、番組表を持っているのが向こうだったので
+ * 覗きに行くしかなかった。いまは自分で集めているので、SQL 1本で済む。
+ */
+function epgProgress(): Map<number, { programs: number; until: number }> {
+    const rows = queryAll<{ service_id: number; programs: number; until: number }>(
+        'SELECT service_id, COUNT(*) AS programs, MAX(end_at) AS until FROM programs GROUP BY service_id',
+    );
+    return new Map(rows.map((row) => [row.service_id, { programs: row.programs, until: row.until }]));
 }
 
 export async function load() {
     return {
-        // 実際の状況はチューナー側が持っている。開いた時点で取りに行く
+        // 実際の状況はエージェントが持っている。開いた時点で取りに行く
         scan: await refresh(),
         /*
          * 以下は相手待ちなので promise のまま返して後から流し込む。
-         * スキャン中は mirakc が止まっていて応答しないので、待つと画面が出ない
+         * 待つと画面が出ない
          */
-        // 掴んでいる相手は User-Agent でしか分からない。読める言葉に直してから渡す
         tuners: getTuners()
             .then(withLabels)
             .catch(() => []),
+        // スキャンで見つかった物理チャンネルと、そこに乗っている局
         channels: getChannels().catch(() => []),
-        mirakc: ping(),
+        agent: ping(),
         card: cardStatus(),
-        /*
-         * スキャンの後、mirakc は局も番組表も一度捨てて集め直す。
-         * 「まだ途中なのか、その局が取れていないのか」を見分けられるように、
-         * mirakc 側の集まり具合をそのまま出す
-         */
-        mirakcServices: getServices().catch(() => []),
-        epg: getEpgProgress().catch(() => []),
-        // denpa が取り込み済みの局。mirakc が見つけたものとの差が分かる
+        // denpa が取り込み済みの局。スキャンで見つかったものとの差が分かる
         services: queryAll<Service>('SELECT * FROM services ORDER BY type, channel, service_id'),
+        epg: Object.fromEntries(epgProgress()),
+        /** 番組表を集めている最中の様子。1チャンネルに数分かかる */
+        collect: collectState(),
         /*
          * 局ロゴを何局ぶん持っているか。
          *
-         * mirakc はロゴを集めないので denpa が放送波から拾っているが、
-         * 拾えたかどうかを確かめる場所がどこにも無かった。番組表にロゴが
-         * 出ないとき、取れていないのか出し方が悪いのかを見分けられるようにする
+         * ロゴは放送波から拾うしかないが、拾えたかどうかを確かめる場所が
+         * どこにも無かった。番組表にロゴが出ないとき、取れていないのか
+         * 出し方が悪いのかを見分けられるようにする
          */
         logos: logoStats(),
         /*
@@ -132,21 +119,6 @@ export const actions = {
     scanStop: async () => {
         const result = await stop();
         if (!result.stopped) return fail(409, { message: result.message });
-        return { success: true, scan: result.message };
-    },
-
-    /**
-     * mirakc を入れ直す。
-     *
-     * **局が足りないときに効くのはこれだけ。** 局を調べているのは mirakc 側で、
-     * denpa がそこから取り込み直しても mirakc が知らないものは増えない。
-     * mirakc は起動時に局と番組表を取りに行くので、入れ直すのが一番速い道になる。
-     * 揃うたびに `/events` で知らせが来るので、denpa は待ち構えるだけでいい。
-     */
-    restartMirakc: async ({ request }) => {
-        const form = await request.formData();
-        const result = await restartMirakc(form.get('forget') === 'on');
-        if (!result.ok) return fail(409, { message: result.message });
         return { success: true, scan: result.message };
     },
 

@@ -16,6 +16,8 @@ export type DenpaEvent =
     | 'migrate'
     | 'scan'
     | 'services'
+    /** 番組表が増えた・書き換わった。1チャンネル集め終わるたびに飛ぶ */
+    | 'programs'
     /** 局ロゴを取りに行っている最中の進み具合。1チャンネルに数分かかる */
     | 'logos'
     | 'tuners';
