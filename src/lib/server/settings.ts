@@ -76,8 +76,3 @@ export function saveSettings(patch: Partial<Settings>): Settings {
     tx();
     return settings();
 }
-
-/** その設定が環境変数のままなのか、画面で変えたものなのか */
-export function isStored(key: keyof Settings): boolean {
-    return stored(key) !== undefined;
-}

@@ -25,6 +25,8 @@ EPGStation の置き換えとして作ったもので、エンコード設定は
 | `src/lib/server/cm.ts` | CM検出 (無音 + CM尺) |
 | `src/lib/server/cm-jls.ts` | CM検出 (join_logo_scp。任意) |
 | `src/lib/server/encoder.ts` | 録画のエンコード (AV1 / H.264) |
+| `src/lib/server/subtitle.ts` | ARIB字幕を絵にして `.sup` にする (sub2video) |
+| `src/lib/pgs.ts` | PGS (Blu-ray の字幕) の組み立て。ffmpeg に符号器が無いので自前 |
 | `src/lib/play.ts` | 外部プレイヤーを開くURLの組み立て |
 | `src/lib/server/library.ts` | 保存先でのファイル配置 |
 | `src/lib/server/metadata.ts` | .nfo とサムネイル (Kodi など向け) |
@@ -36,6 +38,7 @@ EPGStation の置き換えとして作ったもので、エンコード設定は
 | `src/lib/components/LogoArea.svelte` | CM検出用のロゴ位置を画面から教える |
 | `src/lib/ts/psi.ts` | TS の PSI (NIT / SDT) を読む。チューナー側と共通 |
 | `src/lib/ts/logo.ts` | TS から局ロゴ (CDT) を読む |
+| `src/lib/ts/logo-palette.ts` | 局ロゴPNGに ARIB の色の表 (PLTE/tRNS) を入れ直す |
 | `src/lib/ts/synth.ts` | TS のセクションを組み立てる (テストと偽mirakc用) |
 | `src/lib/server/migrate.ts` | EPGStation からの引き継ぎ |
 | `src/lib/server/dav.ts` | WebDAV (Kodi 向け) |
@@ -118,7 +121,6 @@ k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書い�
 | `ONAIR_POLL_INTERVAL` | `300000` | 放送の延長を見に行く間隔(ms)。これも保険 |
 | `ONAIR_FALLBACK_WAIT` | `90000` | 番組単位で開いて何も来ないとき、サービス単位に切り替えるまで(ms) |
 | `SHUTDOWN_WAIT` | `21600000` | 止められたとき、録画が終わるまで待つ上限(ms)。`0` で待たない |
-| `LIVE_IDLE_TIMEOUT` | — | 見ていない中継を畳むまで(ms) |
 | `EPGSTATION_*` | — | 引き継ぎ元の DB と録画置き場 |
 | `DENPA_AUTOSTART` | `1` | `0` で常駐処理を止める |
 

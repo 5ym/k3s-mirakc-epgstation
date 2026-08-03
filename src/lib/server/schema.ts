@@ -86,6 +86,21 @@ export const RECORDING_STATE = `
             ELSE 'recorded'
         END`;
 
+/**
+ * 画面に出す予約の状態。**録り始めてからは録画の行が決める。**
+ *
+ * DBに入っているのは `scheduled | conflict | canceled | missed` だけ。
+ * 予約 `r` と、その予約で録れた最新の録画 `rec` を LEFT JOIN した上で使う
+ * (一覧と番組表の両方が要るので、式はここにしか置かない)。
+ */
+export const RESERVATION_STATE = `
+        CASE
+            WHEN r.started_at IS NULL THEN r.state
+            WHEN rec.state = 'recording' THEN 'recording'
+            WHEN rec.state = 'failed' THEN 'failed'
+            ELSE 'done'
+        END`;
+
 export const SCHEMA = `
 -- 全て CREATE ... IF NOT EXISTS で書き、起動のたびに流す。
 -- 列を足すときは末尾に ALTER TABLE ... ADD COLUMN を追記していく方針

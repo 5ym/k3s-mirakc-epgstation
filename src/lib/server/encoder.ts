@@ -150,42 +150,20 @@ export function buildArgs(
 
     const args = ['-y'];
 
-    /*
-     * ARIB字幕は**PGS 1本だけ**入れる。denpa が別に作った .sup をそのまま copy する
-     * (作り方は src/lib/server/subtitle.ts)。
-     *
-     * 以前は ASS (文字) と dvdsub (絵・4色) の2本を、ここで同じ入力を2回開いて
-     * 作っていた。PGS が入ったので、どちらも残す理由が無くなった。
-     * - ASS … **外字 (DRCS) が全部「〓」になる** (libaribcaption は ASS を組むとき
-     *   DRCS を下駄記号に置き換える。`replace_drcs` はビットマップ専用)。
-     *   背景の箱も影の色で代用するだけで、位置も色も放送どおりにはならない
-     * - dvdsub … 1枚あたり4色まで。実測230色の字幕を文字・縁・箱・透明で
-     *   使い切ってしまう。PGS が無かった頃の妥協で、色が落ちる
-     * - PGS … 1枚256色。位置も背景の箱も放送そのまま。Blu-ray と同じ形なので
-     *   VLC / Kodi / Infuse / Jellyfin のどれも読める
-     *
-     * PGS が作れなかったとき (字幕の無い番組・sub2video が落ちた場合) は
-     * 字幕トラックが1本も入らない。ASS を保険に残すことはしない —
-     * 見た目が違うものが「字幕」として混ざるほうが紛らわしい
-     */
+    if (seek !== null) {
+        // 録画開始直後の1秒未満だけ、多重化されたもう一方の映像ストリームのPAT/PMTが確定しておらず
+        // エンコーダの初期化(fps/解像度確定)自体が失敗することがある。
+        // 最初の失敗を検知した後だけ頭を少し捨てて再試行する(常時捨てると本編側が削れるため)
+        args.push('-ss', String(seek));
+    }
+    // チャンネル切り替え直後は前番組のPAT/PMTの残骸が先頭に混ざるため、長めにprobeしてから構成を確定させる
+    args.push('-analyzeduration', '15000000', '-probesize', '30000000');
+    args.push('-i', input);
 
-    /** 入力ごとに同じ前置きが要る。デコーダの設定は入力ファイル単位で効く */
-    const openInput = () => {
-        if (seek !== null) {
-            // 録画開始直後の1秒未満だけ、多重化されたもう一方の映像ストリームのPAT/PMTが確定しておらず
-            // エンコーダの初期化(fps/解像度確定)自体が失敗することがある。
-            // 最初の失敗を検知した後だけ頭を少し捨てて再試行する(常時捨てると本編側が削れるため)
-            args.push('-ss', String(seek));
-        }
-        // チャンネル切り替え直後は前番組のPAT/PMTの残骸が先頭に混ざるため、長めにprobeしてから構成を確定させる
-        args.push('-analyzeduration', '15000000', '-probesize', '30000000');
-        args.push('-i', input);
-    };
-
-    openInput();
     /*
-     * 放送どおりに描いた字幕 (PGS)。ffmpeg は PGS を作れないが読むことはできるので、
-     * ここでは copy するだけ
+     * 字幕は**PGS 1本だけ**。denpa が別に作った .sup をそのまま copy する
+     * (作り方は subtitle.ts、なぜ PGS だけかは docs/architecture.md)。
+     * 作れなかったとき (字幕の無い番組・sub2video が落ちた場合) は字幕トラックが入らない
      */
     let next = 1;
     let pgs = -1;

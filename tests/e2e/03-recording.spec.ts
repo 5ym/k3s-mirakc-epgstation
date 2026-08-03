@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import type { Page } from '@playwright/test';
-import { expect, goto, reserveSoon, syncEpg, test, upcoming } from './helpers';
+import { cellOf, expect, goto, reserveSoon, syncEpg, test, upcoming } from './helpers';
 
 /**
  * 録画→エンコード→保存先に入るまでを通しで確認する。
@@ -129,6 +129,17 @@ test.describe('録画とエンコード', () => {
             expect(call.text).toContain('BS11イレブン');
             expect(call.recording?.service).toBe('BS11イレブン');
         }
+
+        /*
+         * 番組表のほうも「完了」になっていること。
+         *
+         * 予約の行が持っているのは録り始めた時刻だけで、そこから先の状態は
+         * 録画の行から引く。番組表が予約の状態をそのまま出していた頃は、
+         * 録り終えた番組が「予約済み」のまま並び、詳細に取消ボタンまで出ていた
+         * (取り消せるのは scheduled / conflict / recording だけ)
+         */
+        await goto(page, '/guide?type=BS');
+        await expect(cellOf(page, programId)).toContainText('完了');
 
         // 後続のテストに通知先を持ち越さない
         await goto(page, '/settings');

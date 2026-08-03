@@ -416,6 +416,7 @@
                         {@const link = playLink(rec)}
                         {@const canPlay = link !== null}
                         {@const canReencode = canPlay && rec.job_id === null && encodeSource(rec) !== null}
+                        {@const shown = rowState(rec)}
                         <!-- 押すと再生。中身を読みたいときは行の中の「詳細」から -->
                         <div
                             data-testid="recording-row"
@@ -457,12 +458,7 @@
                                         (rowState)。消したもの (deleted) も録画の状態から
                                         決まるので、ここで書き分けることは何も無い
                                     -->
-                                    {@render title(
-                                        rowState(rec).label,
-                                        rowState(rec).badge,
-                                        rec.name,
-                                        'recording-state',
-                                    )}
+                                    {@render title(shown.label, shown.badge, rec.name, 'recording-state')}
                                     <!--
                                         放送日時・尺・サイズは1行にまとめる。列に分けていた頃は、
                                         画面が狭いと表ごと横スクロールになって番組名まで隠れていた。

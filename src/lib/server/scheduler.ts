@@ -17,7 +17,7 @@ interface Candidate extends Reservation {
  * 「制限なし」を返し、予約を勝手に conflict にしない(実際に録画が始まるときに
  * mirakc 側が弾くので、予約表を壊すより実行時に失敗させるほうが害が小さい)。
  */
-export async function tunerCapacity(): Promise<Map<string, number>> {
+async function tunerCapacity(): Promise<Map<string, number>> {
     const capacity = new Map<string, number>();
     let tuners: mirakc.MirakcTuner[];
     try {

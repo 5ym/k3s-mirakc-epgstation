@@ -62,7 +62,7 @@ export function parseSilences(stderr: string): { silences: Silence[]; duration: 
  * 長い録画では数分かかるので、進み具合を呼ぶ側へ渡す。「CM検出中」とだけ出して
  * 何分も動かないと、止まっているのか進んでいるのか分からない。
  */
-export async function detectSilences(
+async function detectSilences(
     input: string,
     signal?: AbortSignal,
     onProgress?: (percent: number) => void,
@@ -266,7 +266,7 @@ export async function probeVideo(
 }
 
 /** 尺だけを軽く取る。CM区間を秒で扱うために必要 */
-export async function probeDuration(input: string): Promise<number> {
+async function probeDuration(input: string): Promise<number> {
     return (await probeVideo(input)).duration;
 }
 

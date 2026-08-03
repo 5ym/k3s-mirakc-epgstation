@@ -73,7 +73,7 @@ export function eta(ms: number | null): string {
  * エンコードの段階。ffmpeg が回る前の下ごしらえは進み具合を出せないので、
  * 何をしているところなのかを状態として出す。
  */
-export const PHASE_LABEL: Record<string, string> = {
+const PHASE_LABEL: Record<string, string> = {
     descramble: 'スクランブル解除中',
     cm: 'CM検出中',
     cut: 'CMカット中',
@@ -81,7 +81,7 @@ export const PHASE_LABEL: Record<string, string> = {
 };
 
 /** 行の状態。エンコードが動いていればその段階、そうでなければ録画の状態 */
-export function encodeLabel(job: { state: string; phase: string | null } | null): string | null {
+function encodeLabel(job: { state: string; phase: string | null } | null): string | null {
     if (job === null) return null;
     if (job.state === 'queued') return 'エンコード待ち';
     if (job.state !== 'running') return null;

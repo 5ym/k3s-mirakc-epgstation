@@ -44,7 +44,7 @@ function resolve(path: string): string | null {
     return full.startsWith(config.libraryDir) ? full : null;
 }
 
-export function entryFor(path: string): Entry | null {
+function entryFor(path: string): Entry | null {
     const trimmed = path.replace(/^\/+|\/+$/g, '');
     const full = resolve(trimmed);
     if (full === null) return null;
@@ -105,7 +105,7 @@ function href(origin: string, path: string, isDirectory: boolean): string {
     return escapeXml(isDirectory ? `${base}/` : base);
 }
 
-export function propfind(origin: string, entries: Entry[]): string {
+function propfind(origin: string, entries: Entry[]): string {
     const responses = entries
         .map((entry) => {
             const type = entry.isDirectory

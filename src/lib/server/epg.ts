@@ -33,7 +33,7 @@ const DIGITAL_TV = 1;
  */
 export const CURRENT_SERVICES = 'updated_at >= (SELECT MAX(updated_at) FROM services)';
 
-export function syncServices(services: mirakc.MirakcService[]): number {
+function syncServices(services: mirakc.MirakcService[]): number {
     const stmt = database().prepare(`
         INSERT INTO services (id, service_id, network_id, name, type, service_type, channel,
                               remote_control_key, has_logo, updated_at)
@@ -111,7 +111,7 @@ function serviceIdIndex(): Map<string, number> {
     return new Map(services.map((s) => [`${s.network_id}:${s.service_id}`, s.id]));
 }
 
-export function syncPrograms(programs: mirakc.MirakcProgram[]): number {
+function syncPrograms(programs: mirakc.MirakcProgram[]): number {
     const index = serviceIdIndex();
     const stmt = database().prepare(`
         INSERT INTO programs (id, service_id, network_id, event_id, start_at, end_at,
@@ -179,7 +179,7 @@ export function syncPrograms(programs: mirakc.MirakcProgram[]): number {
 }
 
 /** 予約時刻の追従。放送時間が動いた番組の予約を新しい時刻に合わせる */
-export function syncReservationTimes(): number {
+function syncReservationTimes(): number {
     const changed = database()
         .prepare(
             `
@@ -198,7 +198,7 @@ export function syncReservationTimes(): number {
 }
 
 /** 終わった番組を消す。番組表は未来しか見ないので、直近の分だけ残せば足りる */
-export function pruneOldPrograms(): number {
+function pruneOldPrograms(): number {
     const cutoff = now() - config.programRetention;
     return database().prepare('DELETE FROM programs WHERE end_at < ?').run(cutoff).changes;
 }

@@ -7,6 +7,7 @@ import { cancel as cancelEncode, enqueue, pump } from '$lib/server/encoder';
 import { emit } from '$lib/server/events';
 import { deleteRecordingFiles, reconcile } from '$lib/server/files';
 import { cancel, restore } from '$lib/server/reservations';
+import { RESERVATION_STATE } from '$lib/server/schema';
 import { settings } from '$lib/server/settings';
 import { encodeSource } from '$lib/source';
 import type { EncodeJob, Recording, Reservation } from '$lib/types';
@@ -81,12 +82,7 @@ export function load({ url, request }) {
     const reservations = queryAll<ReservationRow>(
         // 最後の state が r.* の state を隠す。出したいのは録画から引いたほう
         `SELECT r.*, s.name AS service_name, rules.name AS rule_name,
-                CASE
-                    WHEN r.started_at IS NULL THEN r.state
-                    WHEN rec.state = 'recording' THEN 'recording'
-                    WHEN rec.state = 'failed' THEN 'failed'
-                    ELSE 'done'
-                END AS state
+                ${RESERVATION_STATE} AS state
          FROM reservations r
          JOIN services s ON s.id = r.service_id
          LEFT JOIN rules ON rules.id = r.rule_id

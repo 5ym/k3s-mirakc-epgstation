@@ -4,6 +4,7 @@ import { enabled as authEnabled } from '$lib/server/auth';
 import { queryAll, queryOne } from '$lib/server/db';
 import { CURRENT_SERVICES } from '$lib/server/epg';
 import { cancel, reserve } from '$lib/server/reservations';
+import { RESERVATION_STATE } from '$lib/server/schema';
 import { settings } from '$lib/server/settings';
 import type { ChannelType, Program, Service } from '$lib/types';
 
@@ -59,7 +60,13 @@ export async function load({ url, request }) {
         type,
     );
     const programs = queryAll<GridProgram>(
-        `SELECT p.*, r.state AS reservation_state,
+        /*
+         * 予約の状態は録画の行から引く (RESERVATION_STATE)。r.state をそのまま
+         * 出していた頃は、録り終えた番組が「予約済み」のまま並び、
+         * 取消ボタンまで出ていた (予約側は録り始めた時刻しか持たないため)
+         */
+        `SELECT p.*,
+                CASE WHEN r.id IS NULL THEN NULL ELSE ${RESERVATION_STATE} END AS reservation_state,
                 rec.id AS recording_id, rec.name AS recording_name,
                 rec.library_path, rec.ts_path
          FROM programs p

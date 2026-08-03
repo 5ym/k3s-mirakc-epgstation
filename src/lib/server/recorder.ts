@@ -59,7 +59,7 @@ function fail(recordingId: number, error: string): void {
     // 予約側には何も書かない。失敗したことは録画の行が持っている
 }
 
-export function createRecording(reservation: Reservation): Recording {
+function createRecording(reservation: Reservation): Recording {
     const service = queryOne<Service>('SELECT * FROM services WHERE id = ?', reservation.service_id);
     const program = queryOne<Program>('SELECT * FROM programs WHERE id = ?', reservation.program_id);
     const parsed = parseTitle(reservation.name);

@@ -164,8 +164,12 @@ export const config = {
      * 認証をかける範囲の初期値。設定画面で変えられる。
      * `files` … 録画の配信と WebDAV だけ。画面は素通し
      * `all`   … 画面も含めて全部
+     *
+     * **ここも環境変数から読む。** 読んでいなかった頃は `BASIC_AUTH_SCOPE=all` を
+     * 渡しても黙って `files` のままで、画面に認証が掛かっているつもりでいられた
+     * (文書には「初期値として使える」と書いてあった)。
      */
-    basicAuthScope: 'files' as 'files' | 'all',
+    basicAuthScope: (str('BASIC_AUTH_SCOPE', 'files') === 'all' ? 'all' : 'files') as 'files' | 'all',
 
     /** 0 にすると EPG 取得・スケジューラ・エンコーダを起動しない (単体テスト用) */
     autostart: bool('DENPA_AUTOSTART', true),

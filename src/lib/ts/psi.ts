@@ -143,7 +143,7 @@ export class SectionAssembler {
 const CONFIRM = 3;
 
 /** `from` 以降で、188 間隔に 0x47 が続くところを探す。無ければ -1 */
-export function findSync(data: Uint8Array, from = 0): number {
+function findSync(data: Uint8Array, from = 0): number {
     for (let at = from; at + PACKET * (CONFIRM - 1) < data.length; at++) {
         let ok = true;
         for (let i = 0; i < CONFIRM; i++) {

@@ -86,7 +86,7 @@ export interface EpgProgress {
     until: number;
 }
 
-export function serviceKey(networkId: number, serviceId: number): string {
+function serviceKey(networkId: number, serviceId: number): string {
     return `${networkId}:${serviceId}`;
 }
 

@@ -23,7 +23,7 @@ export interface LibraryNameInput {
  *
  * 日時はコンテナの TZ (Asia/Tokyo) のローカル時刻。放送日で並ぶことが期待値なので UTC にはしない。
  */
-export function libraryRelPath(rec: LibraryNameInput, ext: string): string {
+function libraryRelPath(rec: LibraryNameInput, ext: string): string {
     const d = new Date(rec.start_at);
     const series = sanitizeFileName(rec.series);
     const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
