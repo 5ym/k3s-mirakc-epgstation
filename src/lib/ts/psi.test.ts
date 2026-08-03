@@ -24,15 +24,16 @@ describe('セクションの解釈', () => {
     test('SDT からサービスを読む', () => {
         const parsed = parseSdt(
             sdtSection(0x0408, 0x0004, [
-                [1024, 0x01],
+                [1024, 0x01, 'TOKYO MX1'],
                 [1025, 0x01],
             ]),
         );
         expect(parsed?.transportStreamId).toBe(0x0408);
         expect(parsed?.originalNetworkId).toBe(0x0004);
         expect(parsed?.services).toEqual([
-            { serviceId: 1024, serviceType: 0x01 },
-            { serviceId: 1025, serviceType: 0x01 },
+            // 局名は SDT にしか無い。番組表の列見出しはこれで決まる
+            { serviceId: 1024, serviceType: 0x01, name: 'TOKYO MX1' },
+            { serviceId: 1025, serviceType: 0x01, name: '' },
         ]);
     });
 

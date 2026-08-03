@@ -22,10 +22,65 @@ export function withCrc(body: number[]): Uint8Array {
 
 const be = (value: number) => [(value >> 8) & 0xff, value & 0xff];
 
+/**
+ * Unicode → JIS X 0208 の区点。**読む側の裏返し。**
+ *
+ * 表を抱え込まずに、EUC-JP のデコーダを1回だけ総当たりして作る
+ * (84区 × 94点 = 7896 文字)。テストと偽放送局からしか呼ばないので、
+ * 最初に使うときまで作らない。
+ */
+let jis: Map<string, number> | null = null;
+
+function jisTable(): Map<string, number> {
+    if (jis !== null) return jis;
+    const decoder = new TextDecoder('euc-jp');
+    jis = new Map();
+    for (let ku = 0x21; ku <= 0x74; ku++) {
+        for (let ten = 0x21; ten <= 0x7e; ten++) {
+            const char = decoder.decode(Uint8Array.of(ku | 0x80, ten | 0x80));
+            if (char.length !== 1 || char === '�') continue;
+            if (!jis.has(char)) jis.set(char, (ku << 8) | ten);
+        }
+    }
+    return jis;
+}
+
+/**
+ * 文字列を ARIB STD-B24 の8単位符号にする。
+ *
+ * 初期状態 (G0=漢字) から始めて、ASCII のところだけ英数集合へ切り替える。
+ * 本物の放送はもっと凝った切り替え方をするが、**読む側が同じ道を通れば足りる**。
+ */
+export function encodeAribText(text: string): number[] {
+    const out: number[] = [];
+    let alnum = false;
+    for (const char of text) {
+        const code = char.codePointAt(0) ?? 0;
+        if (code < 0x80) {
+            if (!alnum) out.push(0x1b, 0x28, 0x4a);
+            alnum = true;
+            out.push(code);
+            continue;
+        }
+        if (alnum) out.push(0x1b, 0x24, 0x42);
+        alnum = false;
+        const kuten = jisTable().get(char);
+        // 表に無い字は下駄で埋める (2区14点)。長さが変わらないので位置がずれない
+        out.push(...be(kuten ?? 0x222e));
+    }
+    return out;
+}
+
+/** 長さ1バイトを頭に付けた文字列。SI の記述子はどこもこの形 */
+const sized = (text: string) => {
+    const body = encodeAribText(text);
+    return [body.length, ...body];
+};
+
 export function sdtSection(
     transportStreamId: number,
     originalNetworkId: number,
-    services: [number, number][],
+    services: [number, number, string?][],
 ): Uint8Array {
     const body = [
         0x42,
@@ -38,11 +93,125 @@ export function sdtSection(
         ...be(originalNetworkId),
         0xff,
     ];
-    for (const [serviceId, serviceType] of services) {
+    for (const [serviceId, serviceType, name] of services) {
         // service_descriptor (0x48): 種別 + 事業者名 + サービス名
-        const descriptor = [0x48, 0x03, serviceType, 0x00, 0x00];
+        const payload = [serviceType, 0x00, ...sized(name ?? '')];
+        const descriptor = [0x48, payload.length, ...payload];
         body.push(...be(serviceId), 0xfc, ...be(0x8000 | descriptor.length), ...descriptor);
     }
+    return withCrc(body);
+}
+
+/** epoch ms → MJD + BCD の5バイト。放送の時刻は日本時間で書く */
+function mjdTime(at: number): number[] {
+    const jst = Math.floor(at / 1000) + 9 * 3600;
+    const mjd = Math.floor(jst / 86400) + 40587;
+    const rest = ((jst % 86400) + 86400) % 86400;
+    const bcd = (value: number) => ((Math.floor(value / 10) << 4) | (value % 10)) & 0xff;
+    return [...be(mjd), bcd(Math.floor(rest / 3600)), bcd(Math.floor(rest / 60) % 60), bcd(rest % 60)];
+}
+
+/** ms → BCD 3バイトの尺 */
+function bcdDuration(ms: number): number[] {
+    const total = Math.floor(ms / 1000);
+    const bcd = (value: number) => ((Math.floor(value / 10) << 4) | (value % 10)) & 0xff;
+    return [bcd(Math.floor(total / 3600)), bcd(Math.floor(total / 60) % 60), bcd(total % 60)];
+}
+
+export interface SynthEvent {
+    eventId: number;
+    /** epoch ms */
+    startAt: number;
+    /** ms */
+    duration: number;
+    name: string;
+    description?: string;
+    extended?: Record<string, string>;
+    genres?: [number, number][];
+    /** audio_component_descriptor の component_type (3 = ステレオ) */
+    audioType?: number;
+    /** component_descriptor の [stream_content, component_type] */
+    video?: [number, number];
+    isFree?: boolean;
+    /** 4 = 放送中。EIT[p/f] で「いま」を表すのに使う */
+    runningStatus?: number;
+}
+
+export interface EitOptions {
+    tableId: number;
+    serviceId: number;
+    transportStreamId: number;
+    originalNetworkId: number;
+    version?: number;
+    sectionNumber?: number;
+    lastSectionNumber?: number;
+    segmentLastSectionNumber?: number;
+    lastTableId?: number;
+    events: SynthEvent[];
+}
+
+function eventDescriptors(event: SynthEvent): number[] {
+    const out: number[] = [];
+
+    const short = [0x6a, 0x70, 0x6e, ...sized(event.name), ...sized(event.description ?? '')];
+    out.push(0x4d, short.length, ...short);
+
+    const extended = Object.entries(event.extended ?? {});
+    if (extended.length > 0) {
+        const items = extended.flatMap(([heading, text]) => [...sized(heading), ...sized(text)]);
+        const body = [0x00, 0x6a, 0x70, 0x6e, items.length, ...items, 0x00];
+        out.push(0x4e, body.length, ...body);
+    }
+
+    if (event.genres !== undefined && event.genres.length > 0) {
+        const body = event.genres.flatMap(([lv1, lv2]) => [(lv1 << 4) | lv2, 0xff]);
+        out.push(0x54, body.length, ...body);
+    }
+
+    if (event.video !== undefined) {
+        const [streamContent, componentType] = event.video;
+        out.push(0x50, 0x06, 0xf0 | streamContent, componentType, 0x00, 0x6a, 0x70, 0x6e);
+    }
+
+    if (event.audioType !== undefined) {
+        // stream_content / component_type / component_tag / stream_type /
+        // simulcast_group_tag / フラグ / 言語
+        out.push(0xc4, 0x09, 0x02, event.audioType, 0x10, 0x0f, 0xff, 0b0000_1110, 0x6a, 0x70, 0x6e);
+    }
+
+    return out;
+}
+
+/** EIT。番組表そのもの。table_id で p/f (0x4E) と schedule (0x50〜) が分かれる */
+export function eitSection(options: EitOptions): Uint8Array {
+    const body = [
+        options.tableId,
+        0x00,
+        0x00,
+        ...be(options.serviceId),
+        0xc1 | ((options.version ?? 0) << 1),
+        options.sectionNumber ?? 0,
+        options.lastSectionNumber ?? 0,
+        ...be(options.transportStreamId),
+        ...be(options.originalNetworkId),
+        options.segmentLastSectionNumber ?? options.lastSectionNumber ?? 0,
+        options.lastTableId ?? options.tableId,
+    ];
+
+    for (const event of options.events) {
+        const descriptors = eventDescriptors(event);
+        body.push(
+            ...be(event.eventId),
+            ...mjdTime(event.startAt),
+            ...bcdDuration(event.duration),
+            ((event.runningStatus ?? 0) << 5) |
+                (event.isFree === false ? 0x10 : 0x00) |
+                ((descriptors.length >> 8) & 0x0f),
+            descriptors.length & 0xff,
+            ...descriptors,
+        );
+    }
+
     return withCrc(body);
 }
 
@@ -124,6 +293,39 @@ export function pmtSection(serviceId: number, esPid: number, componentTag: numbe
         0x01,
         componentTag,
     ]);
+}
+
+/**
+ * ふつうの PMT。映像・音声のような ES を並べる。
+ *
+ * ロゴ用の `pmtSection` と違って中身を選べる。局を選り分ける
+ * [service-filter.ts](service-filter.ts) を試すのに要る
+ */
+export function programMap(
+    serviceId: number,
+    pcrPid: number,
+    streams: [number, number][],
+    ecmPid?: number,
+): Uint8Array {
+    const programInfo =
+        ecmPid === undefined ? [] : [0x09, 0x04, 0x00, 0x05, 0xe0 | (ecmPid >> 8), ecmPid & 0xff];
+    const body = [
+        0x02,
+        0x00,
+        0x00,
+        ...be(serviceId),
+        0xc1,
+        0x00,
+        0x00,
+        0xe0 | (pcrPid >> 8),
+        pcrPid & 0xff,
+        ...be(0xf000 | programInfo.length),
+        ...programInfo,
+    ];
+    for (const [streamType, pid] of streams) {
+        body.push(streamType, 0xe0 | (pid >> 8), pid & 0xff, 0xf0, 0x00);
+    }
+    return withCrc(body);
 }
 
 /** DSM-CC のセクションで包む */
