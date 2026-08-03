@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, rmSync } from 'node:fs';
+import { readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { deflateSync } from 'node:zlib';
 import { pngChunk } from '../ts/logo-palette';
@@ -80,6 +80,15 @@ export interface LearnedLogo {
      * 知りたいのは形のほうなので伸ばし、薄さは `depth` の数字で伝える
      */
     png: Uint8Array;
+    /**
+     * いつ覚えたか (ファイルの更新時刻)。
+     *
+     * **これが無いと画面が嘘に見える。** 詳細に出ているロゴは*いまの*もので、
+     * 隣に出ている「CM判定に失敗」は*そのとき*の記録。実機では、失敗した録画の
+     * 18時間後に覚え直したロゴが並んで出ていて、「ロゴは正しいのに検出できない」
+     * ように読めた (実際には別のロゴで判定していた)
+     */
+    learnedAt: number;
 }
 
 /** いちばん新しい `.lgd`。logoframe は作り直すたびに `-vNNNN` を上げていく */
@@ -130,7 +139,14 @@ export function readLearnedLogo(serviceId: number): LearnedLogo | null {
         gray[i] = Math.round((Math.max(0, Math.min(top, depths[i])) / top) * 255);
     }
 
-    return { name, x, y, width, height, depth, png: encodeGray(gray, width, height) };
+    let learnedAt = 0;
+    try {
+        learnedAt = statSync(path).mtimeMs;
+    } catch {
+        // 時刻が読めなくても絵は出せる
+    }
+
+    return { name, x, y, width, height, depth, learnedAt, png: encodeGray(gray, width, height) };
 }
 
 /** 8bit グレースケールの PNG。出すのは1枚だけなので、素直に組む */

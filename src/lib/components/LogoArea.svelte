@@ -1,5 +1,6 @@
 <script lang="ts">
     import { submitting } from '$lib/actions';
+    import { dateTime } from '$lib/format';
 
     /**
      * 局ロゴの位置を教える。
@@ -101,7 +102,7 @@
      * 縁を拾うこともある。CM判定が当たらないときに、覚えているものが絵になって
      * いるのかどうかを確かめる手立てが無いと、どこを直せばいいのか分からない。
      */
-    let learned = $state<{ url: string; area: string; depth: number } | null>(null);
+    let learned = $state<{ url: string; area: string; depth: number; learnedAt: number } | null>(null);
     /** 覚えているものを調べ終えたか。畳むかどうかはこれが出てから決める */
     let checked = $state(false);
     $effect(() => {
@@ -121,6 +122,7 @@
                     url,
                     area: res.headers.get('X-Logo-Area') ?? '',
                     depth: Number(res.headers.get('X-Logo-Depth')),
+                    learnedAt: Number(res.headers.get('X-Logo-Learned-At')),
                 };
             } catch {
                 // まだ1本も録っていない局。覚えているものが無いのは普通のこと
@@ -288,6 +290,17 @@
             />
             <div class="text-xs">
                 <div class="font-medium">いま覚えているロゴ</div>
+                <!--
+                    **いつ覚えたかを一緒に出す。** ここに出るのは*いまの*ロゴで、
+                    上の「CM判定に失敗」は*そのとき*の記録。実機では、失敗した録画の
+                    18時間後に覚え直したロゴが並んで出ていて、「ロゴは正しいのに
+                    検出できない」ように読めた (別のロゴで判定していた)
+                -->
+                {#if learned.learnedAt > 0}
+                    <div class="text-base-content/60 mt-0.5" data-testid="logo-learned-at">
+                        {dateTime(learned.learnedAt)} に覚えました
+                    </div>
+                {/if}
                 <div class="text-base-content/60 mt-0.5 font-mono">{learned.area}</div>
                 <div class="text-base-content/60" data-testid="logo-learned-depth">
                     濃さ {learned.depth} / 1000

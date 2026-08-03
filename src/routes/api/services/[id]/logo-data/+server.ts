@@ -29,6 +29,8 @@ export function GET({ params }) {
             'X-Logo-Area': `${logo.x},${logo.y},${logo.width},${logo.height}`,
             'X-Logo-Depth': String(logo.depth),
             'X-Logo-Name': encodeURIComponent(logo.name),
+            // いつ覚えたか。「CM判定に失敗」の記録より新しければ、その失敗は別のロゴのもの
+            'X-Logo-Learned-At': String(logo.learnedAt),
         },
     });
 }
