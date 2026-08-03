@@ -55,5 +55,13 @@ test.describe('チューナー画面', () => {
         const channels = page.getByTestId('channel-list');
         await expect(channels.getByTestId('channel-row').first()).toBeVisible();
         await expect(channels).toContainText('TOKYO MX');
+
+        /*
+         * どこまで進んだかを1行で出す。時間がかかるのは mirakc が1局ずつ
+         * 選局して調べるところで、denpa はその結果を取り込み直しているだけ。
+         * 表を上から下まで見ないと分からない状態だと、止まっているのか
+         * 進んでいるのか区別が付かない
+         */
+        await expect(page.getByTestId('channel-coverage')).toContainText('局が取れたチャンネル');
     });
 });

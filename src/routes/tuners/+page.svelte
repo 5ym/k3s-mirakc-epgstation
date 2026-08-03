@@ -62,6 +62,29 @@
         const d = new Date(at);
         return `${d.getMonth() + 1}/${d.getDate()} まで`;
     }
+
+    /*
+     * 取り込みの進み具合。
+     *
+     * 押しても数分〜数十分かかるうえ、**時間のかかる本体は mirakc 側**で、
+     * denpa は取り込み直しているだけ。画面には何も起きていないように見えるので、
+     * 経過と「あとどれだけ静かなら終わりか」を出す。
+     * 秒は自分で数える (サーバからの知らせは1周ごとにしか来ない)
+     */
+    let clock = $state(Date.now());
+    $effect(() => {
+        if (!data.settle.running) return;
+        const timer = setInterval(() => (clock = Date.now()), 1000);
+        return () => clearInterval(timer);
+    });
+
+    function elapsed(from: number, to: number): string {
+        const seconds = Math.max(0, Math.round((to - from) / 1000));
+        return seconds < 60 ? `${seconds}秒` : `${Math.floor(seconds / 60)}分${seconds % 60}秒`;
+    }
+
+    /** 増えないまま、あとどれだけ静かなら終わりとみなすか */
+    const settleLeft = $derived(elapsed(0, (data.settle.needed - data.settle.quiet) * data.settle.interval));
 </script>
 
 <h1 class="mb-4 text-2xl font-bold">チューナー</h1>
@@ -87,10 +110,10 @@
                     <form method="POST" action="?/resync" use:submitting>
                         <button
                             class="btn btn-sm"
-                            disabled={data.settling || scan.state === 'running'}
+                            disabled={data.settle.running || scan.state === 'running'}
                             data-testid="resync-services"
                         >
-                            {data.settling ? '取り込み中…' : '局を取り直す'}
+                            {data.settle.running ? '取り込み中…' : '局を取り直す'}
                         </button>
                     </form>
                 </div>
@@ -100,6 +123,23 @@
                     >、数十分かけて埋まっていきます。スキャンが終わったあとは、増えなくなるまで denpa
                     が自動で取り込み続けます。
                 </p>
+                <!--
+                    進み具合。**チューナーを使うのは mirakc のほう**で、denpa は
+                    その結果を取り込み直しているだけ。何も出していなかった頃は、
+                    押したあと止まっているのか進んでいるのかが分からなかった
+                -->
+                {#if data.settle.running && data.settle.startedAt !== null}
+                    <div class="alert alert-info py-2 text-sm" data-testid="settle-progress">
+                        <span>
+                            取り込み中… <strong>{data.settle.services} 局</strong>
+                            / 経過 {elapsed(data.settle.startedAt, clock)}
+                            {#if data.settle.changedAt !== null}
+                                / 最後に増えてから {elapsed(data.settle.changedAt, clock)}
+                            {/if}
+                            (このまま {settleLeft} 増えなければ終わります)
+                        </span>
+                    </div>
+                {/if}
                 {#await coverage}
                     <p class="text-base-content/60 text-sm">確認中…</p>
                 {:then [channels, mirakcServices, epg]}
@@ -110,6 +150,18 @@
                     {:else}
                         {@const epgByService = new Map(epg.map((e) => [e.key, e]))}
                         {@const servicesByChannel = groupByChannel(mirakcServices)}
+                        <!--
+                            物理チャンネルのうち、mirakc が局を拾えたものの数。
+                            時間がかかっているのはここで、1つずつ選局して調べている。
+                            表を上から下まで見なくても、どこまで進んだか分かるようにする
+                        -->
+                        {@const found = [...servicesByChannel.keys()].filter((key) =>
+                            channels.some((c) => `${c.type}:${c.channel}` === key),
+                        ).length}
+                        <div class="text-base-content/70 text-sm" data-testid="channel-coverage">
+                            局が取れたチャンネル <strong>{found} / {channels.length}</strong>
+                            ・ denpa 取り込み済み <strong>{data.services.length} 局</strong>
+                        </div>
                         <div class="max-h-96 overflow-auto">
                             <table class="table-pin-rows table table-sm">
                                 <thead>

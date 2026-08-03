@@ -102,12 +102,45 @@ const SETTLE_INTERVAL = 50_000;
 /** 諦めるまでの上限。地上波+BS+CS を1局ずつ選局するので、それなりにかかる */
 const SETTLE_TIMEOUT = 30 * 60_000;
 
+/**
+ * 取り込みの進み具合。
+ *
+ * 押しても数分〜数十分かかるうえ、**時間のかかる本体は mirakc 側**なので、
+ * denpa の画面からは何も起きていないように見えていた。いま何局まで来ていて、
+ * 最後に増えたのがいつで、あと何分静かなら終わりとみなすのかを出す。
+ */
+export interface SettleState {
+    running: boolean;
+    /** いま denpa に取り込めている局数 */
+    services: number;
+    /** 始めた時刻 */
+    startedAt: number | null;
+    /** 最後に増えた (減った) 時刻 */
+    changedAt: number | null;
+    /** 増えないまま何周したか */
+    quiet: number;
+    /** 何周静かなら終わりとみなすか */
+    needed: number;
+    /** 様子を見る間隔 */
+    interval: number;
+}
+
+let settle_state: SettleState = {
+    running: false,
+    services: 0,
+    startedAt: null,
+    changedAt: null,
+    quiet: 0,
+    needed: SETTLE_STABLE,
+    interval: SETTLE_INTERVAL,
+};
+
 /** いま走っている取り込み。二重に回さない */
 let settling = false;
 
-/** 取り込みの途中か。画面で「取り込み中」と出すために見る */
-export function isSettling(): boolean {
-    return settling;
+/** 取り込みの進み具合。画面はこれを見る */
+export function settleState(): SettleState {
+    return settle_state;
 }
 
 /**
@@ -124,8 +157,18 @@ export function isSettling(): boolean {
 export async function settle(): Promise<number> {
     if (settling) return 0;
     settling = true;
+    const startedAt = Date.now();
+    settle_state = {
+        running: true,
+        services: 0,
+        startedAt,
+        changedAt: startedAt,
+        quiet: 0,
+        needed: SETTLE_STABLE,
+        interval: SETTLE_INTERVAL,
+    };
     try {
-        const until = Date.now() + SETTLE_TIMEOUT;
+        const until = startedAt + SETTLE_TIMEOUT;
         let last = -1;
         let stable = 0;
         for (;;) {
@@ -137,19 +180,26 @@ export async function settle(): Promise<number> {
                 // mirakc がまだ起動途中。次の周回で繋がる
                 failed = true;
             }
-            // 取り込むたびに画面へ知らせる。埋まっていく様子がそのまま出る
-            emit('services');
             /*
              * 取り込めなかった周回は数に入れない。以前はここでも「増えなかった」
              * 扱いにしていたので、mirakc が落ちている間に終わったことにしていた
              */
             if (!failed) stable = count === last ? stable + 1 : 0;
+            settle_state = {
+                ...settle_state,
+                services: count,
+                quiet: stable,
+                changedAt: stable === 0 ? Date.now() : settle_state.changedAt,
+            };
             last = count;
+            // 取り込むたびに画面へ知らせる。埋まっていく様子がそのまま出る
+            emit('services');
             if (stable >= SETTLE_STABLE || Date.now() >= until) return count;
             await Bun.sleep(SETTLE_INTERVAL);
         }
     } finally {
         settling = false;
+        settle_state = { ...settle_state, running: false };
         // 終わったことを画面に伝える。「取り込み中…」のままボタンが戻らない
         emit('services');
     }

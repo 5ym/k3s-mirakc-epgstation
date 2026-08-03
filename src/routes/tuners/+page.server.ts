@@ -2,7 +2,7 @@ import { fail } from '@sveltejs/kit';
 import { queryAll } from '$lib/server/db';
 import { stats as logoStats, sweep } from '$lib/server/logo';
 import { getChannels, getEpgProgress, getServices, getTuners, ping } from '$lib/server/mirakc';
-import { isSettling, refresh, settle, start, stop } from '$lib/server/scan';
+import { refresh, settle, settleState, start, stop } from '$lib/server/scan';
 import { cardStatus } from '$lib/server/scramble';
 import type { ChannelType, Service } from '$lib/types';
 
@@ -29,8 +29,8 @@ export async function load() {
         epg: getEpgProgress().catch(() => []),
         // denpa が取り込み済みの局。mirakc が見つけたものとの差が分かる
         services: queryAll<Service>('SELECT * FROM services ORDER BY type, channel, service_id'),
-        // 局を取り込み続けている最中か。押した後どうなっているのかを出すため
-        settling: isSettling(),
+        // 局の取り込みの進み具合。押した後どうなっているのかを出すため
+        settle: settleState(),
         /*
          * 局ロゴを何局ぶん持っているか。
          *
