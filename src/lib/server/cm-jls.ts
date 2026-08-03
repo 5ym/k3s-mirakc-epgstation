@@ -2,6 +2,7 @@ import { mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import type { Range } from './cm';
 import { config } from './config';
+import { logoRepo } from './logo-data';
 import { text } from './stream';
 
 /**
@@ -174,30 +175,6 @@ function workFiles(input: string) {
         /** join_logo_scp が出すシーン一覧。使わない */
         scpout: `${base}.jlscp.txt`,
     };
-}
-
-/**
- * 覚えたロゴ (`.lgd`) の置き場。**局ごとに分ける。**
- *
- * logoframe は局名をファイル名に埋めて覚えるが、その名前は多バイト文字を
- * `_E7_B7_8F` のように潰したもので、こちらから組み立て直しても当たる保証がない。
- * 局ごとの入れ物にしておけば、位置を教え直したときに丸ごと捨てられる。
- *
- * **捨てられることが要る。** `-logo-area` はロゴを覚えるときにしか効かず、
- * 既に覚えているものがあれば合致率が落ちるまで作り直さない。実機では
- * TOKYO MX が「合致はしているのに結果の 100% がCM判定」のまま動かなくなり、
- * 位置を教えても覚えているほうが使われ続けていた。
- */
-function logoRepo(serviceId: number | undefined): string {
-    return serviceId === undefined ? config.jlsLogoDir : join(config.jlsLogoDir, String(serviceId));
-}
-
-/**
- * その局の覚えたロゴを捨てる。次のエンコードで、教えてもらった枠から覚え直す。
- * 覚え直しは録画1本ぶん余計にかかるが、当たらないまま回り続けるよりはいい
- */
-export function forgetLogoData(serviceId: number): void {
-    rmSync(logoRepo(serviceId), { recursive: true, force: true });
 }
 
 export interface JlsOptions {

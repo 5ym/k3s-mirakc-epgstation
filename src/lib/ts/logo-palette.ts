@@ -73,7 +73,7 @@ function crc32(bytes: Uint8Array): number {
 }
 
 /** 長さ + 種類 + 中身 + CRC。PNG のかたまりの形 */
-function chunk(type: string, data: Uint8Array): Uint8Array {
+export function pngChunk(type: string, data: Uint8Array): Uint8Array {
     const out = new Uint8Array(12 + data.length);
     const view = new DataView(out.buffer);
     view.setUint32(0, data.length);
@@ -120,8 +120,8 @@ export function withPalette(png: Uint8Array): Uint8Array {
         alpha[i] = CLUT[i * 4 + 3];
     }
 
-    const plte = chunk('PLTE', rgb);
-    const trns = chunk('tRNS', alpha);
+    const plte = pngChunk('PLTE', rgb);
+    const trns = pngChunk('tRNS', alpha);
     const out = new Uint8Array(png.length + plte.length + trns.length);
     out.set(png.subarray(0, AFTER_IHDR), 0);
     out.set(plte, AFTER_IHDR);

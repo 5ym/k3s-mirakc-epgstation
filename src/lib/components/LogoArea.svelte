@@ -86,6 +86,46 @@
         };
     });
 
+    /**
+     * logoframe が**いま覚えているロゴ**。
+     *
+     * 覚えているものが絵になっていないことがある。自動探索は「画面の右上にずっと
+     * 同じ縁があること」しか見ないので、ロゴではない縁 (常時出ている枠や下地) を
+     * 拾うと、毎フレーム合致するのに雑音のまま残る。実機の TOKYO MX がこれで、
+     * 確かめる手立てが無いと「なぜ当たらないのか」が分からなかった。
+     */
+    let learned = $state<{ url: string; area: string; depth: number } | null>(null);
+    /** これを下回る濃さは、ロゴではない何かを覚えているとみなす */
+    const FAINT = 500;
+    $effect(() => {
+        // 位置を教え直すと覚えているものは捨てられる。保存後に消えるのが正しい
+        void area;
+        const controller = new AbortController();
+        let url: string | null = null;
+        void (async () => {
+            try {
+                const res = await fetch(`/api/services/${serviceId}/logo-data`, {
+                    signal: controller.signal,
+                });
+                if (!res.ok) throw new Error(String(res.status));
+                const blob = await res.blob();
+                url = URL.createObjectURL(blob);
+                learned = {
+                    url,
+                    area: res.headers.get('X-Logo-Area') ?? '',
+                    depth: Number(res.headers.get('X-Logo-Depth')),
+                };
+            } catch {
+                // まだ1本も録っていない局。覚えているものが無いのは普通のこと
+                learned = null;
+            }
+        })();
+        return () => {
+            controller.abort();
+            if (url !== null) URL.revokeObjectURL(url);
+        };
+    });
+
     /** 記録されているコマの座標 ↔ 画面上の座標。倍率は横と縦で違う */
     const scale = $derived(
         frame === null || shownWidth === 0 || shownHeight === 0
@@ -181,10 +221,48 @@
 <div class="mt-3" data-testid="logo-area">
     <div class="text-sm font-medium">ロゴの位置を教える</div>
     <p class="text-base-content/70 mt-1 text-sm">
-        {serviceName} のロゴを自動で見つけられませんでした。ロゴが出ているコマまで送って、
+        {serviceName} のロゴでCMを判定できませんでした。ロゴが出ているコマまで送って、
         <strong>ロゴを四角で囲って</strong>ください。枠は<strong>掴んで動かせます</strong>。
         次のエンコードから使います。
     </p>
+
+    <!--
+        覚えているものを見せる。絵になっていないことがあり (ロゴではない縁を拾った)、
+        それを確かめる手立てが無いと「なぜ当たらないのか」が分からなかった
+    -->
+    {#if learned !== null}
+        <div
+            class="bg-base-200 mt-2 flex flex-wrap items-center gap-3 rounded p-2"
+            data-testid="logo-learned"
+        >
+            <img
+                src={learned.url}
+                alt="いま覚えているロゴ"
+                class="bg-neutral max-h-32 rounded"
+                style="image-rendering: pixelated"
+                data-testid="logo-learned-image"
+            />
+            <div class="text-xs">
+                <div class="font-medium">いま覚えているロゴ</div>
+                <div class="text-base-content/60 mt-0.5 font-mono">{learned.area}</div>
+                <div class="text-base-content/60" data-testid="logo-learned-depth">
+                    濃さ {learned.depth} / 1000
+                </div>
+                {#if learned.depth < FAINT}
+                    <!--
+                        薄いものは、毎フレーム合致するのに絵にならない。
+                        実機の TOKYO MX は 268 で、中身は横縞の雑音だった
+                    -->
+                    <div class="text-warning mt-0.5" data-testid="logo-learned-faint">
+                        薄すぎます。ロゴではない縁を覚えている可能性が高いです
+                    </div>
+                {/if}
+                <div class="text-base-content/60 mt-0.5">
+                    濃さを明るさにした白黒です (いちばん濃いところが白)。位置を教えると覚え直します。
+                </div>
+            </div>
+        </div>
+    {/if}
 
     <div class="mt-2 flex flex-wrap items-end gap-2">
         <label class="flex flex-col gap-1">

@@ -35,6 +35,7 @@ EPGStation の置き換えとして作ったもので、エンコード設定は
 | `src/lib/server/scramble.ts` | スクランブルの検出と、チューナー側への解除依頼 |
 | `src/lib/server/scan.ts` | チャンネルスキャン (チューナー側に投げて進み具合を読む) |
 | `src/lib/server/logo.ts` | 局ロゴの収集と保存 (番組表に出すPNG) |
+| `src/lib/server/logo-data.ts` | logoframe が覚えたロゴ (`.lgd`) の置き場・読み取り・破棄 |
 | `src/lib/components/LogoArea.svelte` | CM検出用のロゴ位置を画面から教える |
 | `src/lib/ts/psi.ts` | TS の PSI (NIT / SDT) を読む。チューナー側と共通 |
 | `src/lib/ts/logo.ts` | TS から局ロゴ (CDT) を読む |
@@ -136,6 +137,7 @@ k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書い�
 | `/settings` | 録画のしかた(映像コーデック — **「エンコードしない」もここ**/CMの扱い/CMの探し方/生TSを残すか/無料放送だけか)、通知先(Webhook)、ベーシック認証(パスワードの表示と作り直し)、EPGStation からの引き継ぎ |
 | `/api/recordings/<id>/file` | 録画ファイル。Range 対応。**エンコード済みがあればそちら、無ければ生TS。エンコードが走っている間は生TSのほう** (録り直しの最中は library_path がまだ古いファイルを指していて、しかもそれは終わり際に消える) |
 | `/api/recordings/<id>/frame?at=<秒>` | 録画から1コマ (JPEG)。ロゴの位置を指定するときに使う (既定で右上を拡大、覚えてある枠は掴んで動かせる) |
+| `/api/services/<id>/logo-data` | **logoframe がいま覚えているロゴ** (白黒PNG)。番組表に出すロゴとは別物で、絵になっているかを確かめるためのもの |
 | `/dav` | WebDAV (PROPFIND / GET / HEAD)。Kodi 用。書き込みは受けない |
 
 ## チューナー側 (`mirakc/`)
