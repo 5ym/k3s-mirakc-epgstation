@@ -1,5 +1,5 @@
 import { rmSync } from 'node:fs';
-import { FUJI, MX } from '../fake/services';
+import { BS11, FUJI, MX } from '../fake/services';
 import { expect, goto, syncEpg, test } from './helpers';
 
 /**
@@ -35,6 +35,13 @@ test.describe('局ロゴ', () => {
         await page.getByTestId('logo-sweep').click();
 
         /*
+         * **空いている地上波チューナーの数だけ並べる。** 種別を見ずに
+         * 「1本でも空いていれば」で数えていた頃は、地上波が1本しか空いて
+         * いなくても2チャンネルを同時に開きに行っていた
+         */
+        await expect(page.getByTestId('tuner-notice')).toContainText('チューナー 2 本');
+
+        /*
          * 押しても何も起きていないように見えないこと。1チャンネルに数分かかるので、
          * どこまで進んだかを出さないと動いているのか失敗したのか区別が付かない
          */
@@ -56,9 +63,8 @@ test.describe('局ロゴ', () => {
             }).toPass({ timeout: 60_000 });
         }
 
-        // 2チャンネルぶんを見終えて、結果が残っていること
+        // 見終えて、結果が残っていること
         await goto(page, '/tuners');
-        await expect(page.getByTestId('logo-sweep-count')).toContainText('2 / 2');
         await expect(page.getByTestId('logo-sweep-done')).toContainText('拾いました');
 
         // 何局ぶん持っているかもここに出す。番組表にロゴが出ないとき、
@@ -69,13 +75,45 @@ test.describe('局ロゴ', () => {
          * 取りに行くものが無くなったら**口も消える**。押しても「もう全部持って
          * います」と断るだけのボタンを出しておく意味がない。
          *
-         * 数えるのは取りに行ける放送だけ (地上波)。衛星まで分母に入れていた頃は、
-         * 地上波が全部揃っていても足りていないように見えていた
+         * ここで消えるのは、衛星ぶんも同じ一回で拾えているから。地上波と衛星は
+         * 伝送方式が違うだけで、開けば両方流れてくる
          */
         await expect(page.getByTestId('logo-sweep')).toHaveCount(0);
 
         // 番組表の見出しにも出る
         await goto(page, '/guide?type=GR');
         await expect(page.locator(`img[src="/api/services/${MX.id}/logo"]`).first()).toBeVisible();
+    });
+});
+
+/**
+ * 衛星のロゴ。
+ *
+ * **地上波とは伝送方式が違う。** CDT には載らず、データカルーセル (DSM-CC) で
+ * 流れてくる (ARIB TR-B15)。PAT → エンジニアリングサービス (929) の PMT →
+ * component_tag 0x79/0x7A の ES → DII → DDB と辿って初めて拾える。
+ *
+ * 読めていなかった頃は、実機で BS を26中継・CS を12中継ぶん開いても
+ * 0/38・0/54 のままだった (地上波は12中継で 29/29 揃う)。
+ */
+test.describe('衛星の局ロゴ', () => {
+    test('データカルーセルから拾って番組表に出る', async ({ page, request, stack }) => {
+        test.setTimeout(120_000);
+        await syncEpg(request);
+
+        rmSync(`${stack.root}/logos/${BS11.id}.png`, { force: true });
+        expect((await request.get(`/api/services/${BS11.id}/logo`)).status()).toBe(404);
+
+        await goto(page, '/tuners');
+        await page.getByTestId('logo-sweep').click();
+
+        await expect(async () => {
+            const logo = await request.get(`/api/services/${BS11.id}/logo`);
+            expect(logo.status()).toBe(200);
+            expect(logo.headers()['content-type']).toContain('image/png');
+        }).toPass({ timeout: 60_000 });
+
+        await goto(page, '/guide?type=BS');
+        await expect(page.locator(`img[src="/api/services/${BS11.id}/logo"]`).first()).toBeVisible();
     });
 });

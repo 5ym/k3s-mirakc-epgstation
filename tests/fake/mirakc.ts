@@ -7,7 +7,15 @@
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { packetize, withCrc } from '../../src/lib/ts/synth';
+import {
+    ddbSection,
+    diiSection,
+    logoModule,
+    packetize,
+    patSection,
+    pmtSection,
+    withCrc,
+} from '../../src/lib/ts/synth';
 import { type FakeService, SERVICES } from './services';
 
 /** ロゴとして流す PNG。中身は問われないので小さいものでよい */
@@ -235,6 +243,41 @@ async function advanceScan(): Promise<void> {
 let scrambled = process.env.FAKE_SCRAMBLED === '1';
 
 /**
+ * 衛星のロゴを混ぜる。**地上波とは伝送方式が違う。**
+ *
+ * CDT には載らず、データカルーセル (DSM-CC) で流れてくる。PAT →
+ * エンジニアリングサービス (929) の PMT → component_tag 0x79 の ES →
+ * DII → DDB と辿らないと拾えないので、そこまで作る。本物と同じ道筋にして
+ * おかないと、テストだけ通って現物では永久に集まらない。
+ */
+function carouselPackets(services: FakeService[]): Uint8Array {
+    const ESS = 929;
+    const PMT_PID = 0x1f0;
+    const ES_PID = 0x1f1;
+    const module = logoModule(0x05, [
+        {
+            logoId: services[0].serviceId % 512,
+            services: services.map((s) => [s.networkId, s.serviceId] as [number, number]),
+            data: LOGO_PNG,
+        },
+    ]);
+    return Uint8Array.from([
+        ...packetize(0x0000, patSection([[ESS, PMT_PID]])),
+        ...packetize(PMT_PID, pmtSection(ESS, ES_PID, 0x79)),
+        ...packetize(
+            ES_PID,
+            diiSection(0x1234, 4066, {
+                moduleId: 1,
+                moduleSize: module.length,
+                moduleVersion: 1,
+                name: 'LOGO-05',
+            }),
+        ),
+        ...packetize(ES_PID, ddbSection(0x1234, 1, 1, 0, module)),
+    ]);
+}
+
+/**
  * 局ロゴを放送波に混ぜる。本物と同じく CDT (実体) と SDT (どの局のものか) に
  * 分かれて流れてくるので、denpa 側は両方を読んで初めて紐付けられる
  */
@@ -292,7 +335,12 @@ function logoPackets(service: FakeService): Uint8Array {
  * ここでも同じようにしておかないと、テストだけ通って現物では永久に集まらない。
  */
 function fakeStream(signal: AbortSignal, services: FakeService[] = []): ReadableStream<Uint8Array> {
-    const logo = Uint8Array.from(services.flatMap((service) => [...logoPackets(service)]));
+    // 地上波は CDT、衛星はカルーセル。本物と同じ分かれ方にしておく
+    const satellite = services.filter((service) => service.type !== 'GR');
+    const logo = Uint8Array.from([
+        ...services.filter((service) => service.type === 'GR').flatMap((s) => [...logoPackets(s)]),
+        ...(satellite.length > 0 ? [...carouselPackets(satellite)] : []),
+    ]);
     const chunk = packets(20, scrambled);
     return new ReadableStream({
         start(controller) {

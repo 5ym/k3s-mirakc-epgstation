@@ -78,7 +78,18 @@ export interface NetworkInfo {
 export class SectionAssembler {
     private buffer = new Uint8Array(0);
 
-    constructor(private readonly pid: number) {}
+    /**
+     * @param pid 拾うPID
+     * @param crc CRC の見方。
+     *   `always` … 末尾4バイトを CRC32 とみなして必ず確かめる (PSI はこちら)
+     *   `syntax` … `section_syntax_indicator` が立っているときだけ確かめる。
+     *     DSM-CC は立っていないと末尾が CRC ではなく Checksum なので、
+     *     いつも確かめると**全部捨ててしまう**
+     */
+    constructor(
+        private readonly pid: number,
+        private readonly crc: 'always' | 'syntax' = 'always',
+    ) {}
 
     /** パケットを1つ食わせる。組み上がったセクションを返す */
     feed(packet: Uint8Array): Uint8Array[] {
@@ -131,7 +142,9 @@ export class SectionAssembler {
             const section = this.buffer.slice(0, length);
             this.buffer = this.buffer.slice(length);
             // 壊れたセクションを読むと嘘の局が並ぶので、CRC を通ったものだけ使う
-            if (crc32(section) === 0) sections.push(section);
+            const syntax = (section[1] & 0x80) !== 0;
+            if (this.crc === 'syntax' && !syntax) sections.push(section);
+            else if (crc32(section) === 0) sections.push(section);
         }
     }
 }

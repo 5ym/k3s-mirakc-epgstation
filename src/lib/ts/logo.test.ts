@@ -7,6 +7,9 @@ const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xd
 
 const be = (value: number) => [(value >> 8) & 0xff, value & 0xff];
 
+/** 開いている物理チャンネルのネットワーク。地上波の CDT には入っていない */
+const NETWORK = 0x0004;
+
 /** CDT を組み立てる。data_type=0x01 がロゴ */
 function cdtSection(logoId: number, logoType: number, data: Uint8Array, logoVersion = 1): Uint8Array {
     return withCrc([
@@ -89,7 +92,7 @@ describe('SDT のロゴ対応', () => {
 
 describe('拾い集める', () => {
     test('CDTとSDTが揃って初めて局に配れる', () => {
-        const collector = new LogoCollector();
+        const collector = new LogoCollector(NETWORK);
         collector.feed(packetize(0x0029, cdtSection(3, 0x05, PNG)));
         // ロゴだけではどの局のものか分からない
         expect(collector.collected()).toEqual([]);
@@ -110,13 +113,13 @@ describe('拾い集める', () => {
     });
 
     test('対応だけあってロゴが来ていなければ配らない', () => {
-        const collector = new LogoCollector();
+        const collector = new LogoCollector(NETWORK);
         collector.feed(packetize(0x0011, sdtWithLogo([[1024, 3]])));
         expect(collector.collected()).toEqual([]);
     });
 
     test('大きいロゴが来たら差し替える', () => {
-        const collector = new LogoCollector();
+        const collector = new LogoCollector(NETWORK);
         const small = Uint8Array.from([1, 2, 3]);
         collector.feed(packetize(0x0029, cdtSection(3, 0x02, small)));
         collector.feed(packetize(0x0029, cdtSection(3, 0x05, PNG)));
@@ -125,7 +128,7 @@ describe('拾い集める', () => {
     });
 
     test('小さいロゴが後から来ても戻さない', () => {
-        const collector = new LogoCollector();
+        const collector = new LogoCollector(NETWORK);
         collector.feed(packetize(0x0029, cdtSection(3, 0x05, PNG)));
         collector.feed(packetize(0x0029, cdtSection(3, 0x02, Uint8Array.from([1, 2, 3]))));
         collector.feed(packetize(0x0011, sdtWithLogo([[1024, 3]])));
@@ -133,7 +136,7 @@ describe('拾い集める', () => {
     });
 
     test('188の切れ目と無関係に届いても読める', () => {
-        const collector = new LogoCollector();
+        const collector = new LogoCollector(NETWORK);
         const data = Uint8Array.from([
             ...packetize(0x0029, cdtSection(3, 0x05, PNG)),
             ...packetize(0x0011, sdtWithLogo([[1024, 3]])),

@@ -22,24 +22,12 @@ import { chunks } from './stream';
  */
 
 /**
- * ロゴを取りに行ける放送。**地上波だけ。**
- *
- * denpa が読んでいるのは CDT (PID 0x0029) で、**衛星はそこにロゴを載せません**。
- * Mirakurun も同じで、ネットワーク4 (BS) は CDT ではなく DSM-CC を読みに行きます
- * (`TSFilter.ts` の `_enableParseDSMCC`)。denpa に DSM-CC の読み手はありません。
- *
- * 実機の数字がそのとおりでした: 地上波は 29/29 局ぶん揃い、**BS は 26中継を
- * 回って 0/38、CS は 12中継を回って 0/54**。開くだけ無駄なので行きません
- * (`BS19_1` のような中継を延々と開いていたのはこれ)。
- */
-const CDT_TYPES = new Set(['GR']);
-
-/**
  * 1チャンネルあたりの取得にかける上限。
  *
- * **ロゴ (CDT) は滅多に流れてこない。** 実機で測ると、地上波を100秒読んで
+ * **ロゴは滅多に流れてこない。** 実機で測ると、地上波 (CDT) を100秒読んで
  * 0〜2セクション。分単位で待つ前提のものなので、数十秒開いて諦めていた頃は
  * 当たるほうが偶然でした。3分でも足りず、6分に伸ばしてあります。
+ * 衛星のカルーセルは繰り返し流れてくるので、同じだけ開けば拾えます。
  */
 const SWEEP_TIMEOUT = 6 * 60_000;
 /**
@@ -123,13 +111,13 @@ function store(networkId: number, serviceIds: number[], data: Uint8Array): numbe
  *
  * 失敗しても黙って諦める。ロゴが無くても番組表は出るし、録画には何の関係も無い。
  */
-export function watch(networkId: number): (chunk: Uint8Array) => void {
-    const collector = new LogoCollector();
+export function watch(networkId: number): Feed {
+    const collector = new LogoCollector(networkId);
     let broken = false;
     /** 同じものを何度も書きに行かない。ロゴは滅多に変わらない */
     const written = new Set<string>();
 
-    return (chunk) => {
+    const feed = (chunk: Uint8Array) => {
         if (broken) return;
         try {
             collector.feed(chunk);
@@ -145,11 +133,13 @@ export function watch(networkId: number): (chunk: Uint8Array) => void {
              * 関係なく只なので、来たものは全部取っておく
              */
             let saved = 0;
-            for (const { serviceIds, logo } of found) {
-                const key = `${logo.logoId}:${logo.logoType}:${logo.logoVersion}`;
+            for (const { networkId: network, serviceIds, logo } of found) {
+                // 衛星は他ネットワークの局も混ざる。どのネットワークのぶんかは
+                // ロゴ自身が知っているので、そちらで引く
+                const key = `${network}:${logo.logoId}:${logo.logoType}:${logo.logoVersion}`;
                 if (written.has(key)) continue;
                 written.add(key);
-                saved += store(networkId, serviceIds, logo.data);
+                saved += store(network, serviceIds, logo.data);
             }
             if (saved > 0) emit('services');
         } catch (error) {
@@ -157,6 +147,15 @@ export function watch(networkId: number): (chunk: Uint8Array) => void {
             broken = true;
         }
     };
+    /** 外れの中継を早く見切るために覗く。地上波では使わない */
+    Object.defineProperty(feed, 'hasSatelliteLogo', { get: () => collector.hasSatelliteLogo });
+    return feed as Feed;
+}
+
+/** 食わせる口。ついでに「この中継にロゴがあるか」を覗ける */
+export interface Feed {
+    (chunk: Uint8Array): void;
+    readonly hasSatelliteLogo: boolean | null;
 }
 
 /**
@@ -255,20 +254,23 @@ function currentServices(): { id: number; type: string; channel: string; network
 export function missing(): Target[] {
     const targets = new Map<string, Target>();
     for (const service of currentServices()) {
-        // 衛星は CDT にロゴを載せない。開いても来ない (CDT_TYPES)
-        if (!CDT_TYPES.has(service.type)) continue;
         if (!needsLogo(service.id)) continue;
         const key = `${service.type}:${service.channel}`;
         if (targets.has(key)) continue;
         targets.set(key, { type: service.type, channel: service.channel, network_id: service.network_id });
     }
+    /*
+     * 衛星の中継は絞らない。**ロゴが乗っているのは1つだけ**だが、どれなのかは
+     * 開いてみないと分からない (実機の BS はネットワーク4の26中継のうち
+     * `BS15_0` だけ)。外れは PAT を見た時点で1秒ほどで切り上げるので、
+     * 順に当たっても高くつかない (`collect`)
+     */
     return [...targets.values()];
 }
 
 /** その物理チャンネルに相乗りしている局のうち、ロゴを取り直したい数 */
 function missingOn(channel: string): number {
-    return currentServices().filter((s) => s.channel === channel && CDT_TYPES.has(s.type) && needsLogo(s.id))
-        .length;
+    return currentServices().filter((s) => s.channel === channel && needsLogo(s.id)).length;
 }
 
 /**
@@ -315,6 +317,13 @@ async function collect(target: Target, timeout: number, signal?: AbortSignal): P
             feed(chunk);
             // 全部揃ったら、これ以上開けておく理由がない
             if (missingOn(target.channel) === 0) break;
+            /*
+             * **衛星のロゴは1つの中継にしかない。** 実機の BS はネットワーク4に
+             * 26の中継があるが、ロゴを運ぶエンジニアリングサービス (929) が
+             * 居るのは `BS15_0` (NHK BS と同じ中継) だけだった。外れの中継は
+             * PAT を見た時点で分かるので、10分も開けておかずに次へ行く
+             */
+            if (target.type !== 'GR' && feed.hasSatelliteLogo === false) break;
         }
     } catch {
         // 取れなければ次の機会に。チューナーが空いていないだけのことも多い
@@ -519,8 +528,7 @@ export async function sweep(limit = 1): Promise<number> {
 /**
  * 画面の「いま取りに行く」。残っているぶんを、チューナー2つで一気に取りに行く。
  *
- * 対象は定期取得と同じ (`missing`)。衛星は端から入っていない — CDT にロゴが
- * 載らないので、開いても来ない (`CDT_TYPES`)。
+ * 対象は定期取得と同じ (`missing`)。衛星は1ネットワークにつき1中継だけ。
  */
 export async function sweepGround(): Promise<{ started: boolean; message: string }> {
     /*
@@ -603,14 +611,10 @@ async function run(targets: Target[], parallel: number, found: number): Promise<
 /**
  * 何局ぶん持っているか。「本当に取れているのか」を画面で確かめられるように。
  *
- * **数えるのは取りに行ける放送だけ** (地上波)。衛星まで分母に入れていた頃は、
- * 地上波が全部揃っていても「29 / 124 局」と出て、ずっと足りていないように
- * 見えていた。取りに行けないものを数えても仕方がない。
- *
  * `pending` はこれから取りに行く物理チャンネルの数。0 なら押す口を出さない。
  */
 export function stats(): { have: number; total: number; pending: number } {
-    const services = currentServices().filter((service) => CDT_TYPES.has(service.type));
+    const services = currentServices();
     return {
         have: services.filter((service) => existsSync(logoPath(service.id))).length,
         total: services.length,

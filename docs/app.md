@@ -38,7 +38,8 @@ EPGStation の置き換えとして作ったもので、エンコード設定は
 | `src/lib/server/logo-data.ts` | logoframe が覚えたロゴ (`.lgd`) の置き場・読み取り・破棄 |
 | `src/lib/components/LogoArea.svelte` | CM検出用のロゴ位置を画面から教える |
 | `src/lib/ts/psi.ts` | TS の PSI (NIT / SDT) を読む。チューナー側と共通 |
-| `src/lib/ts/logo.ts` | TS から局ロゴ (CDT) を読む |
+| `src/lib/ts/logo.ts` | TS から局ロゴを読む (地上波は CDT、衛星は下記) |
+| `src/lib/ts/logo-dsmcc.ts` | 衛星の局ロゴをデータカルーセル (DSM-CC) から読む |
 | `src/lib/ts/logo-palette.ts` | 局ロゴPNGに ARIB の色の表 (PLTE/tRNS) を入れ直す |
 | `src/lib/ts/synth.ts` | TS のセクションを組み立てる (テストと偽mirakc用) |
 | `src/lib/server/migrate.ts` | EPGStation からの引き継ぎ |

@@ -5,14 +5,18 @@
  * 指定する仕組みしか無い)。番組表に局ロゴを出すには自分で拾うしかないので、
  * 録画やライブで開いているストリームから、ついでに読む。
  *
- * ロゴは2つの表に分かれて流れてくる。
+ * 地上波は2つの表に分かれて流れてくる。
  *
  * - CDT (PID 0x0029) … ロゴの実体。PNG がそのまま入っている
  * - SDT (PID 0x0011) … どのサービスがどのロゴを使うか (logo_transmission_descriptor)
  *
  * 片方だけでは紐付かないので、両方見て初めて「この局のロゴ」になる。
+ *
+ * **衛星 (BS/CS) は CDT を使わない。** データカルーセル (DSM-CC) で送るので、
+ * そちらは別仕立て (`logo-dsmcc.ts`)。両方まとめてここで面倒を見る。
  */
 
+import { DsmccLogoCollector } from './logo-dsmcc';
 import { withPalette } from './logo-palette';
 import { descriptors, PacketStream, SectionAssembler } from './psi';
 
@@ -98,6 +102,14 @@ export function parseLogoLinks(section: Uint8Array): Map<number, number> {
 }
 
 export interface CollectedLogo {
+    /**
+     * その局のネットワーク。
+     *
+     * 衛星はロゴ自身が「どのネットワークのどの局か」を持っているので、開いた
+     * チャンネルのものとは限らない (1つの中継に他ネットワークの局が乗る)。
+     * 地上波は CDT にその情報が無いので、開いたチャンネルのものを使う。
+     */
+    networkId: number;
     serviceIds: number[];
     logo: LogoData;
 }
@@ -112,11 +124,27 @@ export class LogoCollector {
     private readonly cdt = new SectionAssembler(PID_CDT);
     private readonly sdt = new SectionAssembler(PID_SDT);
     private readonly packets = new PacketStream();
+    /** 衛星ぶん。地上波の TS では何も出てこないので、開いていても害は無い */
+    private readonly dsmcc = new DsmccLogoCollector();
 
     /** logo_id ごとの、いま持っている一番大きいロゴ */
     private readonly logos = new Map<number, LogoData>();
     /** service_id → logo_id */
     private readonly links = new Map<number, number>();
+
+    /**
+     * @param networkId 開いている物理チャンネルのネットワーク。地上波の CDT には
+     *   ネットワークが入っていないので、外から教えてもらう
+     */
+    constructor(private readonly networkId: number) {}
+
+    /**
+     * この中継にロゴのカルーセルが載っているか (衛星のみ)。
+     * `false` なら、いくら開いても来ないので切り上げてよい
+     */
+    get hasSatelliteLogo(): boolean | null {
+        return this.dsmcc.hasLogoService;
+    }
 
     feed(chunk: Uint8Array): void {
         for (const packet of this.packets.feed(chunk)) {
@@ -129,6 +157,7 @@ export class LogoCollector {
                     this.links.set(serviceId, logoId);
                 }
             }
+            this.dsmcc.feed(packet);
         }
     }
 
@@ -151,9 +180,38 @@ export class LogoCollector {
             if (!this.logos.has(logoId)) continue;
             byLogo.set(logoId, [...(byLogo.get(logoId) ?? []), serviceId]);
         }
-        return [...byLogo.entries()].map(([logoId, serviceIds]) => ({
+        const found: CollectedLogo[] = [...byLogo.entries()].map(([logoId, serviceIds]) => ({
+            networkId: this.networkId,
             serviceIds,
             logo: this.logos.get(logoId)!,
         }));
+
+        /*
+         * 衛星ぶん。**ネットワークごとにまとめ直す。** 1つのロゴが他ネットワークの
+         * 局にも紐付いていることがあるので、開いた中継のネットワークで一括りには
+         * できない
+         */
+        for (const logo of this.dsmcc.collected()) {
+            const byNetwork = new Map<number, number[]>();
+            for (const service of logo.services) {
+                byNetwork.set(service.networkId, [
+                    ...(byNetwork.get(service.networkId) ?? []),
+                    service.serviceId,
+                ]);
+            }
+            for (const [networkId, serviceIds] of byNetwork) {
+                found.push({
+                    networkId,
+                    serviceIds,
+                    logo: {
+                        logoId: logo.logoId,
+                        logoType: logo.logoType,
+                        logoVersion: 0,
+                        data: logo.data,
+                    },
+                });
+            }
+        }
+        return found;
     }
 }
