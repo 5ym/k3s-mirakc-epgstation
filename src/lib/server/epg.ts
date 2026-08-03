@@ -52,6 +52,12 @@ function syncServices(services: mirakc.MirakcService[]): number {
     const at = now();
     let count = 0;
     const dropped: number[] = [];
+    /*
+     * この回で見かけた局。**時刻では数えない。** `updated_at < at` で拾っていた頃は、
+     * 2回の取り込みが同じミリ秒に入ると、前の回の局が「まだ見かけている」ことに
+     * なっていた (時計の刻みが1msしかない)
+     */
+    const seen = new Set<number>();
     const tx = database().transaction(() => {
         for (const s of services) {
             if (s.channel === undefined || !CHANNEL_TYPES.has(s.channel.type)) continue;
@@ -60,6 +66,7 @@ function syncServices(services: mirakc.MirakcService[]): number {
                 dropped.push(s.id);
                 continue;
             }
+            seen.add(s.id);
             stmt.run(
                 s.id,
                 s.serviceId,
@@ -89,7 +96,7 @@ function syncServices(services: mirakc.MirakcService[]): number {
             database().prepare('DELETE FROM services WHERE id = ?').run(id);
         }
         // この回で見かけなかった局の持ち物を片付ける
-        if (count > 0) canceled = forgetMissing(at);
+        if (count > 0) canceled = forgetMissing(at, seen);
     });
     let canceled = 0;
     tx();
@@ -112,10 +119,9 @@ function syncServices(services: mirakc.MirakcService[]): number {
  * **1局も取れなかった回では何もしない** (`count > 0` のときだけ呼ぶ)。mirakc が
  * 起動直後や不調で空を返すことはあり、それを「全部消えた」と読むと番組表ごと消える。
  */
-function forgetMissing(at: number): number {
-    const stale = queryAll<{ id: number; name: string }>(
-        'SELECT id, name FROM services WHERE updated_at < ?',
-        at,
+function forgetMissing(at: number, seen: Set<number>): number {
+    const stale = queryAll<{ id: number; name: string }>('SELECT id, name FROM services').filter(
+        (service) => !seen.has(service.id),
     );
     if (stale.length === 0) return 0;
 

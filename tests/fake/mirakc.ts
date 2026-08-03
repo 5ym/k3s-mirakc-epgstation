@@ -531,20 +531,16 @@ Bun.serve({
                              * 用途と録画IDだけを ASCII で載せ (ヘッダなので)、
                              * 読める言葉に直すのは画面側でやる
                              */
-                            users: [{ id: 'denpa', priority: 2, agent: 'denpa (rec 1)' }],
-                        };
-                    }
-                    if (tuner.index === 2) {
-                        /*
-                         * mirakc 自身の仕事。**User-Agent が付かない。**
-                         * 「不明」と出していた頃は、いちばんよく居座っている相手が
-                         * 誰なのか画面から分からなかった
-                         */
-                        return {
-                            ...tuner,
-                            isFree: false,
-                            isUsing: true,
-                            users: [{ id: 'job:epg.update-schedules', priority: -1 }],
+                            users: [
+                                { id: 'denpa', priority: 2, agent: 'denpa (rec 1)' },
+                                /*
+                                 * mirakc 自身の仕事。**User-Agent が付かない。**
+                                 * 「不明」と出していた頃は、いちばんよく居座っている
+                                 * 相手が誰なのか画面から分からなかった。
+                                 * 同じチャンネルなら1本のチューナーに相乗りする
+                                 */
+                                { id: 'job:epg.update-schedules', priority: -1 },
+                            ],
                         };
                     }
                     if (tuner.index === 3) return { ...tuner, isAvailable: false, isFault: true };
