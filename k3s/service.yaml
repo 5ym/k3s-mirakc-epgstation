@@ -21,6 +21,18 @@ metadata:
   name: denpa
   namespace: denpa
 spec:
+  # 止まりかけの Pod にも回す。
+  #
+  # denpa は録画中に入れ替えが来ると、終わるまで居座ってから止まる
+  # (terminationGracePeriodSeconds: 21900)。ところが Kubernetes は
+  # deletionTimestamp が付いた時点で Pod を Service から外すので、
+  # 実機では「録画は無事なのに画面だけ34分落ちる」状態になっていた。
+  #
+  # EndpointSlice の中身を見ると、住所は残っているが ready:false / terminating:true。
+  # これを付けると ready:true になって kube-proxy が回すようになる。
+  # ready を見なくなる副作用は無い: この Deployment に readinessProbe は無く、
+  # strategy も Recreate なので、新旧の Pod が並ぶことはない
+  publishNotReadyAddresses: true
   selector:
     app: denpa
   ports:

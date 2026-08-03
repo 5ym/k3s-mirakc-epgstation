@@ -175,9 +175,32 @@ export function stop(): void {
  * 待っている途中で SIGKILL され、居座った意味が無くなる。
  */
 function installShutdownHooks(): void {
+    takeOverSignals((signal) => void drain(signal));
+}
+
+/**
+ * 止まれの合図を**こちらで受け取る**。先に入っていた後始末は外す。
+ *
+ * 外す相手は adapter-node で、SIGTERM を受けた**その場で listen を閉じる**。
+ * そのため録画が終わるまで居座っている間、Pod は生きているのに画面が開けなかった
+ * (実機で34分。Kubernetes は止まりかけの Pod を Service から外すので、
+ * そこへ HTTP も閉じられると、録画中はどこからも見えない)。
+ *
+ * 落とすのはこちらの `drain` の最後で `process.exit` するときだけにする。
+ * 開いている応答は切れるが、これは今までと同じ (以前も待たずに exit していた)。
+ *
+ * 読み込み順が変わって**まだ誰も入れていなかった**ときは、外すものが無いだけで
+ * 何も壊れない。そのときは今までどおり SIGTERM で listen が閉じる
+ * (画面が開けない状態に戻るだけで、録画は守られる)。
+ */
+export function takeOverSignals(onSignal: (signal: NodeJS.Signals) => void): number {
+    let taken = 0;
     for (const signal of ['SIGTERM', 'SIGINT'] as const) {
-        process.once(signal, () => void drain(signal));
+        taken += process.listenerCount(signal);
+        process.removeAllListeners(signal);
+        process.once(signal, () => onSignal(signal));
     }
+    return taken;
 }
 
 /** 5秒ごとに様子を見る。録画は分単位なので、これ以上細かく見ても意味が無い */
@@ -192,7 +215,9 @@ async function drain(signal: string): Promise<void> {
     }
 
     beginDraining();
-    console.log(`[boot] ${signal} を受けましたが、録画 ${recordings} 件が終わるまで待ちます`);
+    console.log(
+        `[boot] ${signal} を受けましたが、録画 ${recordings} 件が終わるまで待ちます (この間も画面は開けます)`,
+    );
 
     const until = Date.now() + config.shutdownWait;
     while (activeRecordingIds().length > 0 && Date.now() < until) {

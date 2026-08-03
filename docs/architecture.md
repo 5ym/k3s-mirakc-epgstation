@@ -103,10 +103,27 @@ TSは追記で開いていて、次の起動で `recoverOrphanedRecordings` が�
 落ちても丸ごと失うことはありません。それでも居座るのは、**入れ替わるまでの
 十数秒はどうやっても落ちる**からです。ArgoCD の同期は待てますが、放送は待ちません。
 
-**待っている間、画面は見られません。** Pod が終了処理に入った時点で
-Service の宛先から外れるためです。録画していないときは即座に止まるので、
-普段の入れ替えはこれまでどおりです。すぐ入れ替えたいときは `SHUTDOWN_WAIT=0`
-にすると、以前と同じ「落ちて、続きから録り直す」に戻ります。
+**待っている間も画面は開けます。** ここは2箇所で落ちていました。
+
+1. **adapter-node が SIGTERM を受けたその場で listen を閉じる。** 居座っている間、
+   Pod の中からも `127.0.0.1:3000` が拒否される状態でした。止まれの合図は
+   `takeOverSignals` でこちらが受け取り、先に入っていた後始末は外します。
+   閉じるのは本当に止まる直前 (`process.exit`) だけです。
+2. **Kubernetes は `deletionTimestamp` が付いた Pod を Service から外す。**
+   EndpointSlice には住所が残りますが `ready:false` / `terminating:true` になり、
+   kube-proxy が回さなくなります。Service に `publishNotReadyAddresses: true` を
+   付けると `ready:true` に戻ります。この Deployment に readinessProbe は無く、
+   `strategy: Recreate` で新旧の Pod が並ぶこともないので、副作用はありません。
+
+実機では、録画中に同期が来て**34分間ずっと画面だけ開けない**状態になりました
+(Pod は生きていて録画も無事)。
+
+居座っている間は**新しい録画を始めません**。この間に入れた予約は、Pod が入れ替わった
+あと新しいほうが拾います (録画が終わればすぐ入れ替わるので、待つのは数分です)。
+
+録画していないときは即座に止まるので、普段の入れ替えはこれまでどおりです。
+すぐ入れ替えたいときは `SHUTDOWN_WAIT=0` にすると、以前と同じ「落ちて、
+続きから録り直す」に戻ります。
 
 Kubernetes の `terminationGracePeriodSeconds` と docker compose の
 `stop_grace_period` を `SHUTDOWN_WAIT` より長くしておくこと。短いと待っている
