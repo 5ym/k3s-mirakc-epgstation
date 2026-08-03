@@ -341,22 +341,28 @@
                         >
                             {data.logos.have} / {data.logos.total} 局
                         </dd>
-                        <dd>
-                            <form method="POST" action="?/logoSweep" use:submitting>
-                                <button
-                                    class="btn btn-xs"
-                                    disabled={data.logoSweep.running}
-                                    data-testid="logo-sweep"
-                                >
-                                    {data.logoSweep.running ? '取得中…' : '地上波を今すぐ取りに行く'}
-                                </button>
-                            </form>
-                        </dd>
+                        <!--
+                            取りに行くものが無ければ口も出さない。押しても
+                            「もう全部持っています」と断るだけになる。
+                            **走っている最中でも押せる** — 押されたほうが譲る作りなので、
+                            使えなくすると「BSを取っている間ずっと押せない」に逆戻りする
+                            (いまは地上波しか取りに行かないが、押せない理由にはならない)
+                        -->
+                        {#if data.logos.pending > 0}
+                            <dd>
+                                <form method="POST" action="?/logoSweep" use:submitting>
+                                    <button class="btn btn-xs" data-testid="logo-sweep">
+                                        {data.logoSweep.running ? '取得中…' : '今すぐ取りに行く'}
+                                    </button>
+                                </form>
+                            </dd>
+                        {/if}
                         <dd class="text-base-content/60 w-full text-xs">
-                            ロゴが放送波に流れてくるのは数十秒〜数分に一度です。10分ごとに少しずつ拾っているので、
-                            全部揃うまでには時間がかかります。<strong>押すと地上波だけ</strong
-                            >をチューナー2つで 取りに行きます
-                            (衛星はさらに流れてこないので、定期取得に任せます)。
+                            ロゴが放送波に流れてくるのは数十秒〜数分に一度です。10分ごとに少しずつ拾い、
+                            一度取れたものも1週間経ったら取り直します。
+                            <strong>集められるのは地上波だけです</strong>
+                            — 衛星 (BS/CS) はロゴを CDT に載せず DSM-CC で送るので、開いても来ません (Mirakurun
+                            も BS は別扱いにしています)。
                         </dd>
                         <!--
                             1チャンネルに数分かかる。出さないと押しても何も起きていないように

@@ -65,9 +65,14 @@ test.describe('局ロゴ', () => {
         // まだ拾えていないのか出し方が悪いのかを見分けるため
         await expect(page.getByTestId('status-logos')).toContainText('局');
 
-        // もう無いのに押したときも黙らないこと。何も起きないと壊れて見える
-        await page.getByTestId('logo-sweep').click();
-        await expect(page.getByTestId('tuner-error')).toContainText('もう全部持っています');
+        /*
+         * 取りに行くものが無くなったら**口も消える**。押しても「もう全部持って
+         * います」と断るだけのボタンを出しておく意味がない。
+         *
+         * 数えるのは取りに行ける放送だけ (地上波)。衛星まで分母に入れていた頃は、
+         * 地上波が全部揃っていても足りていないように見えていた
+         */
+        await expect(page.getByTestId('logo-sweep')).toHaveCount(0);
 
         // 番組表の見出しにも出る
         await goto(page, '/guide?type=GR');

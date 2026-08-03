@@ -4,7 +4,7 @@ import { LogoCollector } from '../ts/logo';
 import { withPalette } from '../ts/logo-palette';
 import type { ChannelType } from '../types';
 import { config } from './config';
-import { database, now, queryAll, queryOne } from './db';
+import { database, queryAll } from './db';
 import { CURRENT_SERVICES } from './epg';
 import { emit } from './events';
 import { getTuners, type MirakcTuner, openChannelStream } from './mirakc';
@@ -22,20 +22,26 @@ import { chunks } from './stream';
  */
 
 /**
+ * ロゴを取りに行ける放送。**地上波だけ。**
+ *
+ * denpa が読んでいるのは CDT (PID 0x0029) で、**衛星はそこにロゴを載せません**。
+ * Mirakurun も同じで、ネットワーク4 (BS) は CDT ではなく DSM-CC を読みに行きます
+ * (`TSFilter.ts` の `_enableParseDSMCC`)。denpa に DSM-CC の読み手はありません。
+ *
+ * 実機の数字がそのとおりでした: 地上波は 29/29 局ぶん揃い、**BS は 26中継を
+ * 回って 0/38、CS は 12中継を回って 0/54**。開くだけ無駄なので行きません
+ * (`BS19_1` のような中継を延々と開いていたのはこれ)。
+ */
+const CDT_TYPES = new Set(['GR']);
+
+/**
  * 1チャンネルあたりの取得にかける上限。
  *
  * **ロゴ (CDT) は滅多に流れてこない。** 実機で測ると、地上波を100秒読んで
- * 0〜2セクション、BS は4つの中継を100秒ずつ読んで0でした。分単位で待つ前提の
- * ものなので、数十秒開いて諦めていた頃は当たるほうが偶然でした。
- *
- * 衛星は**1つの中継で網羅できます**。BS/CS の CDT はそのネットワークの局の
- * ぶんをまとめて流すので (Mirakurun も同じ前提)、当たれば一度に埋まります。
- * そのぶん長く開く価値があります。地上波は中継ごとに乗っている局が違うので
- * 1つずつ回ることになりますが、**3分では足りませんでした** — 実機で回しても
- * ほとんど当たらないので、倍に伸ばしてあります。
+ * 0〜2セクション。分単位で待つ前提のものなので、数十秒開いて諦めていた頃は
+ * 当たるほうが偶然でした。3分でも足りず、6分に伸ばしてあります。
  */
-const SWEEP_TIMEOUT: Record<string, number> = { GR: 6 * 60_000 };
-const SWEEP_TIMEOUT_SATELLITE = 10 * 60_000;
+const SWEEP_TIMEOUT = 6 * 60_000;
 /**
  * 相乗りのときの上限。向こうの都合でいつ閉じてもおかしくないので短くする。
  * こちらはチューナーを増やさない (同じチャンネルなら mirakc が配っているものへ混ぜる)
@@ -57,10 +63,6 @@ const SWEEP_PRIORITY = 0;
  * 数十チャンネルぶんが何時間もかかる。全部は使わない (録画に残しておく)。
  */
 const GROUND_TUNERS = 2;
-
-function timeoutFor(type: string): number {
-    return SWEEP_TIMEOUT[type] ?? SWEEP_TIMEOUT_SATELLITE;
-}
 
 function logoDir(): string {
     return join(config.dataDir, 'logos');
@@ -102,9 +104,14 @@ function store(networkId: number, serviceIds: number[], data: Uint8Array): numbe
             const working = `${logoPath(id)}.writing`;
             writeFileSync(working, data);
             renameSync(working, logoPath(id));
-            database()
-                .prepare('UPDATE services SET has_logo = 1, updated_at = ? WHERE id = ?')
-                .run(now(), id);
+            /*
+             * **`updated_at` は触らない。** あれは「最後に mirakc から取り込んだ
+             * 時刻」で、番組表は *いちばん新しいものと同じ時刻の局だけ* を出す
+             * (`CURRENT_SERVICES`)。ロゴを1局ぶん保存するたびにここを進めていた
+             * 頃は、**その局だけが「いまの局」になって番組表から他が消えていた**
+             * (次の取り込みまで)。ロゴを拾ったことは取り込みとは何の関係もない
+             */
+            database().prepare('UPDATE services SET has_logo = 1 WHERE id = ?').run(id);
             saved++;
         }
     }
@@ -248,6 +255,8 @@ function currentServices(): { id: number; type: string; channel: string; network
 export function missing(): Target[] {
     const targets = new Map<string, Target>();
     for (const service of currentServices()) {
+        // 衛星は CDT にロゴを載せない。開いても来ない (CDT_TYPES)
+        if (!CDT_TYPES.has(service.type)) continue;
         if (!needsLogo(service.id)) continue;
         const key = `${service.type}:${service.channel}`;
         if (targets.has(key)) continue;
@@ -256,37 +265,21 @@ export function missing(): Target[] {
     return [...targets.values()];
 }
 
-/**
- * 衛星で開く中継の数。**1つのネットワークにつきこれだけ。**
- *
- * BS/CS の CDT は**そのネットワークの局のぶんをまとめて流す**ので、どの中継を
- * 開いても同じものが来る。実機の BS はネットワーク4に26の中継があり、
- * 順に10分ずつ開くと4時間かかっていた (`BS19_1` を開いているのはこれ)。
- * 来ないときは中継を替えても来ないので、2つ試して駄目なら次の機会に回す。
- */
-const SATELLITE_CHANNELS = 2;
-
-/**
- * 自分で開きに行く先。衛星は中継を絞る。
- *
- * 相乗り (`ride`) では絞らない。あちらは mirakc が既に開いているものに混ぜる
- * だけで只なので、どの中継でも来たものを拾えばいい。
- */
-function sweepTargets(): Target[] {
-    const seen = new Map<string, number>();
-    return missing().filter((target) => {
-        if (target.type === 'GR') return true;
-        const key = `${target.type}:${target.network_id}`;
-        const count = (seen.get(key) ?? 0) + 1;
-        seen.set(key, count);
-        return count <= SATELLITE_CHANNELS;
-    });
-}
-
 /** その物理チャンネルに相乗りしている局のうち、ロゴを取り直したい数 */
 function missingOn(channel: string): number {
-    return currentServices().filter((s) => s.channel === channel && needsLogo(s.id)).length;
+    return currentServices().filter((s) => s.channel === channel && CDT_TYPES.has(s.type) && needsLogo(s.id))
+        .length;
 }
+
+/**
+ * いま開いて読んでいる物理チャンネル。
+ *
+ * **相乗り (`ride`) が自分の開けたものに乗らないように持つ。** こちらが開くと
+ * mirakc が `tuner.status-changed` を飛ばし、それを合図に相乗りが走って、
+ * 同じチャンネルをもう1本開いていた。チューナーは増えないが、同じものを二重に
+ * 読むだけで、画面にも同じ中継が2つ並ぶ (実機で `BS01_1` が2つ出ていた)。
+ */
+const collecting = new Set<string>();
 
 /**
  * 1つの物理チャンネルを開いて、そこに乗っている局のロゴを拾う。
@@ -304,6 +297,7 @@ async function collect(target: Target, timeout: number, signal?: AbortSignal): P
     const before = missingOn(target.channel);
     const controller = new AbortController();
     const stop = setTimeout(() => controller.abort(), timeout);
+    collecting.add(target.channel);
     // 外から止められるようにする。衛星に10分かけている最中でも譲れるように
     const give = () => controller.abort();
     signal?.addEventListener('abort', give, { once: true });
@@ -326,6 +320,7 @@ async function collect(target: Target, timeout: number, signal?: AbortSignal): P
         // 取れなければ次の機会に。チューナーが空いていないだけのことも多い
     } finally {
         clearTimeout(stop);
+        collecting.delete(target.channel);
         signal?.removeEventListener('abort', give);
         controller.abort();
     }
@@ -449,7 +444,7 @@ async function drain(queue: Target[], parallel: number, signal: AbortSignal): Pr
                 return;
             }
             update({ channels: [...state.channels, target.channel] });
-            const got = await collect(target, timeoutFor(target.type), signal);
+            const got = await collect(target, SWEEP_TIMEOUT, signal);
             update({
                 channels: state.channels.filter((channel) => channel !== target.channel),
                 done: state.done + 1,
@@ -484,6 +479,8 @@ export async function ride(): Promise<number> {
         let found = 0;
         for (const target of need) {
             if (!open.has(target.channel)) continue;
+            // 自分で開けたものには乗らない。同じチャンネルを二重に読むことになる
+            if (collecting.has(target.channel)) continue;
             found += await collect(target, RIDE_TIMEOUT);
         }
         return found;
@@ -513,44 +510,41 @@ export async function sweep(limit = 1): Promise<number> {
     // 開いているチューナーがあるなら、まずそちらに乗る。只で読める
     const ridden = await ride();
 
-    const targets = sweepTargets().slice(0, limit);
+    const targets = missing().slice(0, limit);
     if (targets.length === 0 || (await freeTuners(targets[0].type)) === 0) return ridden;
     await run(targets, 1, ridden);
     return state.found;
 }
 
 /**
- * 画面の「いま取りに行く」。**地上波だけ**を、チューナー2つで取りに行く。
+ * 画面の「いま取りに行く」。残っているぶんを、チューナー2つで一気に取りに行く。
  *
- * 衛星を混ぜないのは、BS/CS のロゴが滅多に流れてこないため。1チャンネルに
- * 10分開いて何も来ないことが普通で、押した人を待たせるだけになる。
- * そちらは10分ごとの定期取得に任せる (1つの中継で網羅できるので、いつかは埋まる)。
+ * 対象は定期取得と同じ (`missing`)。衛星は端から入っていない — CDT にロゴが
+ * 載らないので、開いても来ない (`CDT_TYPES`)。
  */
 export async function sweepGround(): Promise<{ started: boolean; message: string }> {
     /*
-     * 定期取得が回っていても譲ってもらう。
-     *
-     * **衛星は1チャンネルに10分開く。** その間ずっと押せないままだった
-     * (押した人が待たされる相手は、たいてい自分の見たい局ではない)。
-     * 只で読める相乗り (ride) は別勘定なので、ここでは触らない
+     * 定期取得が回っていても譲ってもらう。1チャンネルに6分開くので、
+     * 待たせると押した人の用が済まない。只で読める相乗り (ride) は
+     * 別勘定なので、ここでは触らない
      */
     if (state.running) {
         inflight?.abort();
         if (!(await settled())) return { started: false, message: 'まだ前の取得が終わっていません' };
     }
     reconcile();
-    const targets = missing().filter((target) => target.type === 'GR');
+    const targets = missing();
     if (targets.length === 0) {
-        return { started: false, message: '地上波のロゴはもう全部持っています (取り直しも要りません)' };
+        return { started: false, message: 'ロゴはもう全部持っています (取り直しも要りません)' };
     }
     /*
      * 開ける本数だけ並べる。**種別まで見る。** 「1本でも空いていれば」で数えて
      * いた頃は、地上波が1本しか空いていなくても2チャンネルを開きに行っていた
      * (衛星用の空きは地上波の役に立たない)
      */
-    const free = await freeTuners('GR');
+    const free = await freeTuners(targets[0].type);
     if (free === 0) {
-        return { started: false, message: '地上波の空いているチューナーがありません' };
+        return { started: false, message: '空いているチューナーがありません' };
     }
     const parallel = Math.min(GROUND_TUNERS, free);
     // 終わるのは数分後。押した人を待たせず、進み具合は画面へ流す
@@ -558,7 +552,7 @@ export async function sweepGround(): Promise<{ started: boolean; message: string
     return {
         started: true,
         message:
-            `地上波 ${targets.length} チャンネルぶんを、チューナー ${parallel} 本で取りに行きます。` +
+            `${targets.length} チャンネルぶんを、チューナー ${parallel} 本で取りに行きます。` +
             'ロゴが流れてくるまで数分かかります',
     };
 }
@@ -591,7 +585,7 @@ async function run(targets: Target[], parallel: number, found: number): Promise<
         await drain([...targets], parallel, controller.signal);
     } finally {
         inflight = null;
-        const left = sweepTargets().length;
+        const left = missing().length;
         update({
             running: false,
             channels: [],
@@ -606,10 +600,20 @@ async function run(targets: Target[], parallel: number, found: number): Promise<
     }
 }
 
-/** 何局ぶん持っているか。「本当に取れているのか」を画面で確かめられるように */
-export function stats(): { have: number; total: number } {
-    const row = queryOne<{ have: number; total: number }>(
-        `SELECT SUM(has_logo) AS have, COUNT(*) AS total FROM services WHERE ${CURRENT_SERVICES}`,
-    );
-    return { have: row?.have ?? 0, total: row?.total ?? 0 };
+/**
+ * 何局ぶん持っているか。「本当に取れているのか」を画面で確かめられるように。
+ *
+ * **数えるのは取りに行ける放送だけ** (地上波)。衛星まで分母に入れていた頃は、
+ * 地上波が全部揃っていても「29 / 124 局」と出て、ずっと足りていないように
+ * 見えていた。取りに行けないものを数えても仕方がない。
+ *
+ * `pending` はこれから取りに行く物理チャンネルの数。0 なら押す口を出さない。
+ */
+export function stats(): { have: number; total: number; pending: number } {
+    const services = currentServices().filter((service) => CDT_TYPES.has(service.type));
+    return {
+        have: services.filter((service) => existsSync(logoPath(service.id))).length,
+        total: services.length,
+        pending: missing().length,
+    };
 }
