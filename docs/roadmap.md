@@ -110,13 +110,48 @@ mirakc も同じで、掴む相手が変わるたびにプロセスごと立て�
   カードを持つのはエージェントだけ、というのは既定路線ですが、
   `libaribb25` 相当を抱えることになります
 - **選局表を自分で持つ。** チャンネル名 → 周波数・方式 (`recisdb` の `channels` 相当)
-- **chardev のチューナーが対応表から外れます。** README は「`recisdb` が扱えるもの
-  (chardev / DVB)」と書いていますが、DVB だけになります。実機は DVB なので
-  今すぐ困りはしません
+- **口が2つになります** (下記)。ただしどちらも開いたままで済みます
 
 既製の常駐 (tvheadend など) に乗せ替える手もありますが、あちらは番組表も録画も
 持っているので、**mirakc を別の大きいものに替えるだけ**になります。欲しいのは
 「開いたまま選局して、TSを配る」薄い層だけです。
+
+#### chardev も開いたままにできる。ただし DVB では代われない
+
+**「開いたまま選局する」は chardev でも成り立ちます。** `px4_drv` の chardev は
+1つの fd に対して選局と streaming の開始・停止を投げる作りで、
+**閉じずに何度でも選局し直せます**。
+
+```c
+#define PTX_SET_CHANNEL     _IOW(0x8d, 0x01, struct ptx_freq)
+#define PTX_START_STREAMING _IO(0x8d, 0x02)
+#define PTX_STOP_STREAMING  _IO(0x8d, 0x03)
+
+struct ptx_freq { int freq_no; int slot; };
+```
+
+`slot` が衛星のスロットなので、**`BS01_0`〜`BS01_3` の切り替えも
+`PTX_SET_CHANNEL` 1回**です (DVB の `DTV_STREAM_ID` と同じ考え方)。
+むしろ fd が1つで済むぶん DVB より単純で、frontend / demux / dvr を
+別々に開く必要がありません。
+
+**では DVB だけにすればいいかというと、それは駄目です。** 「Linux DVB で使える
+PLEX のチューナーもある」のは本当ですが、**そうでないものが主力**です。
+
+| 機材 | 口 |
+| --- | --- |
+| PT2 / PT3 (Earthsoft) | **DVB** (mainline の `earth_pt1` / `earth_pt3`)。実機はこれ |
+| PX-S1UD (ISDB-T / USB) | **DVB** (mainline の Siano `smsusb` + `smsdvb`。firmware `isdbt_rio.inp` が要る) |
+| PX-BCUD (ISDB-S / USB) | **DVB** (Linux 4.7 以降 mainline) |
+| PX4 / PX5 / PX-MLT / e-better 系 | **chardev のみ** (`px4_drv`。作者自身が "not V4L-DVB" と書いています) |
+
+USBの1本ものは DVB に載っていますが、**複数チューナーの PCIe・USB ボードは
+`px4_drv` の chardev だけ**です。ここを落とすと「4本挿してある人」がまるごと
+外れるので、**2つとも実装します**。
+
+さいわい抽象は同じ形になります — *開く → 選局 → 流し始める → 読む → 選局し直す*。
+違うのはその4つをどの ioctl で言うかだけなので、エージェントの中では
+**backend を差し替えるだけ**で済みます。
 
 ### 3. エージェントは denpa に同梱。増やすときだけ足す
 
