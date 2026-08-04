@@ -79,6 +79,18 @@ app.MapGet("/denpa/stream", async (HttpContext http) =>
         await Respond.Write(http, new JsonObject { ["error"] = error.Message }, 409);
         return;
     }
+    catch (Exception error)
+    {
+        /*
+         * 掴めたが選局できなかった (同期しない・デバイスが開けない…)。
+         * **理由を必ず残す。** 空の 500 を返していたせいで、総当たりの
+         * スキャンが「選局できません (500)」としか言えず、何が起きているのか
+         * 分からなかった (docs/roadmap.md)
+         */
+        Log.Write($"{type} {channel} ({use}): {error.Message}");
+        await Respond.Write(http, new JsonObject { ["error"] = error.Message }, 500);
+        return;
+    }
 
     http.Response.ContentType = "video/MP2T";
     // 溜めない。数パケット届いたらそのまま流す (64KB 貯めると 25ms 積み上がる)
