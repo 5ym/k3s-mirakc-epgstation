@@ -13,7 +13,8 @@
             "!windows",
             "!docs",
             "!.github",
-            "!renovate.json"
+            "!renovate.json",
+            "!agent-dotnet"
         ]
     },
     "formatter": {

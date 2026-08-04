@@ -54,9 +54,29 @@ jobs:
       - name: Type check
         run: bun run check
 
-      # denpa 本体と、チューナー側エージェント (mirakc/) の両方
+      # denpa 本体と、チューナーエージェント (agent/) の両方
       - name: Unit tests
         run: bun run test:unit
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      # 手で書いた YAML 読みと、チューナー自動検出の値の読み取り
+      - name: Unit tests (.NET agent)
+        run: dotnet test agent-dotnet/Denpa.Agent.Tests/Denpa.Agent.Tests.csproj
+
+      # **同じものを2回通す。** エージェントの口に直接当てるテストで、
+      # bun 版と .NET 版が同じように振る舞うことがここで担保される
+      - name: Conformance (bun agent)
+        run: bun test agent/conformance.test.ts
+
+      - name: Build .NET agent
+        run: dotnet publish agent-dotnet/Denpa.Agent/Denpa.Agent.csproj -c Release -r linux-x64 -o agent-dotnet/publish
+
+      - name: Conformance (.NET agent)
+        run: AGENT_CMD="$PWD/agent-dotnet/publish/denpa-agent" bun test agent/conformance.test.ts
 
       # ブラウザは 150MB ほどあり、毎回落とすと1分近く持っていかれる。
       # 中身は Playwright のバージョンでしか変わらないので、それを鍵にする
@@ -82,7 +102,7 @@ jobs:
           fi
 
       # アプリを1度だけ組んでから、ワーカーの数だけ立てる。
-      # 偽mirakc・偽通知先もワーカーごとに1式ずつ (tests/stack.ts)
+      # 偽エージェント・偽通知先もワーカーごとに1式ずつ (tests/stack.ts)
       - name: E2E tests
         run: bun run test:e2e
 

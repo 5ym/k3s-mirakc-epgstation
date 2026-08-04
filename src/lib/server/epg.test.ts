@@ -6,10 +6,9 @@ import { join } from 'node:path';
 /**
  * 局だけの取り込み。
  *
- * mirakc は局と番組表を**別々に持っている**。知らせが飛んでくるのは番組表のぶんだけ
- * (`epg.programs-updated`) で、局が揃ったことは教えてくれない。初回起動や
- * チャンネルスキャンの直後は「局は分かったが番組表はこれから」が数十分続くので、
- * 番組表を待たずに局だけ先に取り込めることを確かめる。
+ * どの局が居るかを知っているのは**エージェント** (チャンネルスキャンの結果) で、
+ * 番組表を集めるのは denpa 自身。集めるほうは1チャンネルに数分かかるので、
+ * 局だけ先に取り込めることを確かめる。
  *
  * 環境変数ではなく設定そのものを書き換えている (files.test.ts と同じ理由)。
  */
@@ -19,22 +18,22 @@ config.dbPath = join(mkdtempSync(join(tmpdir(), 'denpa-epg-')), 'denpa.db');
 /** 何を取りに来たか。番組表を取りに行っていないことまで見る */
 const asked: string[] = [];
 
-function service(id: number, name: string, type = 1) {
+function channel(serviceId: number, name: string, serviceType = 1) {
     return {
-        id,
-        serviceId: id % 100000,
+        type: 'GR',
+        channel: 'T16',
         networkId: 32391,
-        name,
-        type,
-        channel: { type: 'GR', channel: 'T16' },
+        transportStreamId: 32391,
+        remoteControlKeyId: 9,
+        services: [{ serviceId, serviceType, name }],
     };
 }
 
-/** mirakc が返す局。テストの途中で入れ替える */
+/** エージェントが返すチャンネル。テストの途中で入れ替える */
 let offered = [
-    service(3239123608, 'ＴＯＫＹＯ　ＭＸ'),
+    channel(23608, 'ＴＯＫＹＯ　ＭＸ'),
     // データ放送。映像が入っていないので取り込まない
-    service(3239100700, 'ＭＸデータ１', 192),
+    channel(700, 'ＭＸデータ１', 192),
 ];
 
 const server = Bun.serve({
@@ -42,11 +41,11 @@ const server = Bun.serve({
     fetch(request) {
         const path = new URL(request.url).pathname;
         asked.push(path);
-        if (path === '/api/services') return Response.json(offered);
+        if (path === '/denpa/channels') return Response.json(offered);
         return new Response('not found', { status: 404 });
     },
 });
-config.mirakcUrl = `http://127.0.0.1:${server.port}`;
+config.agentUrl = `http://127.0.0.1:${server.port}`;
 
 const { database } = await import('./db');
 const { syncServicesOnly } = await import('./epg');
@@ -57,11 +56,11 @@ describe('syncServicesOnly', () => {
 
         const rows = database().query('SELECT id, name, type FROM services').all();
         // 全角英数は取り込むときに直す。他の画面と字面がずれると別の局に見える
+        // 内部IDは networkId * 100000 + serviceId。録画が参照しているので変えられない
         expect(rows).toEqual([{ id: 3239123608, name: 'TOKYO MX', type: 'GR' }]);
 
-        // 番組表は取りに行っていないこと。ここが本題で、
-        // 番組表ごと取っていた頃は mirakc が集め終わるまで局も出せなかった
-        expect(asked).toEqual(['/api/services']);
+        // 選局していないこと。局の一覧はスキャンの結果を読むだけで手に入る
+        expect(asked).toEqual(['/denpa/channels']);
         expect(database().query('SELECT COUNT(*) AS n FROM programs').get()).toEqual({ n: 0 });
     });
 
@@ -72,7 +71,7 @@ describe('syncServicesOnly', () => {
 });
 
 /**
- * mirakc から消えた局の片付け。
+ * 選局できなくなった局の片付け。
  *
  * スキャンをやり直すと局は普通に入れ替わる。番組表を置いたままにしていた頃は、
  * もう選局できない局の番組が数万件残り、検索にも引っかかり続けていた。
@@ -103,7 +102,7 @@ describe('消えた局の片付け', () => {
         seed(3239123608);
 
         // 局が丸ごと入れ替わった (スキャンのやり直し)
-        offered = [service(3239123609, '別の局')];
+        offered = [channel(23609, '別の局')];
         await syncServicesOnly();
 
         expect(db().query('SELECT COUNT(*) AS n FROM programs').get()).toEqual({ n: 0 });
@@ -118,12 +117,12 @@ describe('消えた局の片付け', () => {
     });
 
     test('1局も返ってこなかった回では何もしない', async () => {
-        offered = [service(3239123608, 'ＴＯＫＹＯ　ＭＸ')];
+        offered = [channel(23608, 'ＴＯＫＹＯ　ＭＸ')];
         await syncServicesOnly();
         seed(3239123608);
 
         /*
-         * mirakc は起動直後や不調で空を返すことがある。それを「全部消えた」と
+         * エージェントは起動直後や不調で空を返すことがある。それを「全部消えた」と
          * 読むと、次の取り込みまで番組表が丸ごと消える
          */
         offered = [];

@@ -1,7 +1,7 @@
 # 開発環境。ホストに bun を入れずに済むよう、全部コンテナの中で完結させる。
 #
-#   docker compose up            … 開発サーバ + 偽mirakc
-#   docker compose run --rm e2e  … E2E (中で偽mirakc/偽通知先/アプリを起動する)
+#   docker compose up            … 開発サーバ + 偽チューナーエージェント
+#   docker compose run --rm e2e  … E2E (中で偽エージェント/偽通知先/アプリを起動する)
 #   docker compose run --rm unit … 単体テスト
 #
 # 実チューナーもロゴデータも要らず、ffmpeg も偽物を使うので、
@@ -22,9 +22,9 @@ services:
             # 開発では本物の ffmpeg (ビルドに数十分) の代わりに偽物を使う。
             # 実エンコードを試したいときだけ FFMPEG=/usr/local/bin/ffmpeg にして runtime ステージで動かす
             FFMPEG: /app/tests/fake/ffmpeg.sh
-            MIRAKC_URL: http://mirakc:40772
+            TUNER_AGENT_URL: http://tuner-agent:25252
             RECONCILE_INTERVAL: '60000'
-            EPG_SYNC_INTERVAL: '60000'
+            EPG_COLLECT_INTERVAL: '60000'
             SCHEDULER_TICK: '2000'
             ENCODE_CONCURRENCY: '2'
         volumes:
@@ -37,25 +37,24 @@ services:
             # ホスト側で5173が埋まっていることがあるので上書きできるようにしておく
             - '${DENPA_PORT:-5173}:5173'
         depends_on:
-            - mirakc
+            - tuner-agent
 
-    # 実チューナーの代わり。番組表も録画ストリームもここが返す
-    mirakc:
+    # 実チューナーの代わり。番組表も録画ストリームも、素のTSとしてここが流す
+    tuner-agent:
         build:
             context: .
             target: dev
-        command: bun tests/fake/mirakc.ts
+        command: bun tests/fake/agent.ts
         environment:
             TZ: Asia/Tokyo
-            FAKE_MIRAKC_PORT: '40772'
-            # 開発中に録画完了まで見届けられるよう、1番組60秒にしておく
-            FAKE_SLOT_MS: '60000'
+            FAKE_AGENT_PORT: '25252'
+            # 開発中に録画完了まで見届けられるよう、番組を多めに出しておく
             FAKE_SLOTS: '120'
         volumes:
             - .:/app
             - app-node-modules:/app/node_modules
         ports:
-            - '40772:40772'
+            - '25252:25252'
 
 
     e2e:

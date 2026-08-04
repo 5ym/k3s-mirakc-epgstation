@@ -6,10 +6,11 @@
  * - NIT (PID 0x0010) … ネットワークID と、地上波ならリモコン番号
  * - SDT (PID 0x0011) … その TS に入っているサービスのIDと種別
  *
- * 局名は読まない。ARIB の文字符号は独自で、まともに解くには外字や漢字集合まで
- * 面倒を見ることになる。名前は mirakc が起動後に自分で拾うので、こちらは
- * 「どの物理チャンネルに何番のサービスが居るか」だけ分かればよい。
+ * 局名も SDT から読む。ARIB の文字符号は独自だが、番組表を自分で集めるなら
+ * どのみち要るので [aribtext.ts](aribtext.ts) に寄せてある。
  */
+
+import { decodeAribText } from './aribtext';
 
 export const PACKET = 188;
 export const SYNC = 0x47;
@@ -54,6 +55,8 @@ export function crc32(data: Uint8Array): number {
 export interface Service {
     serviceId: number;
     serviceType: number;
+    /** 局名。SDT からしか取れないので、NIT 由来のものは空 */
+    name: string;
 }
 
 export interface TransportInfo {
@@ -229,7 +232,19 @@ export function parseSdt(section: Uint8Array): TransportInfo | null {
 
         for (const [tag, descriptor] of descriptors(body)) {
             if (tag === DESC_SERVICE && descriptor.length > 0) {
-                services.push({ serviceId, serviceType: descriptor[0] });
+                /*
+                 * service_descriptor は 種別 → 事業者名 → サービス名 の順。
+                 * 事業者名 (「東京メトロポリタンテレビジョン」) は要らないので飛ばし、
+                 * その先のサービス名 (「TOKYO MX1」) を取る
+                 */
+                const providerLength = descriptor[1] ?? 0;
+                const nameAt = 2 + providerLength;
+                const nameLength = descriptor[nameAt] ?? 0;
+                services.push({
+                    serviceId,
+                    serviceType: descriptor[0],
+                    name: decodeAribText(descriptor.subarray(nameAt + 1, nameAt + 1 + nameLength)),
+                });
                 break;
             }
         }
@@ -270,6 +285,7 @@ export function parseNit(section: Uint8Array): NetworkInfo | null {
                     services.push({
                         serviceId: (descriptor[i] << 8) | descriptor[i + 1],
                         serviceType: descriptor[i + 2],
+                        name: '',
                     });
                 }
             }

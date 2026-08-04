@@ -1,9 +1,15 @@
-# mirakc の設定 (config.yml)。チャンネルスキャンの結果がここへ書き戻されるので、
-# イメージに焼かずPVCに置く。初回だけエージェントが空の雛形を写す
+# エージェントの設定。**2つのファイルが入る。**
+#
+#   tuners.json   … 繋いである機材。denpa の画面から書き換える
+#   channels.json … スキャンで見つかったチャンネル。エージェントが書く
+#
+# どちらもイメージに焼かずPVCに置く。どちらも無ければ空から始まる
+# (.NET 版は刺さっている機材を自分で見つける)。
+# 番組表はもうここには居ない (denpa の DB が持つ)
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: mirakc-config
+  name: agent-config
   namespace: denpa
   annotations:
     argocd.argoproj.io/sync-options: Prune=false,Delete=false
@@ -14,21 +20,6 @@ spec:
   resources:
     requests:
       storage: 128Mi
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: mirakc-epg
-  namespace: denpa
-  annotations:
-    argocd.argoproj.io/sync-options: Prune=false,Delete=false
-spec:
-  accessModes:
-    - ReadWriteOnce
-  storageClassName: local-path-retain
-  resources:
-    requests:
-      storage: 3Gi
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

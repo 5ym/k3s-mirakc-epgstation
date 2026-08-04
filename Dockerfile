@@ -116,8 +116,8 @@ ENV NODE_ENV=production \
     FFMPEG=/usr/local/bin/ffmpeg \
     FFPROBE=/usr/local/bin/ffprobe
 
-# B-CASカードは触らない。掛かったまま録れたTSの解除は Mirakurun 側の
-# 受け口に投げる(あちらにしか pcscd が居ないため)。recisdb も libpcsclite も要らない
+# B-CASカードは触らない。掛かったまま録れたTSの解除はチューナーエージェントに
+# 投げる(あちらにしか pcscd が居ないため)。recisdb も libpcsclite も要らない
 # libav* は join_logo_scp 一式のため。あちらは Debian の共有ライブラリに繋いである
 # (denpa 自身の ffmpeg は下で入れる自前ビルド)
 RUN apt-get update && \

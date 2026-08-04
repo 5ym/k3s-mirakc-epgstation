@@ -3,7 +3,7 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { test as base } from '@playwright/test';
 
 /**
- * ワーカーごとに1式ずつ、denpa と偽 mirakc / 偽通知先を立てる。
+ * ワーカーごとに1式ずつ、denpa と偽チューナーエージェント / 偽通知先を立てる。
  *
  * 以前は1つのアプリと1つのDBを全テストで共有していたので、直列に流すしかなかった。
  * 予約も録画もルールも同じ表に入るため、2つのテストが同時に動くと件数が合わない。
@@ -22,7 +22,7 @@ export const TEST_ROOT = '/tmp/denpa-e2e';
  */
 const STRIDE = 10;
 const APP_PORT = 4173;
-const MIRAKC_PORT = 40772;
+const AGENT_PORT = 25252;
 const WEBHOOK_PORT = 8096;
 
 /** 立ち上がりを待つ上限。ここを短くすると混んでいるマシンで落ちる */
@@ -33,7 +33,7 @@ export interface Stack {
     /** このワーカーの作業領域 */
     root: string;
     appUrl: string;
-    mirakcUrl: string;
+    agentUrl: string;
     webhookUrl: string;
     recordedDir: string;
     libraryDir: string;
@@ -95,14 +95,14 @@ async function stop(started: Started): Promise<void> {
 
 async function boot(index: number): Promise<{ stack: Stack; shutdown: () => Promise<void> }> {
     const appPort = APP_PORT + index * STRIDE;
-    const mirakcPort = MIRAKC_PORT + index * STRIDE;
+    const agentPort = AGENT_PORT + index * STRIDE;
     const webhookPort = WEBHOOK_PORT + index * STRIDE;
 
     const root = `${TEST_ROOT}/w${index}`;
     const stack: Stack = {
         root,
         appUrl: `http://127.0.0.1:${appPort}`,
-        mirakcUrl: `http://127.0.0.1:${mirakcPort}`,
+        agentUrl: `http://127.0.0.1:${agentPort}`,
         webhookUrl: `http://127.0.0.1:${webhookPort}`,
         recordedDir: `${root}/recorded`,
         libraryDir: `${root}/library`,
@@ -120,16 +120,16 @@ async function boot(index: number): Promise<{ stack: Stack; shutdown: () => Prom
     };
 
     try {
-        const mirakc = start(['bun', 'tests/fake/mirakc.ts'], {
-            FAKE_MIRAKC_PORT: String(mirakcPort),
+        const agent = start(['bun', 'tests/fake/agent.ts'], {
+            FAKE_AGENT_PORT: String(agentPort),
             // 尺は tests/fake/services.ts で局ごとに決めている
             FAKE_SLOTS: '30',
             // スクランブル解除はパスだけ受け取って直接ファイルを触る。
-            // 本物でも denpa と mirakc の両方に同じ置き場を見せている
+            // 本物でも denpa とエージェントの両方に同じ置き場を見せている
             RECORDED_DIR: stack.recordedDir,
             LIBRARY_DIR: stack.libraryDir,
         });
-        started.push(mirakc);
+        started.push(agent);
 
         const webhook = start(['bun', 'tests/fake/webhook.ts'], {
             FAKE_WEBHOOK_PORT: String(webhookPort),
@@ -152,32 +152,22 @@ async function boot(index: number): Promise<{ stack: Stack; shutdown: () => Prom
             RECORDED_DIR: stack.recordedDir,
             LIBRARY_DIR: stack.libraryDir,
             FFMPEG: './tests/fake/ffmpeg.sh',
-            // スクランブル解除の受け口。本物では mirakc と同じコンテナの
-            // 別プロセスだが、偽 mirakc が同じ口を兼ねている
-            TUNER_AGENT_URL: stack.mirakcUrl,
+            // 選局もスクランブル解除もスキャンも、窓口はここ1つ
+            TUNER_AGENT_URL: stack.agentUrl,
             // 引き継ぎ画面。何も待ち受けていない先を指して、失敗したときの見え方も試す
             EPGSTATION_RECORDED_DIR: stack.epgstationDir,
             EPGSTATION_DB_HOST: '127.0.0.1',
             EPGSTATION_DB_PORT: '1',
             FAKE_FFMPEG_FAIL_FILE: stack.failFile,
-            MIRAKC_URL: stack.mirakcUrl,
             // 定期処理は止め、テストからボタン/APIで明示的に走らせる(タイミング依存を避ける)
             RECONCILE_INTERVAL: '86400000',
-            EPG_SYNC_INTERVAL: '86400000',
-            // 局だけの取り込みも定期実行。中身は epg.test.ts で見ている
-            SERVICE_SYNC_INTERVAL: '86400000',
+            EPG_COLLECT_INTERVAL: '86400000',
+            CHANNEL_SYNC_INTERVAL: '86400000',
+            // 1チャンネル読むのに待つ上限。偽エージェントは開いた直後に全部流す
+            EPG_CHANNEL_TIMEOUT: '10000',
             SCHEDULER_TICK: '500',
             START_MARGIN: '0',
             END_MARGIN: '500',
-            /*
-             * 放送の延長への追従。
-             * 見に行く周期は**わざと長くしてある**。こうしておくと、延長に
-             * 気付けるのは mirakc からの知らせ (/events) を拾えたときだけになり、
-             * 保険の定期実行にすり替わっていないことまで確かめられる
-             */
-            ONAIR_POLL_INTERVAL: '3600000',
-            ONAIR_FALLBACK_WAIT: '1500',
-            EPG_EVENT_DEBOUNCE: '200',
             // 録画が終わるまで待たれるとテストが終わらない
             SHUTDOWN_WAIT: '0',
             ENCODE_CONCURRENCY: '2',
@@ -188,7 +178,7 @@ async function boot(index: number): Promise<{ stack: Stack; shutdown: () => Prom
         started.push(app);
 
         await Promise.all([
-            waitFor(`${stack.mirakcUrl}/api/version`, mirakc, '偽 mirakc'),
+            waitFor(`${stack.agentUrl}/denpa/tuners`, agent, '偽エージェント'),
             waitFor(`${stack.webhookUrl}/__control/state`, webhook, '偽通知先'),
         ]);
         await waitFor(`${stack.appUrl}/api/health`, app, 'denpa');

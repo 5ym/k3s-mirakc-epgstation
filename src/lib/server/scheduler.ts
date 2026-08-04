@@ -3,9 +3,9 @@ import { config } from './config';
 import { assign } from './conflict';
 import { database, now, queryOne } from './db';
 import { emit } from './events';
-import * as mirakc from './mirakc';
 import { activeRecordingIds, startRecording, stopRecording } from './recorder';
 import { isDraining } from './shutdown';
+import { type AgentTuner, getTuners } from './tuner';
 
 interface Candidate extends Reservation {
     type: string;
@@ -13,20 +13,20 @@ interface Candidate extends Reservation {
 }
 
 /**
- * チャンネル種別ごとのチューナー本数。mirakc が落ちていて取れないときは
+ * チャンネル種別ごとのチューナー本数。エージェントに繋がらないときは
  * 「制限なし」を返し、予約を勝手に conflict にしない(実際に録画が始まるときに
- * mirakc 側が弾くので、予約表を壊すより実行時に失敗させるほうが害が小さい)。
+ * あちらが弾くので、予約表を壊すより実行時に失敗させるほうが害が小さい)。
  */
 export async function tunerCapacity(): Promise<Map<string, number>> {
     const capacity = new Map<string, number>();
-    let tuners: mirakc.MirakcTuner[];
+    let tuners: AgentTuner[];
     try {
-        tuners = await mirakc.getTuners();
+        tuners = await getTuners();
     } catch {
         return capacity;
     }
     for (const tuner of tuners) {
-        if (tuner.isFault) continue;
+        if (tuner.disabled) continue;
         for (const type of tuner.types) {
             capacity.set(type, (capacity.get(type) ?? 0) + 1);
         }

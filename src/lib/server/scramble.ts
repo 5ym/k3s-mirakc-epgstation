@@ -85,7 +85,7 @@ export interface CardStatus {
  */
 export async function cardStatus(): Promise<CardStatus> {
     try {
-        const res = await fetch(`${config.tunerAgentUrl}/denpa/card`, {
+        const res = await fetch(`${config.agentUrl}/denpa/card`, {
             signal: AbortSignal.timeout(10_000),
         });
         if (!res.ok) {
@@ -132,7 +132,7 @@ export async function descramble(
 
     try {
         // 解除は数十分かかることがある。中止を押されたらここで切る
-        const res = await fetch(`${config.tunerAgentUrl}/denpa/decode`, {
+        const res = await fetch(`${config.agentUrl}/denpa/decode`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ input: from, output: to }),

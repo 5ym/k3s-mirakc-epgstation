@@ -34,13 +34,31 @@ const SEC = 1000;
 const MIN = 60 * SEC;
 
 export const config = {
-    mirakcUrl: str('MIRAKC_URL', 'http://mirakc:40772').replace(/\/+$/, ''),
     /**
-     * スクランブル解除の受け口。mirakc と同じコンテナに居る。
-     * B-CASカードは pcscd 経由でしか読めず、その pcscd は向こう側にしか無いので、
-     * 掛かったまま録れたTSは投げて解いてもらう
+     * チューナーエージェントの居場所。
+     *
+     * 選局もスクランブル解除もチャンネルスキャンも、全部ここが窓口。
+     * B-CASカードは pcscd 経由でしか読めず、その pcscd は向こう側にしか無い。
+     * 別PCのチューナーを足すときは、そのPCのエージェントを指す
      */
-    tunerAgentUrl: str('TUNER_AGENT_URL', 'http://mirakc:40773').replace(/\/+$/, ''),
+    agentUrl: str('TUNER_AGENT_URL', 'http://tuner-agent:25252').replace(/\/+$/, ''),
+
+    /**
+     * チューナーの取り合いの強さ。**大きいほうが勝つ。**
+     *
+     * mirakc の `X-Mirakurun-Priority` は負値が 0 に丸められ、−1 は
+     * mirakc 自身の番組表集めに取られていたので、番号の付け方が向こうの都合に
+     * 縛られていた。エージェントに移ってからは**こちらが全部決める**。
+     *
+     * 録画がいちばん強い。放送は二度と来ないので、ここだけは譲らせない。
+     */
+    priority: {
+        recording: 10,
+        /** 人が押して待っている。番組表には譲らせるが、録画は蹴らない (agent/scan.ts と揃える) */
+        scan: 5,
+        epg: 3,
+        logo: 1,
+    },
 
     dbPath: str('DENPA_DB', '/app/data/denpa.db'),
     /** DBと並べて置くもの。局ロゴと、jls が作るロゴデータ */
@@ -116,45 +134,39 @@ export const config = {
     /**
      * 放送の延長に追従する。
      *
-     * 番組単位のストリーム (`/api/programs/:id/stream`) で録ると、切れ目を決めるのが
-     * 番組表の時刻ではなく**いま流れている放送** (EIT[p/f]) になる。野球が延びれば
-     * その分だけ録り続け、頭に前番組が混ざることもなくなる。
+     * 録画中のTSには EIT[p/f] (いま流れている番組) が乗っている。そこの終了時刻が
+     * 後ろへ動いたら録画も延ばす。野球が延びればその分だけ録り続ける。
      *
      * 0 にすると番組表の時刻で開いて閉じる、前のやり方に戻る。
      */
     followOnair: true,
-    /**
-     * 延長を見に行く間隔。
-     * 普段は mirakc からの知らせ (`/events` の `onair.program-changed`) で拾うので、
-     * これは**知らせが途切れたときの保険**。短くしても得は無い
-     */
-    onairPollInterval: num('ONAIR_POLL_INTERVAL', 5 * MIN),
-    /**
-     * 番組単位で開いたのに何も流れてこないとき、サービス単位に切り替えるまでの待ち時間。
-     * mirakc は番組が始まるまで1バイトも出さないので、開いた直後は空でも正常
-     */
-    onairFallbackWait: num('ONAIR_FALLBACK_WAIT', 90 * SEC),
 
     /**
-     * 番組表を取り直す間隔。
-     * 普段は mirakc からの知らせ (`/events` の `epg.programs-updated`) で取り直すので、
-     * これも保険。知らせが黙って止まっても、ここで必ず追い付く
-     */
-    epgSyncInterval: num('EPG_SYNC_INTERVAL', 10 * MIN),
-    /**
-     * 局だけを取り直す間隔。
+     * 番組表を集めに行く間隔。**この周期で「集め直すべき局」を選び直す。**
      *
-     * mirakc は局と番組表を別々に持っていて、**局が揃ったことは知らせてくれない**
-     * (飛んでくるのは `epg.programs-updated` だけ)。初回起動やスキャン直後は
-     * 「局は分かったが番組表はこれから」が数十分続くので、局だけ先に拾いに行く
+     * mirakc は 8:21 と 20:21 の1日2回で、1本のチューナーが1チャンネルずつ
+     * 回っていた (実測で1周1時間以上)。こちらはチューナーが空いていれば
+     * 空いているだけ並列に回すので、周期を短くしても取り合いにはならない
      */
-    serviceSyncInterval: num('SERVICE_SYNC_INTERVAL', 1 * MIN),
+    epgCollectInterval: num('EPG_COLLECT_INTERVAL', 30 * MIN),
+    /** 同じチャンネルを集め直すまでの間。番組表は当日ぶんが直前まで書き換わる */
+    epgChannelInterval: num('EPG_CHANNEL_INTERVAL', 6 * 60 * MIN),
     /**
-     * 知らせが来てから取り直すまでの間。
-     * 番組表が更新されると局の数だけ知らせが飛んでくる (実機で30件ほど連続) ので、
-     * 静まるのを待ってから1回だけ取り直す
+     * 1チャンネルを開いておく上限。
+     *
+     * EIT は「自分がどこまであるか」をセクションの中で言っているので、普通は
+     * 揃った時点で閉じる (`ts/eit.ts` の ScheduleProgress)。ここまで待つのは
+     * 電波が弱くて欠けが埋まらないときだけ
      */
-    epgEventDebounce: num('EPG_EVENT_DEBOUNCE', 10 * SEC),
+    epgChannelTimeout: num('EPG_CHANNEL_TIMEOUT', 5 * MIN),
+    /**
+     * 番組表がこの先まで埋まっていない局は、周期を待たずに集め直す。
+     *
+     * スキャンの直後や初回起動では全部が空なので、ここで先に埋まる
+     */
+    epgMinCoverage: num('EPG_MIN_COVERAGE', 3 * 24 * 60 * MIN),
+    /** 局の一覧をエージェントから取り直す間隔。スキャンの結果はここで届く */
+    channelSyncInterval: num('CHANNEL_SYNC_INTERVAL', 1 * MIN),
     /**
      * 止められたとき、録画が終わるまで待つ上限。
      *
