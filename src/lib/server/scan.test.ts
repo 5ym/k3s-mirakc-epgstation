@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { nitSection, packetize, sdtSection } from '../ts/synth';
-import { channelEntry, channelsFor, readServices } from './scan';
+import { channelEntry, channelsFor, readServices, twinOf } from './scan';
+import type { AgentChannel } from './tuner';
 
 /**
  * 総当たりそのもの (`Scanner`) はここでは試さない。**エージェントに選局を
@@ -84,6 +85,42 @@ describe('チャンネル定義の組み立て', () => {
                 { serviceId: 1032, serviceType: 1, name: 'TOKYO MX2' },
             ],
         });
+    });
+});
+
+/**
+ * 衛星は「無い相対番号」を指すと**先頭の TS が返ってくる** (断ってはくれない)。
+ * 実機では 35 枠のうち 9 枠がその写しだった。
+ */
+describe('同じ TS を指している枠', () => {
+    const entry = (channel: string, tsid: number): AgentChannel => ({
+        type: 'BS',
+        channel,
+        networkId: 4,
+        transportStreamId: tsid,
+        remoteControlKeyId: null,
+        services: [{ serviceId: 151, serviceType: 1, name: 'BS朝日1' }],
+    });
+
+    test('先に見つけたほうの名前を返す', () => {
+        const found = [entry('BS01_0', 16400), entry('BS01_1', 16401)];
+
+        expect(twinOf(found, entry('BS01_3', 16400))).toBe('BS01_0');
+        expect(twinOf(found, entry('BS01_2', 16402))).toBeNull();
+    });
+
+    test('種別が違えば別物。TSID は種別をまたいで一意ではない', () => {
+        const found = [entry('BS01_0', 16400)];
+        const cs = { ...entry('CS02', 16400), type: 'CS' as const };
+
+        expect(twinOf(found, cs)).toBeNull();
+    });
+
+    test('TSID が分からないものは落とさない', () => {
+        // 読めなかったものまで「写し」として捨てると、その中継が丸ごと消える
+        const found = [entry('BS01_0', 0)];
+
+        expect(twinOf(found, entry('BS01_1', 0))).toBeNull();
     });
 });
 
