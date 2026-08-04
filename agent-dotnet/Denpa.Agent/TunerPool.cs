@@ -48,6 +48,34 @@ public sealed class TunerPool(
     private readonly Lock _gate = new();
     private readonly Dictionary<int, Lease> _leases = [];
 
+    /// <summary>
+    /// **開きっぱなしのデバイス。チューナー1本につき1つ。**
+    ///
+    /// <para>
+    /// ここが選局 (lease) ごとではなく**チューナーごと**なのが肝。チャンネルを
+    /// 変えるたびに開き直すと、前の選局がまだ持っているデバイスを開こうとして
+    /// <c>Device or resource busy</c> で落ちる。実際そうなっていて、スキャンが
+    /// 1チャンネル目以降ぜんぶ落ちた (docs/roadmap.md)。
+    /// </para>
+    /// </summary>
+    private readonly Dictionary<int, Held> _held = [];
+
+    /// <summary>1本ぶんの実体。**閉じるのは定義が変わったときと、止めるときだけ**</summary>
+    private sealed class Held(ITuneDevice device, AribB25? b25) : IDisposable
+    {
+        public ITuneDevice Device { get; } = device;
+        public AribB25? B25 { get; } = b25;
+
+        /// <summary>いま合わせているところ。**同じなら選局し直さない**</summary>
+        public string? Channel { get; set; }
+
+        public void Dispose()
+        {
+            Device.Dispose();
+            B25?.Dispose();
+        }
+    }
+
     private IReadOnlyList<TunerSpec> _specs = specs;
 
     public IReadOnlyList<TunerSpec> Tuners => _specs;
@@ -76,6 +104,8 @@ public sealed class TunerPool(
                 var now = index < next.Count ? next[index].Name : null;
                 if (was == now && now is not null) continue;
                 Release(lease, "チューナーの設定が変わりました");
+                // 別の機材になったかもしれない。掴み直す
+                Drop(index);
             }
         }
         onChange();
@@ -116,11 +146,29 @@ public sealed class TunerPool(
             {
                 try
                 {
-                    lease.StartNative(spec, _tune, () => OnExit(index, lease));
+                    var held = Acquire(index, spec);
+                    if (held.Channel != channel)
+                    {
+                        var tuning = ChannelTable.Parse(channel)
+                            ?? throw new IOException($"{channel} は選局表にありません");
+                        // 途中で落ちたら「どこにも合っていない」。次は必ず選局し直す
+                        held.Channel = null;
+                        held.Device.Tune(tuning, ChannelTable.StreamId(channel, tuning, _tune.StreamIds));
+                        // 前のチャンネルの PMT と鍵を忘れさせる
+                        held.B25?.Reset();
+                        held.Channel = channel;
+                    }
+                    lease.StartNative(held.Device, held.B25, () => OnExit(index, lease));
                 }
                 catch (Exception error)
                 {
                     _leases.Remove(index);
+                    /*
+                     * **デバイスは閉じない。** 電波が来ていないチャンネルでは
+                     * 選局が失敗するのが普通で、そのたびに閉じていると次の
+                     * チャンネルが「使用中」で開けなくなる (総当たりのスキャンが
+                     * 1本目以降ぜんぶ落ちたのはこれ)。次の選局で掴み直す
+                     */
                     throw new IOException($"{spec.Name}: {error.Message}");
                 }
             }
@@ -130,6 +178,46 @@ public sealed class TunerPool(
             }
             return Join(lease, priority, use);
         }
+    }
+
+    /// <summary>
+    /// 開きっぱなしの実体を取り出す。**無ければ、そのとき1度だけ開く。**
+    ///
+    /// <para>
+    /// カードが開けなくても選局はする。**掛かったままでも録るほうがまし**で、
+    /// 電波は二度と戻ってこない (解けていないことは denpa 側が見て分かる)。
+    /// </para>
+    /// </summary>
+    private Held Acquire(int index, TunerSpec spec)
+    {
+        if (_held.TryGetValue(index, out var open)) return open;
+
+        var path = spec.Device ?? throw new IOException($"{spec.Name} にデバイスが書かれていません");
+        ITuneDevice device = path.Contains("/dvb/", StringComparison.Ordinal)
+            ? new DvbTuner(path, spec.Lnb)
+            : new Px4Tuner(path, spec.Lnb);
+
+        AribB25? b25 = null;
+        try
+        {
+            b25 = AribB25.Open(_tune.CardUrl);
+        }
+        catch (Exception error)
+        {
+            Log.Write($"[{spec.Name}] 解けません: {error.Message}");
+        }
+
+        var held = new Held(device, b25);
+        _held[index] = held;
+        Log.Write($"[{spec.Name}] {path} を掴みました");
+        return held;
+    }
+
+    /// <summary>実体を手放す。**定義が変わったときと、止めるときだけ**</summary>
+    private void Drop(int index)
+    {
+        if (!_held.Remove(index, out var held)) return;
+        held.Dispose();
     }
 
     private void OnExit(int index, Lease lease)
@@ -283,6 +371,7 @@ public sealed class TunerPool(
         lock (_gate)
         {
             foreach (var lease in _leases.Values.ToList()) Release(lease, "停止します");
+            foreach (var index in _held.Keys.ToList()) Drop(index);
         }
     }
 
@@ -384,8 +473,9 @@ internal sealed class Lease(int tuner, string type, string channel)
     /// 止めるときはグループごと落とす。
     /// </para>
     /// </summary>
-    private ITuneDevice? _device;
-    private AribB25? _b25;
+    private bool _native;
+    private volatile bool _stopped;
+    private Task? _pump;
 
     /// <summary>
     /// **掴んだまま選局する側。** 外のコマンドを起こさずに ioctl で選局し、
@@ -396,51 +486,28 @@ internal sealed class Lease(int tuner, string type, string channel)
     /// 失敗として畳む** — 黙って終わると空のファイルが残る。
     /// </para>
     /// </summary>
-    public void StartNative(TunerSpec spec, TuneOptions options, Action onExit)
+    /// <summary>
+    /// **掴んだままのデバイスから読んで配る。** 選局そのものはプールがやる。
+    ///
+    /// <para>
+    /// デバイスは**チューナーごとに開きっぱなし**で、ここでは閉じない。
+    /// 畳むときも読むのをやめるだけ (<see cref="Kill"/>)。
+    /// </para>
+    /// </summary>
+    public void StartNative(ITuneDevice tuner, AribB25? b25, Action onExit)
     {
-        var tuning = ChannelTable.Parse(Channel)
-            ?? throw new IOException($"{Channel} は選局表にありません");
-        var device = spec.Device
-            ?? throw new IOException($"{spec.Name} にデバイスが書かれていません");
-
-        ITuneDevice tuner = device.Contains("/dvb/", StringComparison.Ordinal)
-            ? new DvbTuner(device, spec.Lnb)
-            : new Px4Tuner(device, spec.Lnb);
-        _device = tuner;
-
-        try
-        {
-            tuner.Tune(tuning, ChannelTable.StreamId(Channel, tuning, options.StreamIds));
-            // カードが開けなくても選局は続ける。**掛かったままでも録るほうがまし**で、
-            // 電波は二度と戻ってこない (解けていないことは denpa 側が見て分かる)
-            try
-            {
-                _b25 = AribB25.Open(options.CardUrl);
-            }
-            catch (Exception error)
-            {
-                Error = $"解けません: {error.Message}";
-                Log.Write($"[{spec.Name}] {Error}");
-            }
-        }
-        catch
-        {
-            tuner.Dispose();
-            _device = null;
-            throw;
-        }
-
-        _ = Task.Run(() =>
+        _native = true;
+        _pump = Task.Run(() =>
         {
             var buffer = new byte[188 * 1024];
             try
             {
-                for (; ; )
+                while (!_stopped)
                 {
                     var read = tuner.Output.Read(buffer, 0, buffer.Length);
                     if (read <= 0) break;
 
-                    var chunk = _b25 is null ? buffer[..read] : _b25.Decode(buffer.AsSpan(0, read)).ToArray();
+                    var chunk = b25 is null ? buffer[..read] : b25.Decode(buffer.AsSpan(0, read)).ToArray();
                     if (chunk.Length == 0) continue;
 
                     lock (Sinks)
@@ -453,7 +520,8 @@ internal sealed class Lease(int tuner, string type, string channel)
             {
                 Error = error.Message;
             }
-            onExit();
+            // 畳めと言われて終わったのなら、それは失敗ではない
+            if (!_stopped) onExit();
         });
     }
 
@@ -531,13 +599,17 @@ internal sealed class Lease(int tuner, string type, string channel)
 
     public void Kill()
     {
-        // 掴んだままのほう。閉じれば読み手の待ちも解ける (DeviceStream)
-        var device = _device;
-        _device = null;
-        device?.Dispose();
-        var b25 = _b25;
-        _b25 = null;
-        b25?.Dispose();
+        /*
+         * **掴んだままのほうは閉じない。** デバイスはチューナーごとに開いた
+         * ままで、次の選局が同じものを使う。ここでやるのは読むのをやめること
+         * だけ (読み口は 200ms ごとに起きるので、すぐ気付く)。
+         */
+        if (_native)
+        {
+            _stopped = true;
+            _pump?.Wait(TimeSpan.FromSeconds(2));
+            _pump = null;
+        }
 
         var child = _child;
         _child = null;

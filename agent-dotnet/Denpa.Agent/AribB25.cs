@@ -171,6 +171,16 @@ public sealed unsafe partial class AribB25 : IDisposable
         return output.Data is null ? [] : new ReadOnlySpan<byte>(output.Data, (int)output.Size);
     }
 
+    /// <summary>
+    /// 中身を忘れる。**チャンネルを変えたとき。**
+    ///
+    /// <para>
+    /// 掴んだまま選局し直すと、前のチャンネルの PMT と鍵が残ったままになる。
+    /// 忘れさせないと、次のチャンネルの ECM が来るまで前の鍵で解こうとする。
+    /// </para>
+    /// </summary>
+    public void Reset() => _b25->Reset(_b25);
+
     /// <summary>中に溜まっている分を吐き出す。**終わりに1回**</summary>
     public ReadOnlySpan<byte> Flush()
     {
