@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -108,10 +108,18 @@ describe('実体との照合', () => {
         return readdirSync(config.recordedDir).sort();
     }
 
-    function put(root: string, name: string): string {
+    /**
+     * ファイルを置く。**既定では「書き終えて時間が経ったもの」にする** —
+     * 照合は書きたてに触らないので、置いたままだと何も片付かない
+     */
+    function put(root: string, name: string, settled = true): string {
         const path = join(root, name);
         mkdirSync(dirname(path), { recursive: true });
         writeFileSync(path, 'x');
+        if (settled) {
+            const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+            utimesSync(path, old, old);
+        }
         return path;
     }
 
@@ -168,5 +176,38 @@ describe('実体との照合', () => {
         expect(result.strays).toBe(1);
         expect(result.swept).toBe(0);
         expect(existsSync(join(config.libraryDir, '手で置いた/Season 2026/手で置いた - 1.mkv'))).toBe(true);
+    });
+
+    /*
+     * **焼いている途中のものに触らない。**
+     *
+     * エンコードは出来上がるまで `<最終の名前>.encoding` に書いていて、その `.mkv` は
+     * まだどこにも無い。名前だけで見ると「連れ合いの居ない付き添い」そのものなので、
+     * 実機では5分ごとの照合がこれを消し、ffmpeg が書き終えて置き換えるところで
+     * `ENOENT ... rename` になっていた
+     */
+    test('焼いている途中の .encoding は消さない', () => {
+        fresh();
+        const working = put(config.libraryDir, '番組/Season 2026/番組 - 1.mkv.encoding', false);
+
+        expect(reconcile().swept).toBe(0);
+        expect(existsSync(working)).toBe(true);
+    });
+
+    test('落ちて取り残された .encoding は、時間が経てば片付く', () => {
+        fresh();
+        const left = put(config.libraryDir, '番組/Season 2026/番組 - 1.mkv.encoding');
+
+        expect(reconcile().swept).toBe(1);
+        expect(existsSync(left)).toBe(false);
+    });
+
+    test('切り出したばかりのTSは「実体だけ」に数えない', () => {
+        fresh();
+        put(config.recordedDir, '番組.m2ts');
+        put(config.recordedDir, '番組.m2ts.cut.ts', false);
+
+        // 生TSのほうはDBに無いので1件。書きたての .cut.ts は数えない
+        expect(reconcile().strays).toBe(1);
     });
 });

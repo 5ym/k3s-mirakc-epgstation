@@ -75,12 +75,17 @@ RUN apt-get update && \
 # **dtvindex (FFmpeg) で TS を直接読める**ので、そのどれも要らない。
 # WITH_AVISYNTH=no で組んで、ビルドは30秒ほどで終わる。
 #
-# **持ってくるのが5つあるのは、道具が5つあるからではない。**
-#   dtvindex            … 下の2つが TS を読むための静的ライブラリ (実行ファイルではない)
-#   chapter_exe         ┐
-#   logoframe           ├ 実行ファイル3つ。この順で呼ぶ (cm-jls.ts)
-#   join_logo_scp       ┘
-#   join_logo_scp_trial … **判定規則 (JL/*.txt) だけ。**組まない
+# **持ってくるのが4つあるのは、道具が4つあるからではない。**
+#   dtvindex      … 下の2つが TS を読むための静的ライブラリ (実行ファイルではない)
+#   chapter_exe   ┐
+#   logoframe     ├ 実行ファイル3つ。この順で呼ぶ (cm-jls.ts)
+#   join_logo_scp ┘ 判定規則 (JL/) もここのものを使う
+#
+# **判定規則は join_logo_scp_trial から採らない。** 名前から本家に見えるが、
+# あちらの JL は 2020年で止まっていて6本しかなく、こちらは 2021年まで手が
+# 入っていて12本ある (`-N` が `-NR` に直り、設定を差し込む MemCall の口と
+# common/data/doc が付く)。**規則と実行ファイルは対で出ている**ので、
+# 組むほうと同じリポジトリから採るのが筋。4.4MB の clone も1つ減る
 # ---------------------------------------------------------------------------
 FROM docker.io/library/debian:trixie-slim AS jls
 ENV DEBIAN_FRONTEND=noninteractive
@@ -94,8 +99,7 @@ WORKDIR /src
 RUN git clone --depth 1 https://github.com/tobitti0/dtvindex.git && \
     git clone --depth 1 https://github.com/tobitti0/chapter_exe.git && \
     git clone --depth 1 https://github.com/tobitti0/logoframe.git && \
-    git clone --depth 1 https://github.com/tobitti0/join_logo_scp.git && \
-    git clone --depth 1 https://github.com/tobitti0/join_logo_scp_trial.git
+    git clone --depth 1 https://github.com/tobitti0/join_logo_scp.git
 
 RUN make -C dtvindex build/libdtvindex.a && \
     make -C chapter_exe/src WITH_AVISYNTH=no DTVINDEX_DIR=/src/dtvindex && \
@@ -103,7 +107,8 @@ RUN make -C dtvindex build/libdtvindex.a && \
     make -C join_logo_scp/src && \
     mkdir -p /opt/jls/bin && \
     cp chapter_exe/src/chapter_exe logoframe/src/logoframe join_logo_scp/src/join_logo_scp /opt/jls/bin/ && \
-    cp -r join_logo_scp_trial/JL /opt/jls/JL
+    cp -r join_logo_scp/JL /opt/jls/JL && \
+    test -f /opt/jls/JL/JL_標準.txt
 
 # ---------------------------------------------------------------------------
 # 本番ビルド

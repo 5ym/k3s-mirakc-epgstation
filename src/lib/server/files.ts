@@ -1,4 +1,4 @@
-import { type Dirent, existsSync, readdirSync } from 'node:fs';
+import { type Dirent, existsSync, readdirSync, statSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import type { Recording } from '../types';
 import { config } from './config';
@@ -63,6 +63,31 @@ export function reconcile(): { checked: number; removed: number; swept: number; 
 const VIDEO = /\.(m2ts|ts|mkv|mp4)$/i;
 
 /**
+ * 触らずに置いておく、書きたてのもの。
+ *
+ * **これから連れ合いになるファイルを巻き添えにしないため。** 名前だけで
+ * 「連れ合いが居ない」と決めているので、*まだ出来ていない動画*の付き添いは
+ * 全部そう見える。エンコードは出来上がるまで `<最終の名前>.encoding` に書いていて、
+ * その `.mkv` はまだどこにも無い。実機では**焼いている途中のものが5分ごとに
+ * 消され**、ffmpeg は開いたままの fd に書き終えて 0 で帰り、置き換えるところで
+ * `ENOENT ... rename` になっていた。
+ *
+ * 書いている最中なら更新時刻が新しいので、そこで避ける。名前で除外しないのは、
+ * 作業ファイルの名前がこの先も増えるため。**落ちて取り残されたものも、
+ * しばらく経てば普通に片付く。**
+ */
+const SETTLE = 60 * 60_000;
+
+/** まだ書いている最中かもしれないもの。**読めないものも触らない** */
+function settling(path: string, at: number): boolean {
+    try {
+        return at - statSync(path).mtimeMs < SETTLE;
+    } catch {
+        return true;
+    }
+}
+
+/**
  * 連れ合いを失った付き添いを片付ける。
  *
  * 付き添いは**動画と同じ名前で隣に置く**決まりなので、名前から連れ合いが分かる。
@@ -82,18 +107,21 @@ function sweepLeftovers(): { swept: number; strays: number } {
         ).map((row) => row.path as string),
     );
 
+    const at = now();
     let swept = 0;
     let strays = 0;
     for (const root of [config.recordedDir, config.libraryDir]) {
         const files = walk(root);
         const videos = new Set(files.filter((path) => VIDEO.test(path)));
         for (const path of videos) {
-            // 動画は消さない。手で置いたものかもしれないので、数えるだけ
-            if (!known.has(path)) strays++;
+            // 動画は消さない。手で置いたものかもしれないので、数えるだけ。
+            // 焼いている途中の切り出し (`<入力>.cut.ts`) を数に入れないよう、書きたては飛ばす
+            if (!known.has(path) && !settling(path, at)) strays++;
         }
         for (const path of files) {
             if (videos.has(path)) continue;
             if (!orphan(path, videos)) continue;
+            if (settling(path, at)) continue;
             removeIfExists(path);
             pruneEmptyDirs(path);
             swept++;
