@@ -29,21 +29,13 @@
     /** 進捗。総数が分かっているので割合で出せる */
     const progress = $derived(scan.total > 0 ? scan.scanned / scan.total : 0);
 
-    /** denpa が取り込んだ局を物理チャンネルごとにまとめる */
-    const byChannel = $derived.by(() => {
-        const map = new Map<string, typeof data.services>();
-        for (const service of data.services) {
-            const key = `${service.type}:${service.channel}`;
-            map.set(key, [...(map.get(key) ?? []), service]);
-        }
-        return map;
-    });
-
     /*
-     * 物理チャンネルと、そこに乗っている局。**スキャンの結果そのもの。**
-     * 番組表の集まり具合は denpa 自身のDBから数えたものが `data.epg` で来る
+     * 物理チャンネルと、そこに乗っている局。**denpa 自身のDBから来る。**
+     * エージェントにも控えはあるが、聞きに行かない (+page.server.ts)
      */
     const coverage = $derived(data.channels);
+    /** そこに乗っている局の総数と、番組表が届いている局の数 */
+    const services = $derived(coverage.flatMap((channel) => channel.services));
 
     /*
      * **読み直しの間も前の中身を出したままにする。**
@@ -53,20 +45,8 @@
      * 表がいったん消えてから同じものが描き直されていた (目に見えてちらつく)。
      * 中身を持っておけば、実際に変わった行だけが変わる
      */
-    const shownCoverage = held(() => coverage);
     const shownTuners = held(() => data.tuners);
-    const shownAgent = held(() => data.agent);
     const shownCard = held(() => data.card);
-
-    /**
-     * 局名は取り込み済みのものがあればそちらを出す。
-     * 放送波の局名は全角英数まじりなので、denpa は取り込むときに直している。
-     * 生の名前をそのまま出すと、他の画面と字面が変わって別の局に見える
-     */
-    const importedById = $derived(new Map(data.services.map((s) => [s.id, s])));
-
-    /** 局の内部ID。エージェントが返すのは ARIB のサービスIDなので組み立て直す */
-    const keyOf = (networkId: number, serviceId: number) => networkId * 100000 + serviceId;
 
     /** 番組表がどこまで埋まっているか。「8/9 まで」の形で出す */
     function until(at: number): string {
@@ -105,129 +85,88 @@
                             .collect.pending} チャンネル
                     </div>
                 {/if}
-                {#if shownCoverage.value === undefined}
-                    <p class="text-base-content/60 text-sm">確認中…</p>
+                {#if coverage.length === 0}
+                    <p class="text-base-content/60 text-sm" data-testid="channel-empty">
+                        まだ1つもありません。チャンネルスキャンを実行してください。
+                    </p>
                 {:else}
-                    {@const channels = shownCoverage.value}
-                    {#if channels.length === 0}
-                        <p class="text-base-content/60 text-sm" data-testid="channel-empty">
-                            まだ1つもありません。チャンネルスキャンを実行してください。
-                        </p>
-                    {:else}
-                        {@const all = channels.flatMap((c) =>
-                            c.services.map((sv) => keyOf(c.networkId, sv.serviceId)),
-                        )}
-                        <!-- 番組表がもう入っている局の数。下の表の右端を全部見なくても分かるように -->
-                        {@const withEpg = all.filter((id) => (data.epg[id]?.programs ?? 0) > 0).length}
-                        <!--
-                            **入れ子になった3つの数を、その順に並べる。**
+                    <!-- 番組表がもう入っている局の数。下の表の右端を全部見なくても分かるように -->
+                    {@const withEpg = services.filter((service) => service.programs > 0).length}
+                    <!--
+                        **入れ子になった3つの数を、その順に並べる。**
 
-                            「50 / 59 ・ 124 局」とだけ出していた頃は、59 と 124 が
-                            同じものの数に見えて「残り65はどこへ行った」となっていた。
-                            この3つは入れ子で、数がそろわないのが当たり前:
+                        「50 / 59 ・ 124 局」とだけ出していた頃は、59 と 124 が
+                        同じものの数に見えて「残り65はどこへ行った」となっていた。
+                        この3つは入れ子で、数がそろわないのが当たり前:
 
-                              周波数 (T19, BS15_0) ┬ 局 (TOKYO MX1) ─ 番組表
-                                                  └ 局 (TOKYO MX2) ─ 番組表
+                          周波数 (T19, BS15_0) ┬ 局 (TOKYO MX1) ─ 番組表
+                                              └ 局 (TOKYO MX2) ─ 番組表
 
-                            局と番組表を分けて出すのも、混ざりやすいから。
-                            局はスキャンで、番組表はそのあと denpa が集めるもので、
-                            埋まる時期がずれる (局はあるのに番組表が空、が普通にある)
-                        -->
-                        <div class="text-sm" data-testid="channel-coverage">
-                            <span class="text-base-content/70">周波数</span>
-                            <strong>{channels.length} 本</strong>
-                            <span class="text-base-content/40">→</span>
-                            <span class="text-base-content/70">そこに乗っている局</span>
-                            <strong>{all.length}</strong>
-                            <span class="text-base-content/40">→</span>
-                            <span class="text-base-content/70">番組表の届いた局</span>
-                            <strong>{withEpg}</strong>
-                        </div>
-                        <div class="text-base-content/60 text-xs">
-                            1本の周波数 (物理チャンネル)
-                            に局が何局も相乗りしているので、本数と局数はそろいません。番組表は局ごとに集めるので、局が出そろったあとを追って埋まります。
-                        </div>
-                        <div class="max-h-96 overflow-auto">
-                            <table class="table-pin-rows table table-sm">
-                                <thead>
-                                    <tr>
-                                        <th>種別</th>
-                                        <th>ch</th>
-                                        <th class="w-full">局</th>
-                                        <th class="whitespace-nowrap">番組表</th>
+                        局と番組表を分けて出すのも、混ざりやすいから。
+                        局はスキャンで、番組表はそのあと denpa が集めるもので、
+                        埋まる時期がずれる (局はあるのに番組表が空、が普通にある)
+                    -->
+                    <div class="text-sm" data-testid="channel-coverage">
+                        <span class="text-base-content/70">周波数</span>
+                        <strong>{coverage.length} 本</strong>
+                        <span class="text-base-content/40">→</span>
+                        <span class="text-base-content/70">そこに乗っている局</span>
+                        <strong>{services.length}</strong>
+                        <span class="text-base-content/40">→</span>
+                        <span class="text-base-content/70">番組表の届いた局</span>
+                        <strong>{withEpg}</strong>
+                    </div>
+                    <div class="text-base-content/60 text-xs">
+                        1本の周波数 (物理チャンネル)
+                        に局が何局も相乗りしているので、本数と局数はそろいません。番組表は局ごとに集めるので、局が出そろったあとを追って埋まります。
+                    </div>
+                    <div class="max-h-96 overflow-auto">
+                        <table class="table-pin-rows table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>種別</th>
+                                    <th>ch</th>
+                                    <th class="w-full">局</th>
+                                    <th class="whitespace-nowrap">番組表</th>
+                                </tr>
+                            </thead>
+                            <tbody data-testid="channel-list">
+                                {#each coverage as channel (`${channel.type}:${channel.channel}`)}
+                                    {@const programs = channel.services.reduce(
+                                        (sum, service) => sum + service.programs,
+                                        0,
+                                    )}
+                                    {@const last = Math.max(
+                                        0,
+                                        ...channel.services.map((service) => service.until),
+                                    )}
+                                    <tr data-testid="channel-row" data-channel={channel.channel}>
+                                        <td class="whitespace-nowrap text-sm">
+                                            {TYPE_LABEL[channel.type] ?? channel.type}
+                                        </td>
+                                        <td class="font-mono text-sm whitespace-nowrap">
+                                            {channel.channel}
+                                        </td>
+                                        <td class="text-sm">
+                                            <div data-testid="channel-services">
+                                                {channel.services.map((service) => service.name).join(', ')}
+                                            </div>
+                                        </td>
+                                        <td class="text-sm whitespace-nowrap" data-testid="channel-epg">
+                                            {#if programs > 0}
+                                                <div>{programs} 件</div>
+                                                <div class="text-base-content/60 text-xs">
+                                                    {until(last)}
+                                                </div>
+                                            {:else}
+                                                <span class="text-base-content/60">—</span>
+                                            {/if}
+                                        </td>
                                     </tr>
-                                </thead>
-                                <tbody data-testid="channel-list">
-                                    {#each channels as channel (`${channel.type}:${channel.channel}`)}
-                                        {@const key = `${channel.type}:${channel.channel}`}
-                                        {@const imported = byChannel.get(key) ?? []}
-                                        {@const stats = channel.services.map(
-                                            (sv) =>
-                                                data.epg[keyOf(channel.networkId, sv.serviceId)] ?? {
-                                                    programs: 0,
-                                                    until: 0,
-                                                },
-                                        )}
-                                        {@const programs = stats.reduce((sum, e) => sum + e.programs, 0)}
-                                        {@const last = Math.max(0, ...stats.map((e) => e.until))}
-                                        <tr data-testid="channel-row" data-channel={channel.channel}>
-                                            <td class="whitespace-nowrap text-sm">
-                                                {TYPE_LABEL[channel.type] ?? channel.type}
-                                            </td>
-                                            <td class="font-mono text-sm whitespace-nowrap">
-                                                {channel.channel}
-                                            </td>
-                                            <td class="text-sm">
-                                                {#if channel.services.length > 0}
-                                                    <div data-testid="channel-services">
-                                                        {channel.services
-                                                            .map(
-                                                                (sv) =>
-                                                                    importedById.get(
-                                                                        keyOf(
-                                                                            channel.networkId,
-                                                                            sv.serviceId,
-                                                                        ),
-                                                                    )?.name ?? sv.name,
-                                                            )
-                                                            .join(', ')}
-                                                    </div>
-                                                    <!--
-                                                        denpa 側の取り込みは1分ごとなので、
-                                                        スキャンの直後は差が出る。
-                                                        隠すと「取り込まれない」と区別が付かない
-                                                    -->
-                                                    {#if imported.length < channel.services.length}
-                                                        <div
-                                                            class="text-base-content/60 text-xs"
-                                                            data-testid="channel-pending"
-                                                        >
-                                                            denpa への取り込み待ち ({imported.length}/{channel
-                                                                .services.length})
-                                                        </div>
-                                                    {/if}
-                                                {:else}
-                                                    <span class="text-base-content/60">
-                                                        録れる局がありません
-                                                    </span>
-                                                {/if}
-                                            </td>
-                                            <td class="text-sm whitespace-nowrap" data-testid="channel-epg">
-                                                {#if programs > 0}
-                                                    <div>{programs} 件</div>
-                                                    <div class="text-base-content/60 text-xs">
-                                                        {until(last)}
-                                                    </div>
-                                                {:else}
-                                                    <span class="text-base-content/60">—</span>
-                                                {/if}
-                                            </td>
-                                        </tr>
-                                    {/each}
-                                </tbody>
-                            </table>
-                        </div>
-                    {/if}
+                                {/each}
+                            </tbody>
+                        </table>
+                    </div>
                 {/if}
             </div>
         </section>
@@ -325,27 +264,117 @@
     </div>
 
     <div class="flex flex-col gap-6">
-        <section class="card bg-base-100 shadow" data-testid="status-card">
+        <!--
+            **いちばん上に置く。** 録るのも番組表を集めるのもここの取り合いで、
+            スキャン中に見たいのも「いま何本使っているか」。カードリーダーの
+            具合も同じ機材の話なので、下に並べてある
+        -->
+        <section class="card bg-base-100 shadow" data-testid="tuner-card">
             <div class="card-body">
-                <h2 class="card-title">つながり具合</h2>
+                <h2 class="card-title">チューナーの空き</h2>
+                {#if shownTuners.value === undefined}
+                    <p class="text-base-content/60 text-sm">確認中…</p>
+                {:else}
+                    {@const tuners = shownTuners.value.list}
+                    {@const failure = shownTuners.value.error}
+                    {#if failure !== null}
+                        <!--
+                            繋がらなかったときに空の一覧だけ出すと「1本も無い」と
+                            見分けが付かない。理由をそのまま出す
+                        -->
+                        <div class="alert alert-error text-sm" data-testid="tuner-unreachable">
+                            チューナーエージェントに繋がりません: {failure}
+                        </div>
+                    {:else if tuners.length === 0}
+                        <p class="text-base-content/60 text-sm" data-testid="tuner-empty">
+                            チューナーがありません。下の「チューナーの設定」から足してください。
+                        </p>
+                    {:else}
+                        <div class="overflow-x-auto">
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>名前</th>
+                                        <th>種別</th>
+                                        <th>状態</th>
+                                        <th class="w-full">使っているもの</th>
+                                    </tr>
+                                </thead>
+                                <tbody data-testid="tuner-list">
+                                    {#each tuners as tuner (tuner.index)}
+                                        <tr data-testid="tuner-row" data-tuner-index={tuner.index}>
+                                            <td class="whitespace-nowrap">{tuner.name}</td>
+                                            <td class="whitespace-nowrap text-sm">
+                                                {tuner.types.map((t) => TYPE_LABEL[t] ?? t).join('/')}
+                                            </td>
+                                            <td class="whitespace-nowrap">
+                                                <!-- 何を掴んでいるかも出す。空き/使用中だけでは追えない -->
+                                                {#if tuner.disabled}
+                                                    <span class="badge badge-sm badge-ghost">無効</span>
+                                                {:else if tuner.channel !== null}
+                                                    <span class="badge badge-sm badge-warning">
+                                                        {tuner.channel.channel}
+                                                    </span>
+                                                {:else}
+                                                    <span class="badge badge-sm badge-success">空き</span>
+                                                {/if}
+                                                {#if tuner.error !== null && tuner.channel === null}
+                                                    <div class="text-error text-xs" data-testid="tuner-error">
+                                                        {tuner.error}
+                                                    </div>
+                                                {/if}
+                                            </td>
+                                            <td class="text-sm">
+                                                {#each tuner.users as user (user.use)}
+                                                    <div class="truncate" data-testid="tuner-user">
+                                                        {user.label}
+                                                        <span class="text-base-content/60">
+                                                            (優先度 {user.priority})
+                                                        </span>
+                                                    </div>
+                                                {:else}
+                                                    <span class="text-base-content/60">—</span>
+                                                {/each}
+                                            </td>
+                                        </tr>
+                                    {/each}
+                                </tbody>
+                            </table>
+                        </div>
+                    {/if}
+                {/if}
+
+                <!--
+                    カードリーダー。**同じ機材の話**なのでここに置く。
+                    掛かったまま録れてしまうのを避けるには、録る前に気づけること
+                -->
+                <div class="border-base-300 mt-2 flex flex-wrap items-center gap-2 border-t pt-3">
+                    <span class="text-sm font-medium">カードリーダー</span>
+                    {#if shownCard.value === undefined}
+                        <span class="badge badge-ghost" data-testid="status-card-reader">確認中</span>
+                    {:else}
+                        {@const card = shownCard.value}
+                        <span
+                            class="badge {card.ok ? 'badge-success' : 'badge-error'}"
+                            data-testid="status-card-reader"
+                        >
+                            {card.ok ? 'OK' : 'NG'}
+                        </span>
+                        <span class="text-base-content/60 w-full text-xs">{card.message}</span>
+                        {#each card.readers as reader (reader)}
+                            <span class="text-base-content/60 w-full font-mono text-xs break-all">
+                                {reader}
+                            </span>
+                        {/each}
+                    {/if}
+                </div>
+            </div>
+        </section>
+
+        <section class="card bg-base-100 shadow" data-testid="logo-card">
+            <div class="card-body">
+                <h2 class="card-title">ロゴ</h2>
                 <dl class="space-y-3">
-                    <div class="flex flex-wrap items-center gap-2">
-                        <dt class="w-28 text-sm font-medium">エージェント</dt>
-                        {#if shownAgent.value === undefined}
-                            <dd class="badge badge-ghost" data-testid="status-agent">確認中</dd>
-                        {:else}
-                            {@const agent = shownAgent.value}
-                            <dd
-                                class="badge {agent.ok ? 'badge-success' : 'badge-error'}"
-                                data-testid="status-agent"
-                            >
-                                {agent.ok ? `チューナー ${agent.tuners} 本` : 'NG'}
-                            </dd>
-                            {#if !agent.ok}
-                                <dd class="text-base-content/60 w-full text-xs">{agent.error}</dd>
-                            {/if}
-                        {/if}
-                    </div>
                     <!--
                         局ロゴ。放送波から拾うしかない。
                         番組表に出ないとき、取れていないのか出し方が悪いのかを
@@ -473,95 +502,7 @@
                             </dd>
                         {/if}
                     </div>
-                    <div class="flex flex-wrap items-center gap-2">
-                        <dt class="w-28 text-sm font-medium">カードリーダー</dt>
-                        {#if shownCard.value === undefined}
-                            <dd class="badge badge-ghost" data-testid="status-card-reader">確認中</dd>
-                        {:else}
-                            {@const card = shownCard.value}
-                            <dd
-                                class="badge {card.ok ? 'badge-success' : 'badge-error'}"
-                                data-testid="status-card-reader"
-                            >
-                                {card.ok ? 'OK' : 'NG'}
-                            </dd>
-                            <dd class="text-base-content/60 w-full text-xs">{card.message}</dd>
-                            {#each card.readers as reader (reader)}
-                                <dd class="text-base-content/60 w-full font-mono text-xs break-all">
-                                    {reader}
-                                </dd>
-                            {/each}
-                        {/if}
-                    </div>
                 </dl>
-            </div>
-        </section>
-
-        <section class="card bg-base-100 shadow" data-testid="tuner-card">
-            <div class="card-body">
-                <h2 class="card-title">チューナーの空き</h2>
-                {#if shownTuners.value === undefined}
-                    <p class="text-base-content/60 text-sm">確認中…</p>
-                {:else}
-                    {@const tuners = shownTuners.value}
-                    {#if tuners.length === 0}
-                        <p class="text-base-content/60 text-sm" data-testid="tuner-empty">
-                            チューナーがありません。下の「チューナーの設定」から足してください。
-                        </p>
-                    {:else}
-                        <div class="overflow-x-auto">
-                            <table class="table table-sm">
-                                <thead>
-                                    <tr>
-                                        <th>名前</th>
-                                        <th>種別</th>
-                                        <th>状態</th>
-                                        <th class="w-full">使っているもの</th>
-                                    </tr>
-                                </thead>
-                                <tbody data-testid="tuner-list">
-                                    {#each tuners as tuner (tuner.index)}
-                                        <tr data-testid="tuner-row" data-tuner-index={tuner.index}>
-                                            <td class="whitespace-nowrap">{tuner.name}</td>
-                                            <td class="whitespace-nowrap text-sm">
-                                                {tuner.types.map((t) => TYPE_LABEL[t] ?? t).join('/')}
-                                            </td>
-                                            <td class="whitespace-nowrap">
-                                                <!-- 何を掴んでいるかも出す。空き/使用中だけでは追えない -->
-                                                {#if tuner.disabled}
-                                                    <span class="badge badge-sm badge-ghost">無効</span>
-                                                {:else if tuner.channel !== null}
-                                                    <span class="badge badge-sm badge-warning">
-                                                        {tuner.channel.channel}
-                                                    </span>
-                                                {:else}
-                                                    <span class="badge badge-sm badge-success">空き</span>
-                                                {/if}
-                                                {#if tuner.error !== null && tuner.channel === null}
-                                                    <div class="text-error text-xs" data-testid="tuner-error">
-                                                        {tuner.error}
-                                                    </div>
-                                                {/if}
-                                            </td>
-                                            <td class="text-sm">
-                                                {#each tuner.users as user (user.use)}
-                                                    <div class="truncate" data-testid="tuner-user">
-                                                        {user.label}
-                                                        <span class="text-base-content/60">
-                                                            (優先度 {user.priority})
-                                                        </span>
-                                                    </div>
-                                                {:else}
-                                                    <span class="text-base-content/60">—</span>
-                                                {/each}
-                                            </td>
-                                        </tr>
-                                    {/each}
-                                </tbody>
-                            </table>
-                        </div>
-                    {/if}
-                {/if}
             </div>
         </section>
 
@@ -586,7 +527,7 @@
                 {/await}
 
                 {#if shownTuners.value !== undefined}
-                    {@const rows = [...shownTuners.value, null]}
+                    {@const rows = [...shownTuners.value.list, null]}
                     <form method="POST" action="?/tuners" use:submitting data-testid="tuner-config-form">
                         <div class="overflow-x-auto">
                             <table class="table table-sm">

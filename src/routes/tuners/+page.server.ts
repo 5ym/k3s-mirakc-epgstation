@@ -6,16 +6,8 @@ import { forgetLogoData } from '$lib/server/logo-data';
 import { learned, stats as learnStats } from '$lib/server/logo-learn';
 import { refresh, start, stop } from '$lib/server/scan';
 import { cardStatus } from '$lib/server/scramble';
-import {
-    type AgentTuner,
-    getChannels,
-    getTuners,
-    ping,
-    putTuners,
-    type TunerConfig,
-    tunersDetected,
-} from '$lib/server/tuner';
-import type { ChannelType, Service } from '$lib/types';
+import { type AgentTuner, getTuners, putTuners, type TunerConfig, tunersDetected } from '$lib/server/tuner';
+import type { ChannelType } from '$lib/types';
 
 /** 局1つぶんの、CM検出ロゴの覚え具合 */
 export interface CmLogo {
@@ -74,17 +66,54 @@ function withLabels(tuners: AgentTuner[]): (Omit<AgentTuner, 'users'> & { users:
     }));
 }
 
+/** 物理チャンネル1本と、そこに乗っている局 */
+export interface Coverage {
+    type: ChannelType;
+    channel: string;
+    services: { id: number; name: string; programs: number; until: number }[];
+}
+
 /**
- * 局ごとの番組表の集まり具合。**denpa 自身のDBから数える。**
+ * 取れているチャンネルと、局ごとの番組表の集まり具合。**denpa 自身のDBから。**
  *
- * mirakc に全件 (数MB) を聞いていた頃は、番組表を持っているのが向こうだったので
- * 覗きに行くしかなかった。いまは自分で集めているので、SQL 1本で済む。
+ * エージェントにも同じ顔ぶれの控えがある (スキャンの結果を預けてあるので) が、
+ * **聞きに行かない。** 向こうが持っているのは選局に要る周波数と TSID のためで、
+ * 局名も番組表も denpa のもの。両方を並べていた頃は、取り込みが1分おきだった
+ * 名残で「denpa への取り込み待ち」を出していたが、いまはスキャンが終わった
+ * その場で取り込む (scan.ts) ので、待ちようがない。
+ *
+ * 出すのは**いま選局できる局だけ**。スキャンをやり直すと局は入れ替わり、
+ * 前の回の行は残る (録画や過去の予約が辿れなくなるので消せない)。
  */
-function epgProgress(): Map<number, { programs: number; until: number }> {
-    const rows = queryAll<{ service_id: number; programs: number; until: number }>(
-        'SELECT service_id, COUNT(*) AS programs, MAX(end_at) AS until FROM programs GROUP BY service_id',
+function coverage(): Coverage[] {
+    const rows = queryAll<{
+        id: number;
+        name: string;
+        type: ChannelType;
+        channel: string;
+        programs: number;
+        until: number;
+    }>(`
+        SELECT s.id, s.name, s.type, s.channel,
+               COUNT(p.id) AS programs, COALESCE(MAX(p.end_at), 0) AS until
+          FROM services s
+          LEFT JOIN programs p ON p.service_id = s.id
+         WHERE s.updated_at >= (SELECT MAX(updated_at) FROM services)
+         GROUP BY s.id
+         ORDER BY s.service_id
+    `);
+
+    const order: Record<string, number> = { GR: 0, BS: 1, CS: 2 };
+    const channels = new Map<string, Coverage>();
+    for (const { id, name, type, channel, programs, until } of rows) {
+        const key = `${type}:${channel}`;
+        const entry = channels.get(key) ?? { type, channel, services: [] };
+        entry.services.push({ id, name, programs, until });
+        channels.set(key, entry);
+    }
+    return [...channels.values()].sort(
+        (a, b) => (order[a.type] ?? 9) - (order[b.type] ?? 9) || a.channel.localeCompare(b.channel),
     );
-    return new Map(rows.map((row) => [row.service_id, { programs: row.programs, until: row.until }]));
 }
 
 export async function load() {
@@ -101,17 +130,17 @@ export async function load() {
         /*
          * 以下は相手待ちなので promise のまま返して後から流し込む。
          * 待つと画面が出ない
+         *
+         * 繋がらなかった理由も一緒に返す。空の一覧だけ渡すと「チューナーが
+         * 1本も無い」と区別が付かない (以前はエージェントの生死を別の行に
+         * 出していたが、見るところが増えるだけだった)
          */
         tuners: getTuners()
-            .then(withLabels)
-            .catch(() => []),
-        // スキャンで見つかった物理チャンネルと、そこに乗っている局
-        channels: getChannels().catch(() => []),
-        agent: ping(),
+            .then((list) => ({ list: withLabels(list), error: null as string | null }))
+            .catch((error: unknown) => ({ list: [], error: String(error) })),
+        // 取れているチャンネルと、そこに乗っている局。**denpa 自身のDBから**
+        channels: coverage(),
         card: cardStatus(),
-        // denpa が取り込み済みの局。スキャンで見つかったものとの差が分かる
-        services: queryAll<Service>('SELECT * FROM services ORDER BY type, channel, service_id'),
-        epg: Object.fromEntries(epgProgress()),
         /** 番組表を集めている最中の様子。1チャンネルに数分かかる */
         collect: collectState(),
         /*

@@ -1,2 +1,4 @@
 bin/
 obj/
+# dotnet publish の出力 (CI とローカルの適合テストで作る)
+publish/

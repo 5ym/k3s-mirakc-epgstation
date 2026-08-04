@@ -165,7 +165,7 @@ test.describe('衛星の局ロゴ', () => {
 
         // 取れない局は取れないと書く。黙って足りないままだと不具合と区別が付かない
         await expect(page.getByTestId('status-logos')).toContainText('局');
-        await expect(page.locator('[data-testid="status-card"]')).toContainText(
+        await expect(page.locator('[data-testid="logo-card"]')).toContainText(
             'ロゴが放送に載っていないので取れません',
         );
         expect((await request.get(`/api/services/${BS_NO_LOGO.id}/logo`)).status()).toBe(404);

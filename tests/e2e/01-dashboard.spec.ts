@@ -34,12 +34,17 @@ test.describe('ダッシュボードと画面遷移', () => {
         }
     });
 
-    test('チューナー画面にエージェントとカードリーダーの状態が出る', async ({ page }) => {
+    test('チューナー画面にカードリーダーの状態が出る', async ({ page }) => {
         await goto(page, '/tuners');
-        // どちらも相手待ちなので後から流れてくる
-        await expect(page.getByTestId('status-agent')).toHaveText('チューナー 4 本');
-        await expect(page.getByTestId('status-card-reader')).toHaveText('OK');
-        await expect(page.getByTestId('status-card')).toContainText('Fake Card Reader');
+        /*
+         * **「チューナーの空き」に並べてある。** 同じ機材の話なので、
+         * わざわざ別の枠を作って見るところを増やさない
+         * (エージェントの生死も、繋がらなければその枠に理由が出る)
+         */
+        const card = page.getByTestId('tuner-card');
+        // 相手待ちなので後から流れてくる
+        await expect(card.getByTestId('status-card-reader')).toHaveText('OK');
+        await expect(card).toContainText('Fake Card Reader');
     });
 
     test('番組表はグリッドで出て、キーワード検索ではリストになる', async ({ page }) => {

@@ -199,15 +199,21 @@ interface Progress {
     skipped?: number;
 }
 
+/** 総当たりの1件。どの種別のどの物理チャンネルか */
+interface Job {
+    type: ScannableType;
+    channel: string;
+}
+
 /** チューナーの台数ぶん並べて総当たりする */
 class Scanner {
     /** 中断の合図。押されたら選局を切り、残りのチャンネルには行かない */
     private readonly aborter = new AbortController();
     private readonly found = new Map<string, AgentChannel>();
-    /** 電波が来た(TSが1バイトでも出た)チャンネル数。種別ごとに数え直す */
-    private tuned = 0;
+    /** 電波が来た(TSが1バイトでも出た)チャンネル数。種別ごと */
+    private readonly tuned = new Map<ScannableType, number>();
     /** 電波は来たのに局情報が揃わなかったチャンネル。1周したあとで回し直す */
-    private retry: string[] = [];
+    private retry: Job[] = [];
 
     constructor(private readonly onProgress: (progress: Progress) => void) {}
 
@@ -227,23 +233,35 @@ class Scanner {
 
     /** targets は [種別, チャンネル一覧] の並び。見つかったチャンネル定義を返す */
     async run(targets: [ScannableType, string[]][]): Promise<AgentChannel[]> {
-        const tuners = await getTuners().catch(() => []);
+        const tuners = (await getTuners().catch(() => [])).filter((tuner) => !tuner.disabled);
 
+        /*
+         * **種別をまたいで1つの列にする。**
+         *
+         * 種別ごとに順に回していた頃は、地上波を50ch 撃ち終わるまで衛星に
+         * 行かなかった。使うチューナーが別なので、待たせている間ずっと
+         * 衛星の本が遊んでいる。1つの列を全チューナーで引けば同時に進む
+         */
+        const queue: Job[] = [];
         for (const [type, channels] of targets) {
-            if (this.aborted) break;
-            const usable = tuners.filter((tuner) => !tuner.disabled && tuner.types.includes(type));
-            if (usable.length === 0) {
+            if (!tuners.some((tuner) => tuner.types.includes(type))) {
                 this.onProgress({
                     line: `${type}: 対応するチューナーがありません`,
                     skipped: channels.length,
                 });
                 continue;
             }
+            for (const channel of channels) queue.push({ type, channel });
+        }
 
-            const pending = [...channels];
-            this.tuned = 0;
-            this.retry = [];
-            await Promise.all(usable.map(() => this.work(type, pending)));
+        /** その本で引けるものが1つでもある本だけ動かす */
+        const wanted = new Set(queue.map((job) => job.type));
+        const workers = tuners.filter((tuner) =>
+            tuner.types.some((type) => wanted.has(type as ScannableType)),
+        );
+
+        if (workers.length > 0) {
+            await Promise.all(workers.map((tuner) => this.work(tuner.types, queue)));
 
             /*
              * 電波は来たのに揃わなかったチャンネルは、もう一度だけ回す。
@@ -255,19 +273,23 @@ class Scanner {
             const retry = this.retry;
             this.retry = [];
             if (retry.length > 0 && !this.aborted) {
-                this.onProgress({ line: `${type}: ${retry.length}ch をもう一度試します` });
-                await Promise.all(usable.map(() => this.work(type, retry, false)));
+                this.onProgress({ line: `${retry.length}ch をもう一度試します` });
+                await Promise.all(workers.map((tuner) => this.work(tuner.types, retry, false)));
             }
-            /*
-             * 種別ごとに1行でまとめる。
-             *
-             * 「電波は来たのに局情報が揃わなかった」のか「そもそも何も来なかった」のかで
-             * 疑うところがまるで違う (前者は受信環境、後者は配線やデバイス指定)。
-             * 総当たりのログは何十行も流れるので、最後に要約が無いと読み取れない
-             */
+        }
+
+        /*
+         * 種別ごとに1行でまとめる。
+         *
+         * 「電波は来たのに局情報が揃わなかった」のか「そもそも何も来なかった」のかで
+         * 疑うところがまるで違う (前者は受信環境、後者は配線やデバイス指定)。
+         * 総当たりのログは何十行も流れるので、最後に要約が無いと読み取れない
+         */
+        for (const [type, channels] of targets) {
             const found = [...this.found.keys()].filter((key) => key.startsWith(`${type}:`)).length;
+            const tuned = this.tuned.get(type) ?? 0;
             this.onProgress({
-                line: `${type}: ${channels.length}ch 中 ${this.tuned}ch で受信、うち ${found}ch で局情報が揃いました`,
+                line: `${type}: ${channels.length}ch 中 ${tuned}ch で受信、うち ${found}ch で局情報が揃いました`,
             });
         }
 
@@ -281,12 +303,26 @@ class Scanner {
             .map(([, entry]) => entry);
     }
 
-    /** first が false のときは数え直さない (同じチャンネルを2回数えないため) */
-    private async work(type: ScannableType, pending: string[], first = true): Promise<void> {
+    /** その本で引ける先頭の1件を取り出す。引けないものは飛ばして次を見る */
+    private take(queue: Job[], types: ChannelType[]): Job | undefined {
+        const at = queue.findIndex((job) => types.includes(job.type));
+        return at === -1 ? undefined : queue.splice(at, 1)[0];
+    }
+
+    /**
+     * チューナー1本ぶんの担当。列が尽きるまで引き続ける。
+     *
+     * `types` はその本が受けられる種別。地上波の本は地上波の分だけ、衛星の本は
+     * 衛星の分だけを引くので、片方が先に終わってももう片方は止まらない。
+     *
+     * first が false のときは数え直さない (同じチャンネルを2回数えないため)
+     */
+    private async work(types: ChannelType[], queue: Job[], first = true): Promise<void> {
         for (;;) {
             if (this.aborted) return;
-            const channel = pending.shift();
-            if (channel === undefined) return;
+            const job = this.take(queue, types);
+            if (job === undefined) return;
+            const { type, channel } = job;
 
             /*
              * 1チャンネルごとに切る口を持つ。読み終えたらここで接続を落とし、
@@ -310,7 +346,7 @@ class Scanner {
                  */
                 if (error instanceof TunerBusyError) {
                     this.onProgress({ line: `${channel}: 空きを待っています` });
-                    pending.unshift(channel);
+                    queue.unshift(job);
                     await Bun.sleep(BUSY_RETRY);
                     continue;
                 }
@@ -323,11 +359,11 @@ class Scanner {
             closer.abort();
             if (this.aborted) return;
             const counts = first ? { scanned: 1 } : {};
-            if (first && signal) this.tuned++;
+            if (first && signal) this.tuned.set(type, (this.tuned.get(type) ?? 0) + 1);
 
             if (error !== null) {
                 // 電波は来ているのに揃わなかったものだけ、あとでもう一度回す
-                if (first && signal) this.retry.push(channel);
+                if (first && signal) this.retry.push(job);
                 this.onProgress({ line: `${channel}: ${error}`, ...counts });
                 continue;
             }

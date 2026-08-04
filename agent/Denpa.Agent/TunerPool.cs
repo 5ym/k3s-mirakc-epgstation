@@ -60,11 +60,33 @@ public sealed class TunerPool(
     /// </summary>
     private readonly Dictionary<int, Held> _held = [];
 
+    /// <summary>
+    /// <see cref="_held"/> を出し入れする間の錠。**取り合い (<see cref="_gate"/>) とは別。**
+    ///
+    /// <para>
+    /// 選局は取り合いの錠を放してからやる (<see cref="Open"/>)。そのぶん、この
+    /// 入れ物には錠のかかっていない道から触られることになるので、ここで守る。
+    /// 掴む/手放すだけなので、待たされるのは一瞬。
+    /// </para>
+    /// </summary>
+    private readonly Lock _deviceGate = new();
+
     /// <summary>1本ぶんの実体。**閉じるのは定義が変わったときと、止めるときだけ**</summary>
     private sealed class Held(ITuneDevice device, AribB25? b25) : IDisposable
     {
         public ITuneDevice Device { get; } = device;
         public AribB25? B25 { get; } = b25;
+
+        /// <summary>
+        /// **この1本を選局し直す間の錠。本ごとに別**なので、他の本は待たない。
+        ///
+        /// <para>
+        /// 選局の最中に、優先度の高い要求が同じ本を取り上げることがある。
+        /// その相手が続けて選局を始めると、1つのデバイスに2つの選局が同時に
+        /// 入ることになるので、ここで順番にする。
+        /// </para>
+        /// </summary>
+        public Lock Gate { get; } = new();
 
         /// <summary>いま合わせているところ。**同じなら選局し直さない**</summary>
         public string? Channel { get; set; }
@@ -120,6 +142,11 @@ public sealed class TunerPool(
     /// </summary>
     public Sink Open(string type, string channel, int priority, string use)
     {
+        int index;
+        TunerSpec spec;
+        Lease lease;
+        Sink sink;
+
         lock (_gate)
         {
             foreach (var open in _leases.Values)
@@ -127,15 +154,36 @@ public sealed class TunerPool(
                 if (open.Type == type && open.Channel == channel) return Join(open, priority, use);
             }
 
-            var index = Pick(type, priority) ?? throw new TunerBusyException($"{type} のチューナーに空きがありません");
+            index = Pick(type, priority) ?? throw new TunerBusyException($"{type} のチューナーに空きがありません");
 
             // 蹴る相手が居れば先に片付ける。同じチューナーを2つの選局が掴まないように
             if (_leases.TryGetValue(index, out var victim)) Release(victim, "優先度の高い要求に譲りました");
 
-            var spec = Tuners[index];
-            var lease = new Lease(index, type, channel);
+            spec = Tuners[index];
+            lease = new Lease(index, type, channel);
             _leases[index] = lease;
+            /*
+             * **読み手を入れてから錠を放す。** 選局はこの下、錠の外でやるので、
+             * 入れないまま放すと `Pick` に「誰も読んでいない本」と見えて、
+             * まだ選局している最中のチューナーを次の要求が持っていく
+             */
+            sink = Join(lease, priority, use);
+        }
 
+        /*
+         * **選局は取り合いの錠を放してからやる。**
+         *
+         * 電波が来ていないチャンネルでは同期待ちに5秒かかる (Tuning.cs)。
+         * 掴んだままにすると、その5秒のあいだ `/denpa/tuners` も、他の本への
+         * 要求も止まる。実際そうなっていて、
+         *
+         * - チューナーが2本あっても総当たりは1本ずつしか進まなかった
+         * - スキャンを始めてもチューナー画面が「空き」のまま動かなかった
+         *
+         * ここから先で触るのは、上で押さえた自分の本だけ。
+         */
+        try
+        {
             /*
              * **既定は自分で掴む。** 外のコマンドを起こすのは、設定に
              * `command` が書いてあるときだけ (変わった機材と、試すときの逃げ道。
@@ -144,9 +192,9 @@ public sealed class TunerPool(
             var command = spec.Resolve();
             if (command is null)
             {
-                try
+                var held = Acquire(index, spec);
+                lock (held.Gate)
                 {
-                    var held = Acquire(index, spec);
                     if (held.Channel != channel)
                     {
                         var tuning = ChannelTable.Parse(channel)
@@ -160,24 +208,30 @@ public sealed class TunerPool(
                     }
                     lease.StartNative(held.Device, held.B25, () => OnExit(index, lease));
                 }
-                catch (Exception error)
-                {
-                    _leases.Remove(index);
-                    /*
-                     * **デバイスは閉じない。** 電波が来ていないチャンネルでは
-                     * 選局が失敗するのが普通で、そのたびに閉じていると次の
-                     * チャンネルが「使用中」で開けなくなる (総当たりのスキャンが
-                     * 1本目以降ぜんぶ落ちたのはこれ)。次の選局で掴み直す
-                     */
-                    throw new IOException($"{spec.Name}: {error.Message}");
-                }
             }
             else
             {
                 lease.Start(Render(command, channel, type), () => OnExit(index, lease));
             }
-            return Join(lease, priority, use);
         }
+        catch (Exception error)
+        {
+            /*
+             * **デバイスは閉じない。** 電波が来ていないチャンネルでは選局が
+             * 失敗するのが普通で、そのたびに閉じていると次のチャンネルが
+             * 「使用中」で開けなくなる (総当たりのスキャンが1本目以降ぜんぶ
+             * 落ちたのはこれ)。次の選局で掴み直す
+             */
+            lock (_gate)
+            {
+                if (_leases.TryGetValue(index, out var mine) && mine == lease) _leases.Remove(index);
+                lease.Sinks.Clear();
+            }
+            sink.Fail($"{spec.Name}: {error.Message}");
+            onChange();
+            throw new IOException($"{spec.Name}: {error.Message}");
+        }
+        return sink;
     }
 
     /// <summary>
@@ -190,34 +244,40 @@ public sealed class TunerPool(
     /// </summary>
     private Held Acquire(int index, TunerSpec spec)
     {
-        if (_held.TryGetValue(index, out var open)) return open;
-
-        var path = spec.Device ?? throw new IOException($"{spec.Name} にデバイスが書かれていません");
-        ITuneDevice device = path.Contains("/dvb/", StringComparison.Ordinal)
-            ? new DvbTuner(path, spec.Lnb)
-            : new Px4Tuner(path, spec.Lnb);
-
-        AribB25? b25 = null;
-        try
+        lock (_deviceGate)
         {
-            b25 = AribB25.Open(_tune.CardUrl);
-        }
-        catch (Exception error)
-        {
-            Log.Write($"[{spec.Name}] 解けません: {error.Message}");
-        }
+            if (_held.TryGetValue(index, out var open)) return open;
 
-        var held = new Held(device, b25);
-        _held[index] = held;
-        Log.Write($"[{spec.Name}] {path} を掴みました");
-        return held;
+            var path = spec.Device ?? throw new IOException($"{spec.Name} にデバイスが書かれていません");
+            ITuneDevice device = path.Contains("/dvb/", StringComparison.Ordinal)
+                ? new DvbTuner(path, spec.Lnb)
+                : new Px4Tuner(path, spec.Lnb);
+
+            AribB25? b25 = null;
+            try
+            {
+                b25 = AribB25.Open(_tune.CardUrl);
+            }
+            catch (Exception error)
+            {
+                Log.Write($"[{spec.Name}] 解けません: {error.Message}");
+            }
+
+            var held = new Held(device, b25);
+            _held[index] = held;
+            Log.Write($"[{spec.Name}] {path} を掴みました");
+            return held;
+        }
     }
 
     /// <summary>実体を手放す。**定義が変わったときと、止めるときだけ**</summary>
     private void Drop(int index)
     {
-        if (!_held.Remove(index, out var held)) return;
-        held.Dispose();
+        lock (_deviceGate)
+        {
+            if (!_held.Remove(index, out var held)) return;
+            held.Dispose();
+        }
     }
 
     private void OnExit(int index, Lease lease)
