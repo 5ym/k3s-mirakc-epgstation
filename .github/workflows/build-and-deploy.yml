@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'agent/**'
+      - 'agent-dotnet/**'
       - 'Dockerfile'
       - 'src/**'
       - 'static/**'
@@ -48,6 +49,7 @@ jobs:
           # denpa はリポジトリ直下なので、エージェントなど別物のパスを除いて見る
           denpa_paths="Dockerfile src static package.json bun.lock svelte.config.js vite.config.ts"
           echo "agent=sha-$(git log -1 --format=%H -- agent | cut -c1-12)" >> "$GITHUB_OUTPUT"
+          echo "agent_dotnet=sha-$(git log -1 --format=%H -- agent-dotnet | cut -c1-12)" >> "$GITHUB_OUTPUT"
           echo "denpa=sha-$(git log -1 --format=%H -- $denpa_paths | cut -c1-12)" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
@@ -74,6 +76,22 @@ jobs:
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/denpa-agent:${{ steps.tag.outputs.agent }}
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/denpa-agent:latest
 
+      # .NET 版。**まだ配備には出していない。** 口も決まりも bun 版と同じで、
+      # 同じ適合テスト (agent/conformance.test.ts) を通る。入れ替えるときは
+      # k3s/deployment.yaml の像を差し替えるだけ (docs/roadmap.md)。
+      - name: Build and push tuner agent image (.NET)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: agent-dotnet/Dockerfile
+          platforms: linux/amd64
+          push: true
+          pull: true
+          cache-from: type=gha,scope=agent-dotnet
+          cache-to: type=gha,mode=max,scope=agent-dotnet
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/denpa-agent-dotnet:${{ steps.tag.outputs.agent_dotnet }}
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/denpa-agent-dotnet:latest
 
       - name: Build and push denpa image
         uses: docker/build-push-action@v7
