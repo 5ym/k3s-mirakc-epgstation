@@ -95,8 +95,11 @@ sh mac/verify.sh
 
 ## イメージ
 
-`Dockerfile` が denpa 本体、`agent/` がチューナー側 (スキャン用の
-エージェント) です。CI が両方を焼いて `k3s/` のタグを書き戻します。
+`Dockerfile` が denpa 本体、`agent-dotnet/Dockerfile` がチューナー側です。
+CI が両方を焼いて `k3s/` のタグを書き戻します。
+
+エージェントの口に当てる適合テストは `agent-dotnet/conformance.test.ts`。
+**本物を起こして**、偽の選局コマンド (`tests/fake/tune.ts`) で流します。
 
 ## もっと詳しく
 

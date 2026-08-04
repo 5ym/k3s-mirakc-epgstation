@@ -21,7 +21,10 @@ import { SYNC } from '../src/lib/ts/psi';
 import { channels } from '../tests/fake/broadcast';
 import type { ChannelEntry } from './channels';
 
-const AGENT_CMD = (process.env.AGENT_CMD ?? 'bun agent/server.ts').split(' ');
+/** 既定は焼いたもの。`dotnet publish` してから走らせる (CI もそうしている) */
+const AGENT_CMD = (
+    process.env.AGENT_CMD ?? 'agent-dotnet/Denpa.Agent/bin/Release/net10.0/linux-x64/publish/denpa-agent'
+).split(' ');
 const PORT = Number(process.env.AGENT_TEST_PORT ?? 40881);
 const BASE = `http://127.0.0.1:${PORT}`;
 const ROOT = resolve(import.meta.dir, '..');
@@ -147,7 +150,6 @@ beforeAll(async () => {
             CHANNELS_FILE: paths().channels,
             RECORDED_DIR: paths().recorded,
             // 復号は別プロセス。本物と同じく終了コードだけを見る
-            RECISDB: `${ROOT}/tests/fake/recisdb.ts`,
             // 番組を作る本数。総当たりの1チャンネルあたりを軽くする
             FAKE_SLOTS: '4',
         },
