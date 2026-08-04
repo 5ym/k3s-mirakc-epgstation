@@ -86,7 +86,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: prepull
-          image: ghcr.io/danything/denpa:sha-a4a827843a02
+          image: ghcr.io/danything/denpa:sha-64961e4989bc
           imagePullPolicy: IfNotPresent
           command: ['/bin/true']
 ---
@@ -114,7 +114,7 @@ spec:
       terminationGracePeriodSeconds: 21900
       containers:
         - name: denpa
-          image: ghcr.io/danything/denpa:sha-a4a827843a02
+          image: ghcr.io/danything/denpa:sha-64961e4989bc
           imagePullPolicy: IfNotPresent
           env:
             - name: TZ
