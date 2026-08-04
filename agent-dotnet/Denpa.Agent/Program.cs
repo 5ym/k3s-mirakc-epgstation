@@ -17,6 +17,9 @@ using Microsoft.AspNetCore.Http.Features;
  * チャンネルスキャンで見つかった局を判断するのもあちらの仕事 (docs/roadmap.md)。
  */
 
+// 実機で選局だけ試す口。サーバは立てない (Probe.cs)
+if (args.ElementAtOrDefault(0) == "--tune") return Probe.Run(args);
+
 var port = int.TryParse(Environment.GetEnvironmentVariable("AGENT_PORT"), out var configured)
     ? configured
     : 25252;
@@ -224,6 +227,7 @@ app.Lifetime.ApplicationStopping.Register(pool.CloseAll);
 Log.Write($"listening on :{port} (tuners: {config.TunersFile} / channels: {config.ChannelsFile})");
 Log.Write($"チューナー {pool.Tuners.Count} 本 / チャンネル {config.LoadChannels().Count} 件");
 await app.RunAsync();
+return 0;
 
 /// <summary>HTTP に JSON を書く / 読む。中身の作りは <see cref="Json"/></summary>
 internal static class Respond

@@ -202,6 +202,32 @@ public sealed class Config(string tunersFile, string channelsFile, string recisd
     public JsonArray LoadChannels() => ReadArray(ChannelsFile, null);
 
     /// <summary>
+    /// チャンネル名から TSID を引く。**衛星の選局に要る。**
+    ///
+    /// <para>
+    /// 衛星は1つの周波数に何本もの TS が相乗りしていて、復調器は TSID を
+    /// 書いて選り分ける。denpa が言ってくるのは <c>BS15_0</c> のような相対番号
+    /// なので、ここで直す (<see cref="ChannelTable.StreamId"/>)。
+    /// </para>
+    ///
+    /// <para>
+    /// **スキャン結果がいちばん新しい。** BS は再編があるので、焼き込んだ表は
+    /// いつか古くなる。1度でもスキャンしていればこちらが勝つ。
+    /// </para>
+    /// </summary>
+    public Func<string, int?> StreamIds()
+    {
+        var table = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var entry in LoadChannels())
+        {
+            var channel = entry?["channel"]?.GetValue<string>();
+            var id = entry?["transportStreamId"]?.GetValue<int>();
+            if (channel is not null && id is > 0) table[channel] = id.Value;
+        }
+        return name => table.TryGetValue(name, out var id) ? id : null;
+    }
+
+    /// <summary>
     /// 預かった顔ぶれで差し替える。
     ///
     /// <para>

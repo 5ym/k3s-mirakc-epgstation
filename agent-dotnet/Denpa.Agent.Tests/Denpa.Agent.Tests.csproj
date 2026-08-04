@@ -17,6 +17,8 @@
         <Compile Include="../Denpa.Agent/TunerPool.cs" />
         <Compile Include="../Denpa.Agent/Interop.cs" />
         <Compile Include="../Denpa.Agent/DeviceProbe.cs" />
+        <Compile Include="../Denpa.Agent/ChannelTable.cs" />
+        <Compile Include="../Denpa.Agent/Tuning.cs" />
     </ItemGroup>
 
     <ItemGroup>
