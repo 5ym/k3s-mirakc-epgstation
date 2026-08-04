@@ -166,7 +166,7 @@ k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書い�
 | `agent/tuners.ts` | 優先度つきの取り合いと、選局プロセスの面倒 |
 | `agent/channels.ts` | `tuners.json` と `channels.json` の読み書き |
 
-## チューナーエージェント (.NET 版。`agent-dotnet/`)
+## チューナーエージェント (.NET 版。`agent/`)
 
 **同じ口を持つ、書き直したほう。** bun 版と同じ適合テストを通る
 (`AGENT_CMD` を差し替えて2回走らせる)。Native AOT で実行ファイル1個。
@@ -174,11 +174,11 @@ k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書い�
 
 | ファイル | 役割 |
 | --- | --- |
-| `agent-dotnet/Denpa.Agent/Program.cs` | HTTP の口 (Kestrel)。選局・チャンネルの控え・カード・解除 |
-| `agent-dotnet/Denpa.Agent/TunerPool.cs` | 優先度つきの取り合いと、選局プロセスの面倒 |
-| `agent-dotnet/Denpa.Agent/DeviceProbe.cs` | **チューナーの自動検出** (ioctl で受けられる方式を聞く) |
-| `agent-dotnet/Denpa.Agent/Config.cs` | `tuners.json` と `channels.json` の読み書き |
-| `agent-dotnet/Denpa.Agent/Interop.cs` | 選局をプロセスグループごと終わらせる (`kill`) |
+| `agent/Denpa.Agent/Program.cs` | HTTP の口 (Kestrel)。選局・チャンネルの控え・カード・解除 |
+| `agent/Denpa.Agent/TunerPool.cs` | 優先度つきの取り合いと、選局プロセスの面倒 |
+| `agent/Denpa.Agent/DeviceProbe.cs` | **チューナーの自動検出** (ioctl で受けられる方式を聞く) |
+| `agent/Denpa.Agent/Config.cs` | `tuners.json` と `channels.json` の読み書き |
+| `agent/Denpa.Agent/Interop.cs` | 選局をプロセスグループごと終わらせる (`kill`) |
 
 **チューナーは書かなくてよい。** 定義が無ければ `/dev/dvb/*` を開いて
 `DTV_ENUM_DELSYS` で方式を聞き、地上波か衛星かまで判別する。書いてあれば
@@ -193,7 +193,7 @@ k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書い�
 | `tests/fake/` | 偽エージェント・偽の選局コマンド・偽の通知先・偽ffmpeg。**電波は `broadcast.ts` が組み立てる** (EIT も SDT も NIT も。同じものを偽エージェントと偽選局コマンドの両方が流す) |
 | `src/**/*.test.ts` | 純粋関数の境界条件 (bun test) |
 | `agent/*.test.ts` | チューナー側 (取り合い) |
-| `agent-dotnet/Denpa.Agent.Tests/` | .NET 版 (手で書く設定の読み取り、チューナー自動検出の値の読み取り) |
+| `agent/Denpa.Agent.Tests/` | .NET 版 (手で書く設定の読み取り、チューナー自動検出の値の読み取り) |
 | `agent/conformance.test.ts` | **本物のエージェントを起こして HTTP の口に当てる。** チューナーの代わりは偽の選局コマンド。`AGENT_CMD` を差し替えれば、書き直したエージェントにも同じものを通せる |
 | `windows/verify.ps1` `mac/verify.sh` | `denpa://` の登録役 |
 

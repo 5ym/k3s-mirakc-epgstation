@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'agent-dotnet/**'
+      - 'agent/**'
       - 'Dockerfile'
       - 'src/**'
       - 'static/**'
@@ -47,7 +47,7 @@ jobs:
           set -eu
           # denpa はリポジトリ直下なので、エージェントなど別物のパスを除いて見る
           denpa_paths="Dockerfile src static package.json bun.lock svelte.config.js vite.config.ts"
-          echo "agent_dotnet=sha-$(git log -1 --format=%H -- agent-dotnet | cut -c1-12)" >> "$GITHUB_OUTPUT"
+          echo "agent=sha-$(git log -1 --format=%H -- agent | cut -c1-12)" >> "$GITHUB_OUTPUT"
           echo "denpa=sha-$(git log -1 --format=%H -- $denpa_paths | cut -c1-12)" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
@@ -66,15 +66,15 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: agent-dotnet/Dockerfile
+          file: agent/Dockerfile
           platforms: linux/amd64
           push: true
           pull: true
-          cache-from: type=gha,scope=agent-dotnet
-          cache-to: type=gha,mode=max,scope=agent-dotnet
+          cache-from: type=gha,scope=agent
+          cache-to: type=gha,mode=max,scope=agent
           tags: |
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/denpa-agent-dotnet:${{ steps.tag.outputs.agent_dotnet }}
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/denpa-agent-dotnet:latest
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/denpa-agent:${{ steps.tag.outputs.agent }}
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/denpa-agent:latest
 
       - name: Build and push denpa image
         uses: docker/build-push-action@v7
@@ -108,9 +108,9 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
-            for image in denpa-agent-dotnet denpa; do
+            for image in denpa-agent denpa; do
               case "$image" in
-                denpa-agent-dotnet) tag="${{ steps.tag.outputs.agent_dotnet }}" ;;
+                denpa-agent) tag="${{ steps.tag.outputs.agent }}" ;;
                 denpa) tag="${{ steps.tag.outputs.denpa }}" ;;
               esac
               sed -i -E "s#image: [^[:space:]]*/${image}:[^[:space:]]*#image: ${{ env.REGISTRY }}/${OWNER}/${image}:${tag}#g" ${FILES}

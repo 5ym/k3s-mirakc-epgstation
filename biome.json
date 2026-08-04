@@ -14,7 +14,8 @@
             "!docs",
             "!.github",
             "!renovate.json",
-            "!agent-dotnet"
+            "!agent/Denpa.Agent",
+            "!agent/Denpa.Agent.Tests"
         ]
     },
     "formatter": {

@@ -14,7 +14,7 @@ WORKDIR /build
 RUN apt-get update && \
     apt-get -y --no-install-recommends install clang zlib1g-dev && \
     rm -rf /var/lib/apt/lists/*
-COPY agent-dotnet/Denpa.Agent/ Denpa.Agent/
+COPY agent/Denpa.Agent/ Denpa.Agent/
 RUN dotnet publish Denpa.Agent/Denpa.Agent.csproj -c Release -r linux-x64 -o /out
 
 # ---------------------------------------------------------------------------

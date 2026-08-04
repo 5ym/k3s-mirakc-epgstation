@@ -65,15 +65,15 @@ jobs:
 
       # 設定の読み書き、選局表、チューナー自動検出の値の読み取り
       - name: Unit tests (.NET agent)
-        run: dotnet test agent-dotnet/Denpa.Agent.Tests/Denpa.Agent.Tests.csproj
+        run: dotnet test agent/Denpa.Agent.Tests/Denpa.Agent.Tests.csproj
 
       # エージェントの口に直接当てるテスト。**本物を起こして**、偽の選局
       # コマンドで流す (bun 版が居た頃は、同じものを2つの実装に通していた)
       - name: Build .NET agent
-        run: dotnet publish agent-dotnet/Denpa.Agent/Denpa.Agent.csproj -c Release -r linux-x64 -o agent-dotnet/publish
+        run: dotnet publish agent/Denpa.Agent/Denpa.Agent.csproj -c Release -r linux-x64 -o agent/publish
 
       - name: Conformance
-        run: AGENT_CMD="$PWD/agent-dotnet/publish/denpa-agent" bun test agent-dotnet/conformance.test.ts
+        run: AGENT_CMD="$PWD/agent/publish/denpa-agent" bun test agent/conformance.test.ts
 
       # ブラウザは 150MB ほどあり、毎回落とすと1分近く持っていかれる。
       # 中身は Playwright のバージョンでしか変わらないので、それを鍵にする

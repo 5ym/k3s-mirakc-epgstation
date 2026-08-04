@@ -24,7 +24,7 @@ denpa 自身で放送中のものを配る話。視聴・追っかけ録画・�
 仕事になり、チューナー側に残っているのは「掴む・裁く・流す」だけです
 ([architecture.md](architecture.md#チューナーエージェント))。
 
-**エージェントの .NET 版は入りました** (`agent-dotnet/`)。bun 版と同じ口を持ち、
+**エージェントの .NET 版は入りました** (`agent/`)。bun 版と同じ口を持ち、
 **同じ適合テストを通ります** (`agent/conformance.test.ts` — `AGENT_CMD` を
 差し替えて2回走らせる)。Native AOT で実行ファイル1個、依存はありません。
 
@@ -38,11 +38,11 @@ denpa 自身で放送中のものを配る話。視聴・追っかけ録画・�
 
 1. 実機で1本録って中身を見る (**まだ**)
 2. 配備の像を .NET に差し替えて、しばらく回す
-3. `agent/` を消して `agent-dotnet/` → `agent/`、像も `denpa-agent` 1つに戻す
+3. `agent/` を消して `agent/` → `agent/`、像も `denpa-agent` 1つに戻す
 
 先に消さない理由は1つで、**同じ適合テストを2つの実装に通せなくなる**からです。
 いま .NET 版を信じられている根拠がそれなので、最後まで残します。
-`agent/conformance.test.ts` は消さずに `agent-dotnet/` の下へ移します。
+`agent/conformance.test.ts` は消さずに `agent/` の下へ移します。
 
 .NET にして1つ増えたことがあります。**チューナーを自分で見つけられるように
 なりました** — 定義が無ければ `/dev/dvb/*` を開いて `DTV_ENUM_DELSYS`

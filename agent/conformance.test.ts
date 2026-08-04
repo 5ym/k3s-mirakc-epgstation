@@ -8,7 +8,7 @@
  * .NET に書き直したら、`AGENT_CMD` を差し替えて同じものを通す — それが
  * 「今までと同じように動く」の定義になる ([roadmap.md](../docs/roadmap.md))。
  *
- *     AGENT_CMD='./agent-dotnet/publish/denpa-agent' bun test agent/conformance.test.ts
+ *     AGENT_CMD='./agent/publish/denpa-agent' bun test agent/conformance.test.ts
  *
  * チューナーの代わりは `tests/fake/tune.ts`。エージェントから見れば
  * 「起こすと TS を流し続ける子プロセス」でしかないので、recisdb と区別がつかない。
@@ -23,7 +23,7 @@ import type { ChannelEntry } from './channels';
 
 /** 既定は焼いたもの。`dotnet publish` してから走らせる (CI もそうしている) */
 const AGENT_CMD = (
-    process.env.AGENT_CMD ?? 'agent-dotnet/Denpa.Agent/bin/Release/net10.0/linux-x64/publish/denpa-agent'
+    process.env.AGENT_CMD ?? 'agent/Denpa.Agent/bin/Release/net10.0/linux-x64/publish/denpa-agent'
 ).split(' ');
 const PORT = Number(process.env.AGENT_TEST_PORT ?? 40881);
 const BASE = `http://127.0.0.1:${PORT}`;
