@@ -89,10 +89,13 @@ public static class Probe
         var lnbAt = Array.IndexOf(args, "--lnb");
         var lnb = lnbAt >= 0 ? args.ElementAtOrDefault(lnbAt + 1) : null;
         var decode = args.Contains("--decode");
+        // 手元にカードが無い拠点。鍵だけ貰いに行く (CardShare.cs)
+        var cardAt = Array.IndexOf(args, "--card");
+        var card = cardAt >= 0 ? args.ElementAtOrDefault(cardAt + 1) : null;
 
         var known = Config.FromEnvironment().StreamIds();
 
-        using var b25 = decode ? AribB25.Open() : null;
+        using var b25 = decode ? AribB25.Open(card) : null;
         if (b25 is not null)
         {
             var ids = b25.Ids();

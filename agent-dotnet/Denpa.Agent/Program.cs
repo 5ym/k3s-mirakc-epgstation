@@ -219,6 +219,50 @@ app.MapPost("/denpa/decode", async (HttpContext http) =>
     await Respond.Write(http, result, result["ok"]!.GetValue<bool>() ? 200 : 500);
 });
 
+/*
+ * 鍵を配る口。**カードを1枚だけ置いて、他の拠点にも使わせる。**
+ *
+ * 拠点ごとにエージェントとチューナーがある形だと、カードは1箇所にしか
+ * ありません。カードごと持っていく代わりに、ECM を投げて鍵を貰います
+ * (CardShare.cs)。重い MULTI2 は各拠点の手元に残ります。
+ *
+ * **自分にカードが刺さっていなければ、ここは 503 を返すだけ**です。
+ */
+app.MapGet("/denpa/card/init", async (HttpContext http) =>
+{
+    try
+    {
+        http.Response.ContentType = "application/octet-stream";
+        await http.Response.Body.WriteAsync(AribB25.Pack(AribB25.Server.Init()));
+    }
+    catch (Exception error)
+    {
+        await Respond.Write(http, new JsonObject { ["error"] = error.Message }, 503);
+    }
+});
+
+app.MapPost("/denpa/card/ecm", async (HttpContext http) =>
+{
+    using var body = new MemoryStream();
+    await http.Request.Body.CopyToAsync(body);
+    if (body.Length is 0 or > 4096)
+    {
+        await Respond.Write(http, new JsonObject { ["error"] = "ECM が入っていません" }, 400);
+        return;
+    }
+
+    try
+    {
+        var (key, code) = AribB25.Server.Ecm(body.ToArray());
+        http.Response.ContentType = "application/octet-stream";
+        await http.Response.Body.WriteAsync(AribB25.Pack(key, code));
+    }
+    catch (Exception error)
+    {
+        await Respond.Write(http, new JsonObject { ["error"] = error.Message }, 503);
+    }
+});
+
 app.MapFallback((HttpContext http) =>
     Respond.Write(http, new JsonObject { ["ok"] = false, ["error"] = "not found" }, 404));
 

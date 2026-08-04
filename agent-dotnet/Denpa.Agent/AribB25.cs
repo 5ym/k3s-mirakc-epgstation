@@ -62,7 +62,7 @@ public sealed unsafe partial class AribB25 : IDisposable
 
     /// <summary>`b_cas_card.h` の <c>B_CAS_CARD</c></summary>
     [StructLayout(LayoutKind.Sequential)]
-    private struct CasCard
+    internal struct CasCard
     {
         public void* PrivateData;
         public delegate* unmanaged<CasCard*, void> Release;
@@ -76,7 +76,7 @@ public sealed unsafe partial class AribB25 : IDisposable
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct CardId
+    internal struct CardId
     {
         public long* Data;
         public int Count;
@@ -107,12 +107,16 @@ public sealed unsafe partial class AribB25 : IDisposable
     /// という分かりにくい壊れ方をする (Card.cs)。
     /// </para>
     /// </summary>
-    public static AribB25 Open()
+    /// <param name="cardUrl">
+    /// 鍵を配ってくれる相手。**手元にカードが無い拠点だけ**指定する
+    /// (<see cref="Remote"/>)。空なら自分に刺さっているカードを読む
+    /// </param>
+    public static AribB25 Open(string? cardUrl = null)
     {
         var b25 = CreateStdB25();
         if (b25 is null) throw new IOException("libaribb25 を用意できません");
 
-        var card = CreateCasCard();
+        var card = cardUrl is { Length: > 0 } ? Remote.Create(cardUrl) : CreateCasCard();
         if (card is null)
         {
             b25->Release(b25);
