@@ -177,6 +177,38 @@ describe('状態を持つのをやめる', () => {
         expect(stateOf(db, 1)).toBe('available');
     });
 
+    /**
+     * ルール 2 / 手動 3 は mirakc の頃の値を引きずっていた。比べる相手は
+     * 予約どうしだけなので、ルール 1 / 手動 2 から数え直す
+     */
+    test('優先度を1つ下げる。順位はそのまま', () => {
+        const db = new Database(':memory:');
+        db.exec(SCHEMA);
+        addMissingColumns(db);
+        db.exec(`INSERT INTO rules (id, name, priority, created_at)
+                 VALUES (1, '手で上げたもの', 5, 0), (2, 'ふつう', 2, 0), (3, 'いちばん下', 0, 0)`);
+        db.exec(`INSERT INTO reservations (id, program_id, service_id, name, start_at, end_at,
+                                           priority, created_at, updated_at)
+                 VALUES (1, 10, 1, '手動', 0, 1, 3, 0, 0), (2, 11, 1, 'ルール由来', 0, 1, 2, 0, 0)`);
+
+        dropStoredState(db);
+
+        // 一律に1つ下げる。0 より下へは動かさない
+        expect(db.query('SELECT id, priority FROM rules ORDER BY id').all()).toEqual([
+            { id: 1, priority: 4 },
+            { id: 2, priority: 1 },
+            { id: 3, priority: 0 },
+        ]);
+        expect(db.query('SELECT id, priority FROM reservations ORDER BY id').all()).toEqual([
+            { id: 1, priority: 2 },
+            { id: 2, priority: 1 },
+        ]);
+
+        // 二度目は動かさない (印を user_version に持つ)
+        dropStoredState(db);
+        expect(db.query('SELECT priority FROM rules WHERE id = 2').get()).toEqual({ priority: 1 });
+    });
+
     test('新しく作ったDBには何もしない', () => {
         const db = new Database(':memory:');
         db.exec(SCHEMA);

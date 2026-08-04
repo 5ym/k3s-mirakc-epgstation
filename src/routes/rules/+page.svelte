@@ -140,7 +140,7 @@
                     <input
                         type="number"
                         name="priority"
-                        value={data.seed?.priority ?? 2}
+                        value={data.seed?.priority ?? 1}
                         min="0"
                         max="9"
                         class="input input-bordered w-full"
@@ -155,7 +155,7 @@
                         <strong>予約どうし</strong>を比べる数です。チューナーが足りないとき<strong
                             >大きいほうを残します</strong
                         >
-                        (手動予約は 3)。番組表集めやロゴ集めとは比べません — 録画は必ずそれらより強く掴みます。
+                        (手動予約は 2)。番組表集めやロゴ集めとは比べません — 録画は必ずそれらより強く掴みます。
                     </span>
                 </label>
             </div>

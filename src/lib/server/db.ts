@@ -126,6 +126,41 @@ export function dropStoredState(db: Database): void {
         db.exec(`ALTER TABLE rules DROP COLUMN ${column}`);
         console.log(`[db] rules.${column} を落としました (焼き方は設定で決めます)`);
     }
+
+    shiftPriorities(db);
+}
+
+/**
+ * 予約どうしの優先度を1つ下へずらす。**順位は変えない。**
+ *
+ * ルール 2 / 手動 3 で始まったのは mirakc の頃の値を引きずっていたため。
+ * 比べる相手は予約どうしだけなので、**ルール 1 / 手動 2** から数える。
+ *
+ * **全部を一律にずらす。** 既定だけ変えると、前からある行 (2) が新しい行 (1) より
+ * 強いままになる。一律なら、手で付けた差もそのまま残る。0 より下へは動かさない。
+ *
+ * 1度だけ効かせたいので、印を `user_version` に持つ (行を数えて判断すると、
+ * たまたま全部 1 のときに二度目が走る)。
+ */
+const PRIORITY_BASE_SHIFTED = 1;
+
+function shiftPriorities(db: Database): void {
+    const version = (db.query('PRAGMA user_version').get() as { user_version: number }).user_version;
+    if (version >= PRIORITY_BASE_SHIFTED) return;
+
+    // 途中まで作ったDBを渡されることがある (移行のテスト)。無い表は触らない
+    const tables = db.query('SELECT name FROM sqlite_master WHERE type = ?').all('table') as {
+        name: string;
+    }[];
+    const has = (name: string) => tables.some((table) => table.name === name);
+    if (!has('rules') || !has('reservations')) return;
+
+    const rules = db.query('UPDATE rules SET priority = MAX(0, priority - 1)').run().changes;
+    const reservations = db.query('UPDATE reservations SET priority = MAX(0, priority - 1)').run().changes;
+    db.exec(`PRAGMA user_version = ${PRIORITY_BASE_SHIFTED}`);
+    if (rules > 0 || reservations > 0) {
+        console.log(`[db] 優先度を1つ下げました (ルール ${rules} 件 / 予約 ${reservations} 件)`);
+    }
 }
 
 export function now(): number {

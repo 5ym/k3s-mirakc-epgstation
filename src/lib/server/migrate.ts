@@ -387,7 +387,7 @@ async function importRules(connection: mysql.Connection, options: MigrateOptions
                 // 焼き方は引き継がない。エンコードもCMも全体設定で、焼くときに読む
                 `INSERT INTO rules (name, keyword, ignore_keyword, search_fields, service_ids, service_types,
                                     genres, enabled, priority, source, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 2, ?, ?)`,
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
             )
             .run(
                 name,

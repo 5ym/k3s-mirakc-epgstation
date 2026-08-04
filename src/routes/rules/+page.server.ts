@@ -50,7 +50,7 @@ function conditionsFrom(params: URLSearchParams): Rule | null {
         genres: genres.length === 0 ? null : JSON.stringify(genres),
         // 無料放送の扱いは**全体設定**。ルールごとには持たない (誰も読まない列)
         enabled: 1,
-        priority: 2,
+        priority: 1,
         source: null,
         created_at: 0,
     };
@@ -313,6 +313,18 @@ function searchFields(form: FormData): string {
     return parseSearchFields(form.getAll('searchFields').join(',')).join(',');
 }
 
+/**
+ * 予約どうしを比べる数。**0 も受ける。**
+ *
+ * `Number(...) || 2` と書いていた頃は、0 を入れると既定に戻っていた
+ * (`0 || 2` は 2)。「いちばん譲る」を選べないことになる。
+ * 既定はルールの 1 で、手動予約はその上の 2。
+ */
+function rulePriority(form: FormData): number {
+    const value = Number(form.get('priority'));
+    return Number.isFinite(value) && value >= 0 ? Math.floor(value) : 1;
+}
+
 const TYPE_LABEL: Record<string, string> = { GR: '地上波', BS: 'BS', CS: 'CS', SKY: 'SKY' };
 
 /**
@@ -388,7 +400,7 @@ export const actions = {
                 ids,
                 types,
                 genreIds,
-                Number(form.get('priority') ?? 2) || 2,
+                rulePriority(form),
                 now(),
             );
 
@@ -426,7 +438,7 @@ export const actions = {
                 ids,
                 types,
                 genreIds,
-                Number(form.get('priority') ?? 2) || 2,
+                rulePriority(form),
                 id,
             );
 
