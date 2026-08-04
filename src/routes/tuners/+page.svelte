@@ -71,19 +71,20 @@
     <div class="flex min-w-0 flex-col gap-6">
         <section class="card bg-base-100 shadow" data-testid="channel-card">
             <div class="card-body">
-                <h2 class="card-title">取れているチャンネル</h2>
-                <p class="text-base-content/70 text-sm">
-                    チャンネルスキャンで見つかった物理チャンネルと、そこに乗っている局です。
-                    <strong>局はスキャンが終わった時点で出そろいます</strong>が、番組表はそのあと denpa
-                    が1チャンネルずつ開いて集めるので、少し遅れて埋まります。
-                    集まるたびに知らせが来るので、この画面は開いたままで構いません。
-                </p>
                 <!--
-                    **入れたばかりのとき用。** 普段の周回は録画にもスキャンにもロゴにも
-                    譲るので、何か動いていると番組表がなかなか埋まらない。
-                    押されている間は録画以外を蹴って、全チューナーで回る
+                    **説明を3つ重ねない。**
+
+                    見出しの下に長い前置き、ボタンの下に押し方の説明、数の下に
+                    数え方の説明、と3つ並んでいた。どれも同じことを言い換えていて、
+                    肝心の数が下に押し出されていた。**数を先に出して、注は1つだけ。**
                 -->
-                <div class="flex flex-wrap items-center gap-2">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <h2 class="card-title">取れているチャンネル</h2>
+                    <!--
+                        入れたばかりのとき用。普段の周回は録画にもスキャンにもロゴにも
+                        譲るので、何か動いていると番組表がなかなか埋まらない。
+                        押されている間は録画以外を蹴って、全チューナーで回る
+                    -->
                     <form method="POST" action="?/collectNow" use:submitting>
                         <button
                             class="btn btn-sm"
@@ -93,20 +94,14 @@
                             {data.collect.boosted ? '集めています…' : '番組表をいますぐ集める'}
                         </button>
                     </form>
-                    {#if data.collect.running}
-                        <!-- 1チャンネルに数分かかる。黙っていると止まって見える -->
-                        <span class="text-base-content/70 text-sm" data-testid="epg-collect">
-                            {data.collect.boosted ? '最優先で集めています' : '番組表を集めています'}
-                            ({data.collect.active.join(', ') || '準備中'}) ・ 残り {data.collect.pending} チャンネル
-                        </span>
-                    {/if}
                 </div>
-                <div class="text-base-content/60 text-xs">
-                    入れたばかりで番組表が空のときは、これを押すと<strong
-                        >空いているチューナーを全部使って</strong
-                    >集めます (<strong>録画は蹴りません</strong>)。普段は denpa
-                    が薄い局から少しずつ集めるので、押す必要はありません。
-                </div>
+                {#if data.collect.running}
+                    <!-- 1チャンネルに数分かかる。黙っていると止まって見える -->
+                    <div class="text-base-content/70 text-sm" data-testid="epg-collect">
+                        {data.collect.boosted ? '最優先で集めています' : '番組表を集めています'}
+                        ({data.collect.active.join(', ') || '準備中'}) ・ 残り {data.collect.pending} チャンネル
+                    </div>
+                {/if}
                 {#if coverage.length === 0}
                     <p class="text-base-content/60 text-sm" data-testid="channel-empty">
                         まだ1つもありません。チャンネルスキャンを実行してください。
@@ -138,9 +133,14 @@
                         <span class="text-base-content/70">番組表の届いた局</span>
                         <strong>{withEpg}</strong>
                     </div>
+                    <!--
+                        **注はここ1つだけ。** 数のすぐ下に、数がそろわない理由と、
+                        上のボタンが何をするものかをまとめて置く
+                    -->
                     <div class="text-base-content/60 text-xs">
-                        1本の周波数 (物理チャンネル)
-                        に局が何局も相乗りしているので、本数と局数はそろいません。番組表は局ごとに集めるので、局が出そろったあとを追って埋まります。
+                        1本の周波数に局が何局も相乗りしているので、本数と局数はそろいません。番組表は局ごとに、スキャンのあとを追って埋まります。
+                        埋まるのを待てないときは<strong>「番組表をいますぐ集める」</strong
+                        >で、空いているチューナーを全部使って集められます (録画は蹴りません)。
                     </div>
                     <div class="max-h-96 overflow-auto">
                         <table class="table-pin-rows table table-sm">
@@ -347,11 +347,20 @@
                                                 {/if}
                                             </td>
                                             <td class="text-sm">
+                                                <!--
+                                                    **「優先度」とは呼ばない。**
+
+                                                    ルール画面の「優先度」は*どの予約を残すか*で、
+                                                    こちらは*いま掴んでいる1本を誰に譲るか*。
+                                                    別の物差しなのに同じ名前で数字を並べていたので、
+                                                    ルールの 2 が番組表の 3 に負けるように見えていた。
+                                                    録画は必ず 10 で掴むので、そうはならない
+                                                -->
                                                 {#each tuner.users as user (user.use)}
                                                     <div class="truncate" data-testid="tuner-user">
                                                         {user.label}
                                                         <span class="text-base-content/60">
-                                                            (優先度 {user.priority})
+                                                            (掴む強さ {user.priority})
                                                         </span>
                                                     </div>
                                                 {:else}

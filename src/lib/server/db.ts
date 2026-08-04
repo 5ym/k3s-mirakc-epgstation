@@ -109,6 +109,23 @@ export function dropStoredState(db: Database): void {
         db.exec('ALTER TABLE recordings DROP COLUMN logo_missing');
         console.log('[db] recordings.logo_missing を落としました (cm_note から読みます)');
     }
+
+    /*
+     * **焼き方はルールに持たせない。**
+     *
+     * ルールの行にも「エンコードする / 生TSも残す / CMの扱い / コーデック」が
+     * 入っていたが、予約を立てるところ (rules.ts) はそこを一度も読んでおらず、
+     * **設定 (settings) のほうを見ていた**。編集画面に出ていただけの値で、
+     * 設定を変えても直らないので、開くたびに古い値が並んでいた。
+     *
+     * `free_only` も同じ。無料放送だけにするかは全体設定で、ルールごとには持たない。
+     */
+    const rules = db.query('PRAGMA table_info(rules)').all() as { name: string }[];
+    for (const column of ['encode', 'keep_original', 'cm_cut', 'codec', 'free_only']) {
+        if (!rules.some((c) => c.name === column)) continue;
+        db.exec(`ALTER TABLE rules DROP COLUMN ${column}`);
+        console.log(`[db] rules.${column} を落としました (焼き方は設定で決めます)`);
+    }
 }
 
 export function now(): number {

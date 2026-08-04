@@ -173,17 +173,13 @@ CREATE TABLE IF NOT EXISTS rules (
     service_ids TEXT,                 -- JSON 配列。NULL は全チャンネル対象
     service_types TEXT,               -- JSON 配列 (GR/BS/CS)。個別チャンネルとのORで効く
     genres TEXT,                      -- JSON 配列 (lv1)。NULL は全ジャンル
-    -- 使っていない。無料放送を対象にするかは**全体設定** (settings.freeOnly) で、
-    -- ルールごとには持たない。同じ選択肢が2箇所にあると、どちらで決まったのか分からなくなる
-    free_only INTEGER NOT NULL DEFAULT 1,
     enabled INTEGER NOT NULL DEFAULT 1,
+    -- チューナーが足りないとき、どの予約を残すか。大きいほうが残る (conflict.ts)。
+    -- **エージェントに渡す「掴む強さ」とは別物** (docs/architecture.md)
     priority INTEGER NOT NULL DEFAULT 2,
-    encode INTEGER NOT NULL DEFAULT 1,
-    keep_original INTEGER NOT NULL DEFAULT 0,
-    -- off / chapter / cut。CMの扱い(cm.ts 参照)
-    cm_cut TEXT NOT NULL DEFAULT 'chapter',
-    -- av1 / h264。非力なマシンでは h264 のほうが実用的
-    codec TEXT NOT NULL DEFAULT 'av1',
+    -- **焼き方は持たない。** エンコードするか・生TSを残すか・CMの扱い・コーデックは
+    -- 全体設定 (settings) で、焼くときに読む。ルールにも予約にも写さない —
+    -- 同じ設定が2箇所にあると、片方だけ古くなって画面が嘘をつく
     created_at INTEGER NOT NULL
 );
 

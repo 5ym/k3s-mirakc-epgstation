@@ -71,9 +71,15 @@ test.describe('予約の細かい指定', () => {
         await syncEpg(request);
     });
 
-    test('録画のしかたは設定画面で決めて、そこから予約に入る', async ({ page, request }) => {
-        // 番組ごとの指定は置いていない。同じ選択肢が予約・ルール・設定にあると
-        // 「どれで決まったのか」が分からなくなるため
+    /**
+     * 録画のしかたは**設定画面ひとつ**で決める。
+     *
+     * 番組ごとの指定は置いていないし、**予約にも写さない。** 写していた頃は
+     * 予約を立てた時点の値で固まり、設定を変えても直らなかった (実機で、
+     * 「生TSも残す」を ON にしたのに既に立っていた予約24本が OFF のままだった)。
+     * 実際に読むのは**焼くとき** (encoder.ts)。
+     */
+    test('録画のしかたは設定画面だけで決める。番組ごとの指定は無い', async ({ page, request }) => {
         await setRecording(request, { keepOriginal: true });
         try {
             await goto(page, '/guide?type=GR');
@@ -87,7 +93,10 @@ test.describe('予約の細かい指定', () => {
             const reservation = page.locator(
                 `[data-testid="reservation-row"][data-program-id="${target.programId}"]`,
             );
-            await expect(reservation).toContainText('生TSも残す');
+            await expect(reservation).toHaveCount(1);
+            // 予約の行に焼き方の札は出さない。焼くときの設定で決まるので、
+            // 立てた時点の値を出すと設定を変えたときに嘘になる
+            await expect(reservation).not.toContainText('生TSも残す');
 
             await reservation.getByTestId('cancel-button').click();
             await expect(reservation).toHaveCount(0);

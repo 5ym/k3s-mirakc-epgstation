@@ -146,8 +146,16 @@
                         class="input input-bordered w-full"
                         data-testid="rule-priority"
                     />
+                    <!--
+                        **比べる相手は予約だけ。** チューナー画面に出ている「掴む強さ」
+                        (番組表 3 / スキャン 5 …) とは別の物差しで、そちらとは比べない。
+                        録画は必ずいちばん強い値で掴むので、番組表集めに負けることはない
+                    -->
                     <span class="text-base-content/60 text-xs">
-                        チューナーが足りないとき<strong>大きいほうを残します</strong>(手動予約は 3)
+                        <strong>予約どうし</strong>を比べる数です。チューナーが足りないとき<strong
+                            >大きいほうを残します</strong
+                        >
+                        (手動予約は 3)。番組表集めやロゴ集めとは比べません — 録画は必ずそれらより強く掴みます。
                     </span>
                 </label>
             </div>

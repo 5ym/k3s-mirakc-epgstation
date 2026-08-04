@@ -15,7 +15,6 @@ import { dirname, join } from 'node:path';
 import mysql from 'mysql2/promise';
 import { parseSearchFields, SEARCH_FIELDS } from '$lib/search';
 import type { Recording } from '$lib/types';
-import { config } from './config';
 import { database, now, queryOne } from './db';
 import { emit } from './events';
 import { libraryPath, recordedPath } from './library';
@@ -385,10 +384,10 @@ async function importRules(connection: mysql.Connection, options: MigrateOptions
 
         database()
             .prepare(
+                // 焼き方は引き継がない。エンコードもCMも全体設定で、焼くときに読む
                 `INSERT INTO rules (name, keyword, ignore_keyword, search_fields, service_ids, service_types,
-                                    genres, free_only, enabled, priority, encode, keep_original,
-                                    cm_cut, codec, source, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 2, 1, 0, ?, ?, ?, ?)`,
+                                    genres, enabled, priority, source, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 2, ?, ?)`,
             )
             .run(
                 name,
@@ -399,10 +398,7 @@ async function importRules(connection: mysql.Connection, options: MigrateOptions
                 channels.length === 0 ? null : JSON.stringify(channels),
                 types.length === 0 ? null : JSON.stringify(types),
                 genreIds.length === 0 ? null : JSON.stringify(genreIds),
-                row.isFree ? 1 : 0,
                 row.enable ? 1 : 0,
-                config.cmCutDefault,
-                config.encodeCodec,
                 source,
                 now(),
             );

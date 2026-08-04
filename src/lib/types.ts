@@ -84,13 +84,12 @@ export interface Rule {
     service_ids: string | null;
     service_types: string | null;
     genres: string | null;
-    free_only: number;
     enabled: number;
+    /**
+     * チューナーが足りないとき、どの予約を残すか。大きいほうが残る。
+     * **エージェントに渡す「掴む強さ」とは別物**
+     */
     priority: number;
-    encode: number;
-    keep_original: number;
-    cm_cut: CmMode;
-    codec: VideoCodec;
     /** 引き継ぎ元での識別子 (例: epgstation:12)。自分で作ったものは NULL */
     source: string | null;
     created_at: number;

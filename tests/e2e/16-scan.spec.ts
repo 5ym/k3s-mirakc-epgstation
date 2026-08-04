@@ -34,8 +34,8 @@ test.describe('チューナー画面', () => {
      * 入れたばかりのとき用の口。
      *
      * 普段の周回は録画にもスキャンにもロゴにも譲るので、何か動いていると
-     * 番組表がなかなか埋まらない。押されている間は**録画以外を蹴る**優先度で
-     * 掴みに行くので、そこまで見ておく (画面の「優先度」がそれ)
+     * 番組表がなかなか埋まらない。押されている間は**録画以外を蹴る強さ**で
+     * 掴みに行くので、そこまで見ておく (画面の「掴む強さ」がそれ)
      */
     test('番組表をいますぐ集められる。掴む強さも上がる', async ({ page, request }) => {
         await syncEpg(request);
@@ -45,7 +45,7 @@ test.describe('チューナー画面', () => {
 
         // 掴んだ相手が誰で、どの強さで掴んでいるかはチューナー画面に出る
         await expect(page.getByTestId('tuner-list')).toContainText('番組表', { timeout: 30_000 });
-        await expect(page.getByTestId('tuner-list')).toContainText('優先度 8');
+        await expect(page.getByTestId('tuner-list')).toContainText('掴む強さ 8');
 
         // 終わったら押せる状態に戻る。戻らないと次に押せない
         await expect(page.getByTestId('epg-collect-now')).toBeEnabled({ timeout: 120_000 });

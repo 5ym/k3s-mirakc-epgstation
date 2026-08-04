@@ -49,18 +49,8 @@ function conditionsFrom(params: URLSearchParams): Rule | null {
         service_types: types.length === 0 ? null : JSON.stringify(types),
         genres: genres.length === 0 ? null : JSON.stringify(genres),
         // 無料放送の扱いは**全体設定**。ルールごとには持たない (誰も読まない列)
-        free_only: 1,
         enabled: 1,
         priority: 2,
-        /*
-         * **録画のしかたは設定画面から取る。** ここに 1 / 0 と書いていた頃は、
-         * 設定を変えても新しいルールだけ昔の値で出てきて、開くたびに直すことに
-         * なっていた (実際に効くのは設定のほうなので、画面が嘘をついていた)
-         */
-        encode: settings().encode ? 1 : 0,
-        keep_original: settings().keepOriginal ? 1 : 0,
-        cm_cut: settings().cmCut,
-        codec: settings().codec,
         source: null,
         created_at: 0,
     };
@@ -381,15 +371,14 @@ export const actions = {
             });
         }
         const services = queryAll<Service>('SELECT * FROM services');
-        const current = settings();
         const name = ruleName(keyword, types, ids, genreIds, services);
 
         database()
             .prepare(
-                // free_only は書かない。無料放送の扱いは全体設定で、ルールごとには持たない
+                // 焼き方は書かない。エンコードもCMも全体設定で、焼くときに読む
                 `INSERT INTO rules (name, keyword, ignore_keyword, search_fields, service_ids, service_types,
-                                genres, enabled, priority, encode, keep_original, cm_cut, codec, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
+                                genres, enabled, priority, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
             )
             .run(
                 name,
@@ -400,10 +389,6 @@ export const actions = {
                 types,
                 genreIds,
                 Number(form.get('priority') ?? 2) || 2,
-                form.get('encode') === 'on' ? 1 : 0,
-                form.get('keepOriginal') === 'on' ? 1 : 0,
-                current.cmCut,
-                current.codec,
                 now(),
             );
 
@@ -427,13 +412,11 @@ export const actions = {
         }
 
         const services = queryAll<Service>('SELECT * FROM services');
-        const current = settings();
         database()
             .prepare(
-                // free_only は触らない。無料放送の扱いは全体設定で、ルールごとには持たない
+                // 焼き方は触らない。エンコードもCMも全体設定で、焼くときに読む
                 `UPDATE rules SET name = ?, keyword = ?, ignore_keyword = ?, search_fields = ?, service_ids = ?,
-                 service_types = ?, genres = ?, priority = ?, encode = ?,
-                 keep_original = ?, cm_cut = ?, codec = ? WHERE id = ?`,
+                 service_types = ?, genres = ?, priority = ? WHERE id = ?`,
             )
             .run(
                 ruleName(keyword, types, ids, genreIds, services),
@@ -444,10 +427,6 @@ export const actions = {
                 types,
                 genreIds,
                 Number(form.get('priority') ?? 2) || 2,
-                form.get('encode') === 'on' ? 1 : 0,
-                form.get('keepOriginal') === 'on' ? 1 : 0,
-                current.cmCut,
-                current.codec,
                 id,
             );
 
