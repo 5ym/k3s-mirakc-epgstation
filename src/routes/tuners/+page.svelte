@@ -68,7 +68,7 @@
 <Toasts {notices} source={form} />
 
 <div class="grid items-start gap-6 xl:grid-cols-2">
-    <div class="flex flex-col gap-6">
+    <div class="flex min-w-0 flex-col gap-6">
         <section class="card bg-base-100 shadow" data-testid="channel-card">
             <div class="card-body">
                 <h2 class="card-title">取れているチャンネル</h2>
@@ -285,7 +285,7 @@
         </section>
     </div>
 
-    <div class="flex flex-col gap-6">
+    <div class="flex min-w-0 flex-col gap-6">
         <!--
             **いちばん上に置く。** 録るのも番組表を集めるのもここの取り合いで、
             スキャン中に見たいのも「いま何本使っているか」。カードリーダーの

@@ -45,13 +45,14 @@ test.describe('エンコードの失敗', () => {
             .first();
         await expect(failed.getByTestId('recording-state')).toHaveText('エンコード失敗');
 
-        // **生TSは無事なので観られるしダウンロードもできる**
+        // **生TSは無事なので観られる** (行そのものが再生)
         await expect(failed.getByTestId('play-hint')).toHaveCount(1);
-        await expect(failed.getByTestId('download-link')).toHaveCount(1);
 
         // 理由は行の「詳細」から。ffmpeg の出力は長いので一覧には貼らない
         await failed.getByTestId('detail-button').click();
         const detail = page.getByTestId('program-detail');
+        // 落とす口も詳細の中。生TSは無事なのでダウンロードできる
+        await expect(detail.getByTestId('download-link')).toHaveCount(1);
         // 理由は1つだけ。録画そのものは失敗していないので、出るのはジョブ側の理由だけ
         const note = detail.getByTestId('detail-error');
         await expect(note).toHaveCount(1);

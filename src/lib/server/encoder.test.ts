@@ -20,13 +20,15 @@ describe('録画エンコードの引数', () => {
         const args = buildArgs('/in.m2ts', '/out.mkv', 1, null);
         expect(args).toContain('libsvtav1');
         // send_field だとコマ数が倍になり、時間もサイズも約2倍になる
-        expect(argValue(args, '-vf')).toBe('bwdif=mode=send_frame,format=yuv420p10le');
+        expect(argValue(args, '-vf')).toBe(
+            'bwdif=mode=send_frame,scale=trunc(iw*sar/2)*2:ih,setsar=1,format=yuv420p10le',
+        );
         expect(args.at(-1)).toBe('/out.mkv');
     });
 
     test('なめらかにすると1フィールドごとに1コマ出す', () => {
         const args = buildArgs('/in.m2ts', '/out.mkv', 1, null, 'av1', { smoothMotion: true });
-        expect(argValue(args, '-vf')).toBe('bwdif,format=yuv420p10le');
+        expect(argValue(args, '-vf')).toBe('bwdif,scale=trunc(iw*sar/2)*2:ih,setsar=1,format=yuv420p10le');
     });
 });
 
@@ -66,7 +68,9 @@ describe('コマ数の決め方', () => {
         const args = buildArgs('/in.m2ts', '/out.mkv', 1, null, 'h264');
         expect(args).toContain('libx264');
         expect(args).not.toContain('libsvtav1');
-        expect(argValue(args, '-vf')).toBe('bwdif=mode=send_frame,format=yuv420p');
+        expect(argValue(args, '-vf')).toBe(
+            'bwdif=mode=send_frame,scale=trunc(iw*sar/2)*2:ih,setsar=1,format=yuv420p',
+        );
         expect(args).toContain('-preset');
     });
 
@@ -140,6 +144,23 @@ describe('コマ数の決め方', () => {
         expect(args).toContain('1:s:0?');
         // 入力は 本編 / sup / チャプター の順
         expect(argValue(args, '-map_chapters')).toBe('2');
+    });
+
+    /**
+     * TS は音声のほうが先に始まっていることが多い。実機の録画では映像の1コマ目が
+     * 0.667 秒あとで、焼き上がりも映像だけ 0.667 秒から始まっていた。
+     * 1コマ目を 0 秒として数えるプレイヤーでは、そのぶん字幕が早く出る
+     */
+    test('映像が途中から始まる素材は、全部のトラックを前へ寄せる', () => {
+        const args = buildArgs('/in.m2ts', '/out.mkv', 1, null, 'av1', { videoStart: 0.667 });
+        expect(argValue(args, '-output_ts_offset')).toBe('-0.667');
+    });
+
+    test('ほぼ 0 なら寄せない', () => {
+        // 数ミリ秒のずれでオプションを増やしても、見た目は変わらない
+        expect(argValue(buildArgs('/in.m2ts', '/out.mkv', 1, null), '-output_ts_offset')).toBeUndefined();
+        const args = buildArgs('/in.m2ts', '/out.mkv', 1, null, 'av1', { videoStart: 0.02 });
+        expect(argValue(args, '-output_ts_offset')).toBeUndefined();
     });
 
     test('PGS が無ければ字幕トラックは入らない', () => {

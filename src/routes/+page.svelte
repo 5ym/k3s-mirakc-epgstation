@@ -80,7 +80,14 @@
      * うまくいったときは持たない (`cmNoteWorthShowing`)
      */
     let detailCmNote = $state<string | null>(null);
-    /** ロゴを当てられなかった録画。詳細で位置を教えてもらう */
+    /**
+     * 詳細を開いている録画。**予約から開いたときは null。**
+     *
+     * ダウンロードと録り直しはここから出す。一覧の行に並べていた頃は、
+     * 1行あたり4つも5つもボタンが並んで、狭い画面では横に流れていた。
+     * どちらもその1本に対する操作なので、中身を見ている場所にある
+     */
+    let detailRec = $state<(typeof data.recordings)[number] | null>(null);
 
     /** 続けて別の行を押したとき、遅れて届いた前の結果で上書きされないようにする */
     let opened = 0;
@@ -107,6 +114,8 @@
         cmNote: string | null = null,
     ): Promise<void> {
         const token = ++opened;
+        // 予約から開いたときは録画のボタンを出さない (openRecording が入れ直す)
+        detailRec = null;
         detailNotes = notes;
         detailCmNote = cmNoteWorthShowing(cmNote) ? cmNote : null;
         detail = {
@@ -206,6 +215,7 @@
             notes.push({ title: 'エンコードに失敗しました', text: rec.encode_error });
         }
         void openDetail(rec.program_id, rec, notes, rec.cm_note);
+        detailRec = rec;
     }
 </script>
 
@@ -386,7 +396,6 @@
                         -->
                         {@const link = playLink(rec)}
                         {@const canPlay = link !== null}
-                        {@const canReencode = canPlay && rec.job_id === null && encodeSource(rec) !== null}
                         {@const shown = rowState(rec)}
                         <!--
                             押すと再生。中身を読みたいときは行の中の「詳細」から。
@@ -528,38 +537,11 @@
                                     </button>
                                     {#if rec.deleted_at === null}
                                         <!--
-                                            まだエンコードしていないものや、引き継いだ未エンコードの
-                                            録画は生TSしか無い。配信は library_path ?? ts_path を返すので、
-                                            どちらかがあれば開ける。
-                                            失敗した録画には出さない (playable)
+                                            **ダウンロードと録り直しは詳細の中に置いてある。**
+                                            行に並べていた頃は1行に4つも5つもボタンが載って、
+                                            狭い画面では横に流れていた。行そのものが再生なので、
+                                            ここに残すのは「詳細」と、取り返しのつかない削除だけ
                                         -->
-                                        {#if canPlay}
-                                            <!--
-                                                再生ボタンは置いていない。行そのものが再生なので、
-                                                同じ働きのものを2つ並べると、どちらを押すのが
-                                                正しいのか考えさせることになる
-                                            -->
-                                            <a
-                                                class="btn btn-outline"
-                                                href={downloadUrl(rec.id)}
-                                                download
-                                                data-testid="download-link"
-                                            >
-                                                ダウンロード
-                                            </a>
-                                        {/if}
-                                        {#if canReencode}
-                                            <!--
-                                                録り直しの元になるのは生TS。エンコード済みを元に
-                                                しても画質は戻らないので、生TSがあるときだけ出す
-                                            -->
-                                            <form method="POST" action="?/reencode" use:submitting>
-                                                <input type="hidden" name="id" value={rec.id} />
-                                                <button class="btn btn-outline" data-testid="reencode-button">
-                                                    再エンコード
-                                                </button>
-                                            </form>
-                                        {/if}
                                         {#if rec.job_id !== null}
                                             <!--
                                                 動いている間は中止だけ。この裏で ffmpeg が
@@ -634,5 +616,40 @@
         notes={detailNotes}
         cmNote={detailCmNote}
         onclose={() => (detail = null)}
+        actions={detailRec === null ? undefined : recordingActions}
     />
 {/if}
+
+<!--
+    その1本に対する操作。**一覧の行ではなくここに置く。**
+
+    行に並べていた頃は「詳細・ダウンロード・再エンコード・削除」が横に並び、
+    狭い画面では枠から流れ出していた。再生は行そのものなので、行に残すのは
+    入口 (詳細) と、取り返しのつかない削除だけにしてある
+-->
+{#snippet recordingActions()}
+    {#if detailRec !== null}
+        {@const rec = detailRec}
+        {#if rec.deleted_at === null && playable(rec)}
+            <!--
+                まだエンコードしていないものや、引き継いだ未エンコードの録画は
+                生TSしか無い。配信は library_path ?? ts_path を返すので、
+                どちらかがあれば落とせる
+            -->
+            <a class="btn btn-outline" href={downloadUrl(rec.id)} download data-testid="download-link">
+                ダウンロード
+            </a>
+            {#if rec.job_id === null && encodeSource(rec) !== null}
+                <!--
+                    録り直しの元になるのは生TS。エンコード済みを元にしても
+                    画質は戻らないので、生TSがあるときだけ出す
+                -->
+                <form method="POST" action="?/reencode" use:submitting>
+                    <input type="hidden" name="id" value={rec.id} />
+                    <button class="btn btn-outline" data-testid="reencode-button">再エンコード</button>
+                </form>
+            {/if}
+        {/if}
+    {/if}
+    <button class="btn" onclick={() => (detail = null)} data-testid="detail-close">閉じる</button>
+{/snippet}

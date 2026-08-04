@@ -68,7 +68,7 @@
     高さが揃えられ、背の低いカードの隣に大きな穴が空く
 -->
 <div class="grid items-start gap-6 xl:grid-cols-2">
-    <div class="flex flex-col gap-6">
+    <div class="flex min-w-0 flex-col gap-6">
         <section class="card bg-base-100 shadow">
             <div class="card-body">
                 <h2 class="card-title">録画のしかた</h2>
@@ -189,7 +189,7 @@
         </section>
     </div>
 
-    <div class="flex flex-col gap-6">
+    <div class="flex min-w-0 flex-col gap-6">
         <section class="card bg-base-100 shadow">
             <div class="card-body">
                 <h2 class="card-title">ベーシック認証</h2>

@@ -93,6 +93,18 @@ test.describe('録画とエンコード', () => {
         const detail = page.getByTestId('program-detail');
         await expect(detail).toBeVisible();
         await expect(detail.getByTestId('detail-video')).toBeVisible();
+
+        /*
+         * ダウンロードのリンクは資格情報を URL に入れる。ブラウザは画面を開いた
+         * ときの認証をダウンロードに引き継がないので、素のURLだと 401 になる。
+         *
+         * **口は詳細の中にある。** 一覧の行に並べていた頃は、1行に4つも5つも
+         * ボタンが載って狭い画面で横に流れていた
+         */
+        const href = (await detail.getByTestId('download-link').getAttribute('href')) ?? '';
+        expect(href).toContain('denpa:');
+        expect(href).toContain('download=1');
+
         await page.getByTestId('detail-close').click();
         await expect(detail).toHaveCount(0);
 
@@ -110,12 +122,6 @@ test.describe('録画とエンコード', () => {
         expect(part.status()).toBe(206);
         expect(part.headers()['content-range']).toMatch(/^bytes 0-99\/\d+$/);
         expect((await part.body()).byteLength).toBe(100);
-
-        // ダウンロードのリンクは資格情報を URL に入れる。ブラウザは画面を開いた
-        // ときの認証をダウンロードに引き継がないので、素のURLだと 401 になる
-        const href = (await recording.getByTestId('download-link').getAttribute('href')) ?? '';
-        expect(href).toContain('denpa:');
-        expect(href).toContain('download=1');
 
         // 名前を付けないと「file」という拡張子の無いファイルとして落ちてくる
         const attached = await request.get(href);
@@ -227,6 +233,11 @@ test.describe('エンコードしない', () => {
          * 元にできるTSがもう無い (「生TSも残す」は焼いたときの話)。
          * 焼きたくなったらコーデックを選んで録り直すことになる
          */
-        await expect(page.locator(row).getByTestId('reencode-button')).toHaveCount(0);
+        await page.locator(row).getByTestId('detail-button').click();
+        const detail = page.getByTestId('program-detail');
+        await expect(detail).toBeVisible();
+        await expect(detail.getByTestId('reencode-button')).toHaveCount(0);
+        // 生TSでも観られるものは落とせる
+        await expect(detail.getByTestId('download-link')).toHaveCount(1);
     });
 });

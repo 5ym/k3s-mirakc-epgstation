@@ -63,6 +63,29 @@ test.describe('PWA', () => {
             expect(doc.scrollW).toBeLessThanOrEqual(doc.clientW);
         }
 
+        /*
+         * **番組表以外の画面も同じ。**
+         *
+         * ルール・チューナー・設定は表を並べていて、それが画面より広い。
+         * 表が枠の中で横に流れるのは構わないが、**ページごと流れると**
+         * ヘッダーも本文も一緒に動いて読めなくなる。
+         *
+         * 起きていたのはグリッドの列が縮まないため。列の既定は
+         * `min-width: auto` なので、中の表が広いと列ごと広がり、
+         * 中の `overflow-x-auto` は出番が来ない
+         */
+        for (const width of [390, 430, 768]) {
+            await page.setViewportSize({ width, height: 780 });
+            for (const path of ['/', '/rules', '/tuners', '/settings']) {
+                await goto(page, path);
+                const doc = await page.evaluate(() => ({
+                    scrollW: document.documentElement.scrollWidth,
+                    clientW: document.documentElement.clientWidth,
+                }));
+                expect(doc.scrollW, `${path} が ${width}px で横に流れる`).toBeLessThanOrEqual(doc.clientW);
+            }
+        }
+
         // 畳んだメニューからも行けること
         await page.setViewportSize({ width: 390, height: 780 });
         await goto(page, '/');

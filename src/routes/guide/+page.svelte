@@ -44,6 +44,14 @@
      */
     let headHeight = $state(0);
 
+    /**
+     * 時刻の列の幅。**数字と「いま」の札が入るぶんだけ。**
+     *
+     * 出しているのは「13」のような時だけなので、3.5rem は要らなかった。
+     * 狭くしたぶんは番組の列に回る (横に並ぶ局が増える)
+     */
+    const TIME_COLUMN = '2.5rem';
+
     /*
      * 開いたときに「いま」が見えている状態にする。24時間ぶん出るので、
      * 先頭(4:00)のままだと毎回スクロールさせることになる。
@@ -249,8 +257,8 @@
         -->
         <div
             class="grid"
-            style="grid-template-columns: 3.5rem repeat({data.services
-                .length}, minmax(11rem, 1fr)); grid-template-rows: auto repeat({slots}, 0.75rem); width: calc(3.5rem + {data
+            style="grid-template-columns: {TIME_COLUMN} repeat({data.services
+                .length}, minmax(11rem, 1fr)); grid-template-rows: auto repeat({slots}, 0.75rem); width: calc({TIME_COLUMN} + {data
                 .services.length} * 11rem); min-width: 100%;"
             data-testid="guide-rows"
         >
@@ -324,17 +332,16 @@
                     data-testid="now-line"
                 >
                     <!--
-                        時刻の札は**横スクロールに付いてこさせる。**
+                        時刻の札は**時刻の列の中に置く。**
 
-                        `absolute left-0` で置いていた頃は、線を引いている枠
-                        (`grid-column: 1 / -1`) の左端に貼り付くので、右へスクロールすると
-                        表の外へ流れて見えなくなっていた。線だけが残って、それが何時の線
-                        なのか読めない。
+                        右へずらして番組の上に浮かせていた頃は、列の外へはみ出して
+                        番組名に被っていた。時刻を読むところは左の列と決まっているので、
+                        そこに収める。ちょうど同じ時のところにある数字とは重なるが、
+                        その1時間は「いま」の札を読めばいいので困らない。
 
-                        `sticky` は流れの中に居ないと効かないので `absolute` はやめる。
-                        `left` は時刻の列 (3.5rem) のぶんだけ空ける — 0 にすると、
-                        同じく `sticky left-0` で置いてある時刻の列と重なって、
-                        どちらも読めなくなる。
+                        `sticky left-0` で横スクロールに付いてこさせる (`absolute` だと
+                        線を引いている枠 `grid-column: 1 / -1` の左端に貼り付いて、
+                        右へ流れると見えなくなる。`sticky` は流れの中に居ないと効かない)。
 
                         **線をまたぐ位置は `translate` で決める。** `inline-block` に
                         負のマージンを付けていた頃は、行の高さのぶんだけ下へずれて
@@ -343,7 +350,8 @@
                         `block` にして高さの半分だけ上げれば、字が変わっても線の上に乗る
                     -->
                     <span
-                        class="bg-error text-error-content sticky left-14 z-20 block w-fit -translate-y-1/2 rounded px-1 text-[10px] leading-4"
+                        class="bg-error text-error-content sticky left-0 z-20 block -translate-y-1/2 rounded text-center text-[10px] leading-4"
+                        style="width: {TIME_COLUMN};"
                     >
                         {time(clock)}
                     </span>

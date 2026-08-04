@@ -8,6 +8,7 @@ import {
     isCmLength,
     parseFrameRate,
     parseSilences,
+    widenKeep,
 } from './cm';
 import { cmRatio, parseTrimRanges, tooMuchCm } from './cm-jls';
 
@@ -95,6 +96,42 @@ describe('区間の裏返し', () => {
                 600,
             ),
         ).toEqual([{ start: 100, end: 160 }]);
+    });
+});
+
+/**
+ * 切り出しはキーフレーム単位なので、判定どおりの位置から始めると本編の頭が
+ * 1 GOP ぶん削れる。実機で「本編の頭が一瞬欠ける」形で出ていた
+ */
+describe('残す区間の頭を戻す', () => {
+    test('頭だけ戻す。尻はそのまま', () => {
+        expect(widenKeep([{ start: 100, end: 200 }], 0.8)).toEqual([{ start: 99.2, end: 200 }]);
+    });
+
+    test('0 より前には戻さない', () => {
+        expect(widenKeep([{ start: 0.3, end: 60 }], 0.8)).toEqual([{ start: 0, end: 60 }]);
+    });
+
+    test('前の区間に食い込まない', () => {
+        // 戻した先が前の区間の中なら、そこで止める (同じところを2回書き出さない)
+        const keep = [
+            { start: 0, end: 100 },
+            { start: 100.5, end: 200 },
+        ];
+
+        expect(widenKeep(keep, 0.8)).toEqual([{ start: 0, end: 200 }]);
+    });
+
+    test('離れている区間は1つにまとめない', () => {
+        const keep = [
+            { start: 0, end: 100 },
+            { start: 130, end: 200 },
+        ];
+
+        expect(widenKeep(keep, 0.8)).toEqual([
+            { start: 0, end: 100 },
+            { start: 129.2, end: 200 },
+        ]);
     });
 });
 

@@ -2,7 +2,15 @@ import { existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } fr
 import { dirname } from 'node:path';
 import { encodeSource } from '../source';
 import type { EncodeJob, EncodePhase, Recording, VideoCodec } from '../types';
-import { type CmDetection, chapterMetadata, detectCm, invertRanges, probeVideo, type Range } from './cm';
+import {
+    type CmDetection,
+    chapterMetadata,
+    detectCm,
+    invertRanges,
+    probeVideo,
+    type Range,
+    widenKeep,
+} from './cm';
 import { config } from './config';
 import { database, now, queryOne } from './db';
 import { emit } from './events';
@@ -87,16 +95,35 @@ function resolveCodec(codec: VideoCodec): 'av1' | 'h264' {
     return chosen === 'none' ? 'av1' : chosen;
 }
 
+/**
+ * **画素を正方形に直す。**
+ *
+ * 地上波のHDは 1440x1080 で送られてきて、画素が横長 (SAR 4:3) であることを
+ * 別に添えて 16:9 に見せている。ffmpeg はその添え書きをそのまま写すので、
+ * 出来上がりも 1440x1080 + SAR 4:3 になる。
+ *
+ * ところが**添え書きを見ないプレイヤーがある。** Android の VLC は
+ * ハードウェア再生のとき画素の数だけを見るので、4:3 に潰れて出る (実機で確認)。
+ *
+ * 横を SAR ぶん伸ばして 1920x1080 にし、SAR を 1 にしておけば、
+ * どのプレイヤーでも同じ形で出る。もともと正方形の素材 (1920x1080) では
+ * 何も変わらない。奇数幅にならないよう2の倍数に丸める
+ */
+const SQUARE_PIXELS = 'scale=trunc(iw*sar/2)*2:ih,setsar=1';
+
 function videoArgs(codec: 'av1' | 'h264', smooth: boolean): { filter: string; encoder: string[] } {
     if (codec === 'h264') {
         return {
-            filter: `${deinterlace(smooth)},format=yuv420p`,
+            filter: `${deinterlace(smooth)},${SQUARE_PIXELS},format=yuv420p`,
             // 実測で AV1 とほぼ同じ速さ。SVT-AV1 の既定より遅い preset を
             // 指定すると逆に倍かかるので、どちらも既定のままにしてある
             encoder: ['libx264', '-preset', 'medium', '-crf', '22'],
         };
     }
-    return { filter: `${deinterlace(smooth)},format=yuv420p10le`, encoder: ['libsvtav1'] };
+    return {
+        filter: `${deinterlace(smooth)},${SQUARE_PIXELS},format=yuv420p10le`,
+        encoder: ['libsvtav1'],
+    };
 }
 
 const DUAL_MONO = 2;
@@ -143,6 +170,15 @@ export interface EncodeOptions {
      * denpa が別に作って渡す (src/lib/server/subtitle.ts)。無ければ字幕は入らない
      */
     pgsFile?: string | null;
+    /**
+     * 映像が始まるまでの間(秒)。**出来上がりの映像を 0 秒から始めるために引く。**
+     *
+     * TS は音声のほうが先に始まっていることが多く、実機の録画では映像の1コマ目が
+     * 0.667 秒あとだった。そのまま焼くと出来上がりの映像も 0.667 秒から始まる。
+     * 時刻をそのまま読むプレイヤーなら合っているが、**1コマ目を 0 秒として数える
+     * プレイヤー**ではそのぶん字幕が早く出る (実機で「字幕が少し早い」として出た)
+     */
+    videoStart?: number;
 }
 
 /**
@@ -226,6 +262,17 @@ export function buildArgs(
     // トラックのdefaultフラグを明示(未設定だとプレイヤーが自動選択せず音声が出ないことがある。
     // 字幕は上で入れたときだけ立てる)
     args.push('-disposition:v:0', 'default', '-disposition:a:0', 'default');
+    /*
+     * **映像を 0 秒から始める。**
+     *
+     * 音声のほうが先に始まっている TS では、そのまま焼くと映像も途中から
+     * 始まる (実機で 0.667 秒)。1コマ目を 0 秒として数えるプレイヤーでは
+     * そのぶん字幕だけが早く出る。全部のトラックを同じだけ前へ寄せれば、
+     * どちらの数え方でも合う (前へ出すぎた頭は入れ物側で 0 に詰められる)
+     */
+    const start = options.videoStart ?? 0;
+    if (start > 0.05) args.push('-output_ts_offset', String(-start));
+
     // 進捗を key=value 形式で標準出力に吐かせる。stderr の人間向けログを目視パースするより確実
     args.push('-progress', 'pipe:1');
     /*
@@ -591,7 +638,16 @@ async function prepareCm(
     if (detection.cm.length === 0) return none;
 
     if (recording.cm_cut === 'cut') {
-        return { keep: invertRanges(detection.cm, detection.duration), chaptersFile: null };
+        /*
+         * **頭を少し戻してから切る。** 切り出しはキーフレーム単位なので、
+         * 判定どおりの位置から始めると本編の頭が1 GOP ぶん削れる (widenKeep)。
+         * チャプターにするほうは戻さない — あちらは切らないので、位置は
+         * 判定どおりのほうが正しい
+         */
+        return {
+            keep: widenKeep(invertRanges(detection.cm, detection.duration), config.cmCutMargin),
+            chaptersFile: null,
+        };
     }
 
     const chaptersFile = `${input}.chapters.txt`;
@@ -795,6 +851,8 @@ async function runJob(jobId: number): Promise<void> {
     if (Number.isFinite(measured.width) && Number.isFinite(measured.height)) {
         encodeOptions.canvasSize = `${measured.width}x${measured.height}`;
     }
+    // 映像が始まるまでの間。全部のトラックをこのぶん前へ寄せて 0 秒から始める
+    encodeOptions.videoStart = measured.videoStart;
 
     /*
      * 放送どおりに描いた字幕を PGS にしておく。

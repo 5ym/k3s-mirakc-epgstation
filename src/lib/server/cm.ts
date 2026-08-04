@@ -209,6 +209,33 @@ export function invertRanges(ranges: Range[], duration: number): Range[] {
 }
 
 /**
+ * 残す区間の**頭を少し前へ戻す**。
+ *
+ * 切り出しは `-ss` で頭出ししてから `-c copy` するので、**キーフレーム単位**に
+ * なる。ffmpeg は指定した時刻の次のキーフレームから書き出すため、本編の頭が
+ * 1 GOP ぶん (地上波の MPEG-2 で 0.5 秒ほど) 削れることがある。実機でも
+ * 「本編の頭が一瞬欠ける」形で出ていた。
+ *
+ * 戻したぶんだけ CM の尻が残るが、**本編を削るよりそちらのほうが被害が小さい**
+ * (この判断は `tooMuchCm` と同じ)。
+ *
+ * 戻した結果 前の区間とくっついたら1つにまとめる (切り出しが1回減る)。
+ */
+export function widenKeep(keep: Range[], margin: number): Range[] {
+    const out: Range[] = [];
+    for (const range of [...keep].sort((a, b) => a.start - b.start)) {
+        const previous = out.at(-1);
+        const start = Math.max(0, range.start - margin, previous?.end ?? 0);
+        if (previous !== undefined && start <= previous.end) {
+            previous.end = Math.max(previous.end, range.end);
+            continue;
+        }
+        out.push({ start, end: range.end });
+    }
+    return out;
+}
+
+/**
  * ffmetadata 形式のチャプター定義。本編とCMを交互のチャプターにして、
  * プレイヤーのチャプター送りでCMを飛ばせるようにする(ファイルは切らない)。
  */
@@ -280,7 +307,7 @@ export function parseFrameRate(value: string | undefined): number {
  */
 export async function probeVideo(
     input: string,
-): Promise<{ duration: number; fps: number; width: number; height: number }> {
+): Promise<{ duration: number; fps: number; width: number; height: number; videoStart: number }> {
     const read = async (args: string[]): Promise<string> => {
         const proc = Bun.spawn([config.ffprobe, '-v', 'error', ...args, input], {
             stdout: 'pipe',
@@ -295,6 +322,7 @@ export async function probeVideo(
     let fps = NaN;
     let width = NaN;
     let height = NaN;
+    let videoStart = NaN;
     try {
         // `nk=1` (鍵を出さない) にはしない。鍵で引くために必ず `key=value` で受ける
         const format = fields(await read(['-show_entries', 'format=duration', '-of', 'default=nw=1']));
@@ -305,7 +333,7 @@ export async function probeVideo(
                 '-select_streams',
                 'v:0',
                 '-show_entries',
-                'stream=avg_frame_rate,width,height',
+                'stream=avg_frame_rate,width,height,start_time',
                 '-of',
                 'default=nw=1',
             ]),
@@ -313,6 +341,7 @@ export async function probeVideo(
         fps = parseFrameRate(stream.get('avg_frame_rate'));
         width = Number(stream.get('width'));
         height = Number(stream.get('height'));
+        videoStart = Number(stream.get('start_time'));
     } catch {
         // ffprobe が使えない環境。呼ぶ側が NaN を見て諦める
     }
@@ -324,6 +353,16 @@ export async function probeVideo(
         // みなすので、渡さないと 1920x1080 の録画で字幕だけ横に伸びる
         width: positive(width),
         height: positive(height),
+        /**
+         * **映像が始まるまでの間。** TS は音声のほうが先に始まっていることが多く、
+         * 実機の録画では映像の1コマ目が 0.667 秒あとだった。
+         *
+         * そのまま焼くと出来上がりの映像も 0.667 秒から始まる。時刻をそのまま
+         * 読むプレイヤーなら合っているが、**1コマ目を 0 秒として数えるプレイヤー**
+         * では、そのぶん字幕が早く出る (実機で「字幕が少し早い」として出ていた)。
+         * ずらすのに使う (encoder.buildArgs の `-output_ts_offset`)
+         */
+        videoStart: Number.isFinite(videoStart) && videoStart > 0 ? videoStart : 0,
     };
 }
 
