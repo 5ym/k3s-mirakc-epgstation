@@ -183,3 +183,43 @@ export async function ping(): Promise<{ ok: boolean; tuners?: number; error?: st
         return { ok: false, error: String(error) };
     }
 }
+
+/**
+ * **同じ TS を指している枠か。** 指していれば、先に見つけたほうの名前を返す。
+ *
+ * 衛星は1つの周波数に何本もの TS が相乗りしていて、`BS01_0` のような
+ * **相対番号**で選ぶ。ところが実際に何本乗っているかは中継ごとに違い、
+ * 無い番号を指すと**復調器は先頭の TS を返す** (断ってはくれない)。
+ *
+ * その結果、実機では 35 枠のうち **9 枠が既に知っている TS の写し**だった
+ * (`BS01_3` = `BS01_0`、`BS05_2` と `BS05_3` = `BS05_0` …)。
+ *
+ * **中身は1つも減りません。** 実機で見つかった BS の 26 TS は、放送自身が
+ * 名乗っている 26 TS と一致していました (docs/roadmap.md)。
+ */
+export function twinOf(found: Iterable<AgentChannel>, entry: AgentChannel): string | null {
+    // TSID が分からないものは判断できない。地上波は1周波数1TSなので、そもそも起きない
+    if (entry.transportStreamId <= 0) return null;
+    for (const other of found) {
+        if (other.type === entry.type && other.transportStreamId === entry.transportStreamId) {
+            return other.channel;
+        }
+    }
+    return null;
+}
+
+/**
+ * 写しを落とした一覧。**先に来たほうを残す** (スキャンと同じ決まり)。
+ *
+ * スキャンでも落としているが、**控えを書いたのが古いスキャンだと写しが残る。**
+ * 実機の `channels.json` がまさにそれで、BS 35 枠のうち 9 枠が写しのまま残り、
+ * 番組表集めが**同じ TS を二度開き続けて**いた。開く側でも落としておけば、
+ * 控えが何であれ二度は開かない。
+ */
+export function withoutTwins(channels: AgentChannel[]): AgentChannel[] {
+    const kept: AgentChannel[] = [];
+    for (const channel of channels) {
+        if (twinOf(kept, channel) === null) kept.push(channel);
+    }
+    return kept;
+}

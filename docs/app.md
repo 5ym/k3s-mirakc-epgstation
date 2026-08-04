@@ -15,7 +15,7 @@ EPGStation の置き換えとして作ったもので、エンコード設定は
 
 | ファイル | 役割 |
 | --- | --- |
-| `src/lib/server/tuner.ts` | チューナーエージェントへの口 (選局・チューナー一覧) |
+| `src/lib/server/tuner.ts` | チューナーエージェントへの口 (選局・チューナー一覧)。同じ TS を指す枠の判定もここ |
 | `src/lib/server/agent-events.ts` | エージェントからの知らせ (`/denpa/events`) の購読 |
 | `src/lib/server/epg.ts` | 局と番組表のDB書き込み、予約時刻の追従 |
 | `src/lib/server/epg-collect.ts` | 番組表集め (どのチャンネルを何本並べて開くか) |

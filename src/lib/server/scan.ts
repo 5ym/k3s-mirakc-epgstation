@@ -22,7 +22,14 @@ import { config } from './config';
 import { sync } from './epg';
 import { collectOnce } from './epg-collect';
 import { emit } from './events';
-import { type AgentChannel, getTuners, openChannelStream, putChannels, TunerBusyError } from './tuner';
+import {
+    type AgentChannel,
+    getTuners,
+    openChannelStream,
+    putChannels,
+    TunerBusyError,
+    twinOf,
+} from './tuner';
 
 /**
  * 1チャンネルあたりの待ち時間。
@@ -125,31 +132,6 @@ export async function readServices(
     }
     const missing = reader.network === null ? 'NIT' : 'SDT';
     return { services: null, error: `${missing} が来ませんでした${detail}`, signal };
-}
-
-/**
- * **同じ TS を指している枠か。** 指していれば、先に見つけたほうの名前を返す。
- *
- * 衛星は1つの周波数に何本もの TS が相乗りしていて、`BS01_0` のような
- * **相対番号**で選ぶ。ところが実際に何本乗っているかは中継ごとに違い、
- * 無い番号を指すと**復調器は先頭の TS を返す** (断ってはくれない)。
- *
- * その結果、実機では 35 枠のうち **9 枠が既に知っている TS の写し**だった
- * (`BS01_3` = `BS01_0`、`BS05_2` と `BS05_3` = `BS05_0` …)。放っておくと
- * 番組表集めが同じ TS を二度三度と開きに行くので、ここで落とす。
- *
- * **中身は1つも減りません。** 実機で見つかった BS の 26 TS は、放送自身が
- * 名乗っている 26 TS と一致していました (docs/roadmap.md)。
- */
-export function twinOf(found: Iterable<AgentChannel>, entry: AgentChannel): string | null {
-    // TSID が分からないものは判断できない。地上波は1周波数1TSなので、そもそも起きない
-    if (entry.transportStreamId <= 0) return null;
-    for (const other of found) {
-        if (other.type === entry.type && other.transportStreamId === entry.transportStreamId) {
-            return other.channel;
-        }
-    }
-    return null;
 }
 
 /** スキャンで分かったことを1件にまとめる */

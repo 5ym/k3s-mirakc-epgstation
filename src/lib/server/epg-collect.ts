@@ -20,7 +20,14 @@ import { savePrograms, settle, syncServices } from './epg';
 import { emit } from './events';
 import { resolveConflicts } from './scheduler';
 import { chunks } from './stream';
-import { type AgentChannel, getChannels, getTuners, openChannelStream, serviceKey } from './tuner';
+import {
+    type AgentChannel,
+    getChannels,
+    getTuners,
+    openChannelStream,
+    serviceKey,
+    withoutTwins,
+} from './tuner';
 
 /**
  * 最後に集め終わった時刻。`type:channel` ごと。
@@ -34,19 +41,46 @@ import { type AgentChannel, getChannels, getTuners, openChannelStream, serviceKe
  */
 const collected = new Map<string, number>();
 
-/** その物理チャンネルを最後に集めた時刻。**番組の行から数える** */
-function lastCollected(): Map<string, number> {
-    const rows = queryAll<{ type: string; channel: string; at: number }>(
-        `SELECT s.type, s.channel, MAX(p.updated_at) AS at
-           FROM services s JOIN programs p ON p.service_id = s.id
-          GROUP BY s.type, s.channel`,
+/**
+ * その物理チャンネルを最後に集めた時刻。**番組の行から数える。**
+ *
+ * **数える鍵は局**で、`services.channel` は見ない。あの列に入るのは
+ * 「最後に取り込んだときの枠の名前」1つだけなので、**同じ TS を指す枠が
+ * 2つあると片方が必ず「一度も集めていない」ことになる**。実機の BS が
+ * まさにそれで、9枠が永久に「まっさら」に見えて周回のたびに開かれていた。
+ *
+ * 局で引けば、どの枠から開いても同じ時刻が出る。
+ */
+function lastCollected(channels: AgentChannel[]): Map<string, number> {
+    const perService = new Map(
+        queryAll<{ service_id: number; at: number }>(
+            'SELECT service_id, MAX(updated_at) AS at FROM programs GROUP BY service_id',
+        ).map((row) => [row.service_id, row.at]),
     );
-    const map = new Map(rows.map((row) => [`${row.type}:${row.channel}`, row.at]));
+
+    const map = new Map<string, number>();
+    for (const channel of channels) {
+        const at = lastOf(perService, channel);
+        if (at > 0) map.set(key(channel), at);
+    }
     // 覚えているほうが新しければそちらを採る (取り込む番組が0件だった回)
     for (const [name, at] of collected) {
         if (at > (map.get(name) ?? 0)) map.set(name, at);
     }
     return map;
+}
+
+/**
+ * そのチャンネルを最後に集めた時刻。**乗っている局のうちいちばん新しいもの。**
+ *
+ * 1本開けば乗っている局が全部まとめて埋まるので、どれか1つでも新しければ
+ * そのチャンネルは行ったばかり。一度も入っていなければ 0 (=まっさら)。
+ */
+export function lastOf(perService: Map<number, number>, channel: AgentChannel): number {
+    const times = channel.services
+        .map((service) => perService.get(serviceKey(channel.networkId, service.serviceId)))
+        .filter((at) => at !== undefined);
+    return times.length === 0 ? 0 : Math.max(...times);
 }
 
 const key = (channel: AgentChannel) => `${channel.type}:${channel.channel}`;
@@ -254,10 +288,17 @@ export function collectNow(): Promise<number> {
 }
 
 async function run(): Promise<number> {
-    const channels = await getChannels().catch(() => [] as AgentChannel[]);
-    if (channels.length === 0) return 0;
+    const all = await getChannels().catch(() => [] as AgentChannel[]);
+    if (all.length === 0) return 0;
     // 局の一覧はここでも取り込んでおく。スキャンの直後に呼ばれることがある
-    syncServices(channels);
+    syncServices(all);
+
+    /*
+     * **同じ TS を指す枠は1回だけ開く。** スキャンでも落としているが、控えを
+     * 書いたのが古いスキャンだと写しが残る。実機の BS はこれで 35 枠のうち
+     * 9 枠が写しのままで、**衛星の1周が 35 回**になっていた (実体は 26 TS)
+     */
+    const channels = withoutTwins(all);
 
     const reach = coverage();
     const at = Date.now();
@@ -270,7 +311,7 @@ async function run(): Promise<number> {
      * さっき集め終えたところで押すと1本も回らず、何も起きていないように見える。
      * 押した人は「いま集め直したい」なので、全部回って薄いほうから行く
      */
-    const last = lastCollected();
+    const last = lastCollected(channels);
     const lastOf = (channel: AgentChannel) => last.get(key(channel)) ?? 0;
 
     const targets = boosted

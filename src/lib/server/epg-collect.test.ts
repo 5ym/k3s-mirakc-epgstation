@@ -9,7 +9,7 @@ import type { AgentChannel } from './tuner';
  * なっていた ([config.ts](config.ts) の epgChannelTimeout)。
  */
 const { config } = await import('./config');
-const { pickChannels, reachOf } = await import('./epg-collect');
+const { lastOf, pickChannels, reachOf } = await import('./epg-collect');
 const { serviceKey } = await import('./tuner');
 
 const NETWORK = 32391;
@@ -109,5 +109,35 @@ describe('pickChannels', () => {
         expect(pickChannels([channel('T16', [1])], full, () => stale, NOW).map((c) => c.channel)).toEqual([
             'T16',
         ]);
+    });
+});
+
+/*
+ * **最後に集めた時刻は局から引く。**
+ *
+ * `services.channel` に入るのは「最後に取り込んだときの枠の名前」1つだけなので、
+ * 同じ TS を指す枠が2つあると片方が必ず「一度も集めていない」ことになる。
+ * 実機の BS がまさにそれで、9枠が永久にまっさらに見えて周回のたびに開かれていた。
+ */
+describe('最後に集めた時刻', () => {
+    const AT = Date.UTC(2026, 7, 4, 3, 0, 0);
+
+    test('乗っている局のうち、いちばん新しいものを採る', () => {
+        const perService = new Map([
+            [serviceKey(NETWORK, 101), AT - 60_000],
+            [serviceKey(NETWORK, 102), AT],
+        ]);
+
+        expect(lastOf(perService, channel('BS01_0', [101, 102]))).toBe(AT);
+    });
+
+    test('同じ局を指す別の枠からでも、同じ時刻が出る', () => {
+        const perService = new Map([[serviceKey(NETWORK, 101), AT]]);
+
+        expect(lastOf(perService, channel('BS01_3', [101]))).toBe(AT);
+    });
+
+    test('1件も入っていなければ「まっさら」', () => {
+        expect(lastOf(new Map(), channel('BS01_0', [101]))).toBe(0);
     });
 });

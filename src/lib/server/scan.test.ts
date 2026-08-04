@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { nitSection, packetize, sdtSection } from '../ts/synth';
-import { channelEntry, channelsFor, readServices, twinOf } from './scan';
-import type { AgentChannel } from './tuner';
+import { channelEntry, channelsFor, readServices } from './scan';
+import { type AgentChannel, twinOf, withoutTwins } from './tuner';
 
 /**
  * 総当たりそのもの (`Scanner`) はここでは試さない。**エージェントに選局を
@@ -121,6 +121,29 @@ describe('同じ TS を指している枠', () => {
         const found = [entry('BS01_0', 0)];
 
         expect(twinOf(found, entry('BS01_1', 0))).toBeNull();
+    });
+
+    /*
+     * **開く側でも落とす。** スキャンで落としていても、控えを書いたのが
+     * 古いスキャンなら写しが残る。実機の `channels.json` がまさにそれで、
+     * BS 35 枠のうち 9 枠が写しのまま、番組表集めが同じ TS を二度開いていた
+     */
+    test('写しを落とすと、先に来たほうだけ残る', () => {
+        const kept = withoutTwins([
+            entry('BS01_0', 16400),
+            entry('BS01_1', 16401),
+            entry('BS01_3', 16400),
+            entry('BS03_0', 16432),
+            entry('BS03_3', 16432),
+        ]);
+
+        expect(kept.map((channel) => channel.channel)).toEqual(['BS01_0', 'BS01_1', 'BS03_0']);
+    });
+
+    test('TSID が読めないものは残す', () => {
+        const kept = withoutTwins([entry('BS01_0', 0), entry('BS01_1', 0)]);
+
+        expect(kept).toHaveLength(2);
     });
 });
 
