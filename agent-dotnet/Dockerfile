@@ -7,7 +7,8 @@
 # bun 版 (agent/) と**同じ口**を持ち、同じ適合テスト
 # (agent/conformance.test.ts) を通る。入れ替えは像のタグを変えるだけ。
 # ---------------------------------------------------------------------------
-FROM mcr.microsoft.com/dotnet/sdk:10.0-trixie AS build
+# 既定の像がそのまま trixie (`-trixie` という札は無い)
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /build
 # AOT のリンクに clang と zlib が要る
 RUN apt-get update && \
