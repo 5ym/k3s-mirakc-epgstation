@@ -12,7 +12,7 @@ import {
     parseSilences,
     widenKeep,
 } from './cm';
-import { cmRatio, parseLogoFrames, parseTrimRanges, tooMuchCm, withLogoLevel } from './cm-jls';
+import { cmRatio, parseLogoFrames, parseTrimRanges, tooMuchCm } from './cm-jls';
 
 describe('parseSilences', () => {
     test('silencedetect のログから無音区間と尺を取る', () => {
@@ -312,21 +312,9 @@ describe('ロゴの写っているコマ', () => {
     });
 });
 
-describe('判定の規則に設定を差し込む', () => {
-    const rule = [
-        '#----- ロゴ情報の優先度 ---',
-        'Default logo_level    6     # 構成推測時のロゴ使用',
-        'Default logo_revise   23    # ロゴ使用関連の構成変更',
-    ].join('\n');
-
-    test('logo_level だけ書き換える', () => {
-        const out = withLogoLevel(rule, 8);
-        expect(out).toContain('Default logo_level    8     # 構成推測時のロゴ使用');
-        // 隣の設定には触らない
-        expect(out).toContain('Default logo_revise   23');
-    });
-
-    test('その行が無い規則はそのまま', () => {
-        expect(withLogoLevel('Default autocm_code   6', 8)).toBe('Default autocm_code   6');
-    });
-});
+/*
+ * ロゴをどれだけ当てにするか (`logo_level`) は `-set` で外から渡す。
+ * 規則ファイルの `Default` は未定義のときだけ効くので、先に決めたほうが勝つ。
+ * 書き換えた写しを渡していた頃は、規則が JL フォルダの外へ出て隣のファイルを
+ * 見失っていた (実測で `warning: not found setup-file JL_common.txt`)
+ */

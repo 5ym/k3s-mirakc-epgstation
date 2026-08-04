@@ -77,15 +77,19 @@ RUN apt-get update && \
 #
 # **持ってくるのが4つあるのは、道具が4つあるからではない。**
 #   dtvindex      … 下の2つが TS を読むための静的ライブラリ (実行ファイルではない)
-#   chapter_exe   ┐
-#   logoframe     ├ 実行ファイル3つ。この順で呼ぶ (cm-jls.ts)
-#   join_logo_scp ┘ 判定規則 (JL/) もここのものを使う
+#   chapter_exe   ┐ 本家 (nekopanda) の Linux 移植。tobitti0 版
+#   logoframe     ┘
+#   join_logo_scp … 実行ファイルと判定規則 (JL/)。**yobibi 版**
 #
-# **判定規則は join_logo_scp_trial から採らない。** 名前から本家に見えるが、
-# あちらの JL は 2020年で止まっていて6本しかなく、こちらは 2021年まで手が
-# 入っていて12本ある (`-N` が `-NR` に直り、設定を差し込む MemCall の口と
-# common/data/doc が付く)。**規則と実行ファイルは対で出ている**ので、
-# 組むほうと同じリポジトリから採るのが筋。4.4MB の clone も1つ減る
+# **join_logo_scp だけ出どころが違う。** tobitti0 版は ver4.0 で 2021年に
+# 止まっているが、本家筋の yobibi 版は ver5.1.1 (2026年) まで続いていて、
+# **ver5.1 で Linux が本流に入った** — 移植版を使う理由がもう無い。
+# 効くのは 5.1.1 の「15秒単位からの差認識が正常にできていなかった所を修正」で、
+# ここは CM判定の芯にあたる。
+#
+# **実行ファイルと JL は必ず対で採る。** JL の文字コードが違い (4.0 は Shift-JIS、
+# 5.x は BOM付きUTF-8)、取り違えると `error: wrong command in` で
+# 「何も切らない」結果になる。実際に組んで確かめた。
 # ---------------------------------------------------------------------------
 FROM docker.io/library/debian:trixie-slim AS jls
 ENV DEBIAN_FRONTEND=noninteractive
@@ -99,7 +103,7 @@ WORKDIR /src
 RUN git clone --depth 1 https://github.com/tobitti0/dtvindex.git && \
     git clone --depth 1 https://github.com/tobitti0/chapter_exe.git && \
     git clone --depth 1 https://github.com/tobitti0/logoframe.git && \
-    git clone --depth 1 https://github.com/tobitti0/join_logo_scp.git
+    git clone --depth 1 https://github.com/yobibi/join_logo_scp.git
 
 RUN make -C dtvindex build/libdtvindex.a && \
     make -C chapter_exe/src WITH_AVISYNTH=no DTVINDEX_DIR=/src/dtvindex && \

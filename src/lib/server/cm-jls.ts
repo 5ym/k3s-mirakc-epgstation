@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { invertRanges, MAX_CM_RATIO, type Range } from './cm';
 import { config } from './config';
@@ -68,19 +68,6 @@ export function parseLogoFrames(text: string, fps: number): Range[] {
         }
     }
     return ranges;
-}
-
-/**
- * 判定の規則。**ロゴをどれだけ当てにするかだけ差し替える。**
- *
- * join_logo_scp は `-incmd` に渡した規則ファイルで動く。中の `logo_level` が
- * 「番組の構成を推測するときにロゴ情報をどれだけ優先するか」(1:使わない
- * 〜 8:最優先) で、**ここが実質の閾値**。ファイルごと差し替えるのではなく、
- * 付いてくる標準の規則からこの1行だけ書き換える — 他の設定まで抱えると、
- * 元が更新されたときに追従できなくなる
- */
-export function withLogoLevel(rule: string, level: number): string {
-    return rule.replace(/^(\s*Default\s+logo_level\s+)\d+/m, `$1${level}`);
 }
 
 /** CM判定が占める割合 (%) */
@@ -161,21 +148,7 @@ function workFiles(input: string) {
         cut: `${base}.cut.avs`,
         /** join_logo_scp が出すシーン一覧。使わない */
         scpout: `${base}.jlscp.txt`,
-        /** 設定を差し込んだ判定の規則 (`withLogoLevel`) */
-        rule: `${base}.jl.txt`,
     };
-}
-
-/**
- * 判定の規則を、設定を差し込んで置く。読めなければ付いてくるものをそのまま使う。
- */
-function ruleFile(path: string, level: number): string {
-    try {
-        writeFileSync(path, withLogoLevel(readFileSync(config.jlsRule, 'utf8'), level));
-        return path;
-    } catch {
-        return config.jlsRule;
-    }
 }
 
 export interface JlsOptions {
@@ -278,7 +251,20 @@ export async function detectWithJls(
                 '-inscp',
                 work.scenes,
                 '-incmd',
-                ruleFile(work.rule, settings().logoLevel),
+                config.jlsRule,
+                /*
+                 * **ロゴをどれだけ当てにするか** (1:使わない 〜 8:最優先)。
+                 *
+                 * 規則ファイルの中では `Default logo_level 6` と書いてあり、
+                 * `Default` は**未定義のときだけ**効くので、ここで先に決めれば勝つ。
+                 *
+                 * 書き換えた写しを渡していた頃は、規則が JL フォルダの外へ出て
+                 * 隣のファイルを見失っていた (`warning: not found setup-file`)。
+                 * 規則は置いたまま、変えたい1つだけを外から渡す
+                 */
+                '-set',
+                'logo_level',
+                String(settings().logoLevel),
                 '-o',
                 work.cut,
                 '-oscp',
