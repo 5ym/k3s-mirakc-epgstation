@@ -3,9 +3,9 @@ import { expect, goto, syncEpg, test } from './helpers';
 /**
  * チューナー画面。
  *
- * 選局するのはチューナーエージェント。あちらが物理チャンネルを総当たりして
- * 見つかった局を書き出す。denpa は開始を投げて進み具合を見せ、終わったら
- * 局を取り込み直して番組表を集め直す。
+ * **総当たりを回すのは denpa。** 選局はエージェントに頼むが、NIT と SDT を
+ * 解いて局名を取るのはこちらで、見つけた顔ぶれをエージェントに預ける。
+ * ここは 13〜62ch を本当に1本ずつ開いていて、偽の放送に居るのは T16 と T21 だけ。
  */
 test.describe('チューナー画面', () => {
     test.afterEach(async ({ request, stack }) => {
@@ -22,9 +22,9 @@ test.describe('チューナー画面', () => {
 
         await card.getByTestId('scan-start').click();
 
-        await expect(card.getByTestId('scan-state')).toHaveText('完了', { timeout: 30_000 });
-        // 総当たりなので、どこまで進んだかを割合で出せる
-        await expect(card.getByTestId('scan-count')).toContainText('4 / 4');
+        await expect(card.getByTestId('scan-state')).toHaveText('完了', { timeout: 60_000 });
+        // 総当たりなので、どこまで進んだかを割合で出せる (地上波は 13〜62ch)
+        await expect(card.getByTestId('scan-count')).toContainText('50 / 50');
         // 受信できた分だけ数える。信号が無かった分は数に入らない
         await expect(card.getByTestId('scan-found')).toContainText('2');
         await expect(card.getByTestId('scan-log')).toContainText('2 サービス');

@@ -61,12 +61,13 @@ const paths = () => ({
 });
 
 const get = (path: string, signal?: AbortSignal) => fetch(`${BASE}${path}`, { signal });
-const post = (path: string, body?: unknown) =>
+const request = (method: string, path: string, body?: unknown) =>
     fetch(`${BASE}${path}`, {
-        method: 'POST',
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body ?? {}),
     });
+const post = (path: string, body?: unknown) => request('POST', path, body);
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -330,53 +331,41 @@ describe('チャンネル', () => {
         expect(found.map((c) => c.channel).sort()).toEqual(['BS03_0', 'BS11_0', 'T16', 'T21']);
     });
 
-    test('中断すると何も書かない', async () => {
-        const before = readFileSync(paths().channels, 'utf8');
-        expect((await post('/denpa/scan', { types: ['GR'] })).status).toBe(200);
-        await sleep(300);
-        expect((await post('/denpa/scan/stop')).status).toBe(200);
+    /**
+     * **中身を作るのは denpa。** 総当たりの選局はエージェントに頼むが、
+     * NIT も SDT も解かないので「何が居たか」は分からない。ここは
+     * 預かって配るだけ ([roadmap.md](../docs/roadmap.md))
+     */
+    test('預かったチャンネルを、探した種別だけ差し替える', async () => {
+        const put = await request('PUT', '/denpa/channels', {
+            scanned: ['GR'],
+            channels: [
+                {
+                    type: 'GR',
+                    channel: 'T25',
+                    networkId: 32391,
+                    transportStreamId: 32391,
+                    remoteControlKeyId: 9,
+                    services: [{ serviceId: 1, serviceType: 1, name: 'あたらしい局' }],
+                },
+            ],
+        });
+        expect(put.status).toBe(200);
 
-        const until = Date.now() + 60_000;
-        for (;;) {
-            const state = (await (await get('/denpa/scan')).json()) as { state: string };
-            if (state.state !== 'running') {
-                expect(state.state).toBe('canceled');
-                break;
-            }
-            if (Date.now() > until) throw new Error('中断できませんでした');
-            await sleep(200);
-        }
-        // 押した人は「やめたい」だけで「消したい」ではない
-        expect(readFileSync(paths().channels, 'utf8')).toBe(before);
+        const found = (await (await get('/denpa/channels')).json()) as ChannelEntry[];
+        expect(found.filter((c) => c.type === 'GR').map((c) => c.channel)).toEqual(['T25']);
+        // 地上波だけ差し替えたので、衛星はそのまま残っている
+        expect(found.filter((c) => c.type === 'BS').map((c) => c.channel)).toEqual(['BS03_0', 'BS11_0']);
+        // 書き換えたら知らせる。denpa はこれを合図に取り込み直す
+        expect(readFileSync(paths().channels, 'utf8')).toContain('あたらしい局');
     });
 
-    /**
-     * 総当たりを本当に回す。**局名は SDT の ARIB 文字符号から読む** ので、
-     * ここが通れば `ts/aribtext.ts` も `ts/psi.ts` も繋がっている
-     */
-    test('総当たりで局を見つけ、探した種別だけ差し替える', async () => {
-        expect((await post('/denpa/scan', { types: ['GR'] })).status).toBe(200);
-
-        const until = Date.now() + 180_000;
-        for (;;) {
-            const state = (await (await get('/denpa/scan')).json()) as {
-                state: string;
-                error: string | null;
-            };
-            if (state.state === 'done') break;
-            if (state.state !== 'running') throw new Error(`スキャンが ${state.state}: ${state.error}`);
-            if (Date.now() > until) throw new Error('スキャンが終わりませんでした');
-            await sleep(500);
-        }
-
-        const found = JSON.parse(readFileSync(paths().channels, 'utf8')) as ChannelEntry[];
-        const gr = found.filter((c) => c.type === 'GR');
-        expect(gr.map((c) => c.channel)).toEqual(['T16', 'T21']);
-        expect(gr[0].networkId).toBe(32391);
-        expect(gr[0].services.map((s) => s.name)).toEqual(['ＭＸデータ１', 'ＴＯＫＹＯ　ＭＸ']);
-        // 地上波だけ探したので、衛星はそのまま残っている
-        expect(found.filter((c) => c.type === 'BS').map((c) => c.channel)).toEqual(['BS03_0', 'BS11_0']);
-    }, 200_000);
+    test('1件も無い差し替えは断る。今まで録れていた局を消さない', async () => {
+        const before = readFileSync(paths().channels, 'utf8');
+        const put = await request('PUT', '/denpa/channels', { scanned: ['GR'], channels: [] });
+        expect(put.status).toBe(400);
+        expect(readFileSync(paths().channels, 'utf8')).toBe(before);
+    });
 });
 
 describe('カードとスクランブル解除', () => {

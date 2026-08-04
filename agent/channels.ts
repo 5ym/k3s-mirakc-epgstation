@@ -6,12 +6,16 @@
  * 分けてしまえば済む話**だった。こちらは丸ごと書き直してよい。
  *
  * - `tuners.yml` … 繋いである機材。**人が書き、こちらは読むだけ**
- * - `channels.json` … スキャンで分かったこと。**こちらが書く**
+ * - `channels.json` … スキャンで分かったこと。**denpa が預けてくる**
+ *
+ * 中身を作るのはこちらではない。総当たりの選局こそ頼まれるが、NIT も SDT も
+ * 解かないので「何が居たか」は分からない。読むのは denpa
+ * ([roadmap.md](../docs/roadmap.md))。それでも控えを持つのはこちら側にする —
+ * アンテナに何が映るかは機材ごとの話だから。
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { FoundService } from '../src/lib/ts/psi';
 import type { TunerSpec } from './tuners';
 
 export type ChannelType = 'GR' | 'BS' | 'CS';
@@ -68,25 +72,6 @@ export function saveChannels(found: ChannelEntry[], scanned: ChannelType[]): Cha
     writeFileSync(working, JSON.stringify(merged, null, 4));
     renameSync(working, CHANNELS);
     return merged;
-}
-
-/** スキャンで分かったことを1件にまとめる */
-export function channelEntry(type: ChannelType, channel: string, services: FoundService[]): ChannelEntry {
-    const first = services[0];
-    return {
-        type,
-        channel,
-        networkId: first?.networkId ?? 0,
-        transportStreamId: first?.transportStreamId ?? 0,
-        remoteControlKeyId: first?.remoteControlKeyId ?? null,
-        services: services
-            .map((service) => ({
-                serviceId: service.serviceId,
-                serviceType: service.serviceType,
-                name: service.name,
-            }))
-            .sort((a, b) => a.serviceId - b.serviceId),
-    };
 }
 
 /**

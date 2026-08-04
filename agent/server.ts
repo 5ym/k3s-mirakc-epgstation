@@ -16,15 +16,20 @@
 
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { type ChannelType, loadChannels, loadTuners, paths, saveChannels } from './channels';
-import { CHANNEL_RANGES, channelsFor, Scanner } from './scan';
+import {
+    type ChannelEntry,
+    type ChannelType,
+    loadChannels,
+    loadTuners,
+    paths,
+    saveChannels,
+} from './channels';
 import { TunerPool } from './tuners';
 
 const PORT = Number(process.env.AGENT_PORT ?? 40773);
 /** denpa の生TSの置き場。掛かったままのTSは必ずここにある */
 const RECORDED = resolve(process.env.RECORDED_DIR ?? '/denpa-recorded');
 const RECISDB = process.env.RECISDB ?? 'recisdb';
-const LOG_LIMIT = 400;
 
 function log(message: string): void {
     console.log(`[agent] ${message}`);
@@ -137,120 +142,31 @@ async function decode(body: { input?: unknown; output?: unknown }) {
     return { ok: true, error: '' };
 }
 
-interface ScanState {
-    state: 'idle' | 'running' | 'done' | 'failed' | 'canceled';
-    phase: string;
-    log: string[];
-    scanned: number;
-    total: number;
-    channels: number;
-    error: string | null;
-    startedAt: number | null;
-    finishedAt: number | null;
-}
-
-let scan: ScanState = {
-    state: 'idle',
-    phase: '',
-    log: [],
-    scanned: 0,
-    total: 0,
-    channels: 0,
-    error: null,
-    startedAt: null,
-    finishedAt: null,
-};
-
-function push(
-    line?: string,
-    counts: { scanned?: number; channels?: number; skipped?: number } = {},
-    fields: Partial<ScanState> = {},
-): void {
-    scan = {
-        ...scan,
-        ...fields,
-        log: line === undefined ? scan.log : [...scan.log, line].slice(-LOG_LIMIT),
-        scanned: scan.scanned + (counts.scanned ?? 0) + (counts.skipped ?? 0),
-        channels: scan.channels + (counts.channels ?? 0),
-    };
-    emit('scan');
-}
-
-/** 走っているスキャン。中断のために持っておく */
-let scanner: Scanner | null = null;
-
-async function runScan(targets: [ChannelType, string[]][]): Promise<void> {
-    const running = new Scanner(pool, (progress) => push(progress.line, progress));
-    scanner = running;
-    try {
-        push('チャンネルを探しています...', {}, { phase: 'スキャン中' });
-        const found = await running.run(targets);
-
-        /*
-         * 中断されたら**何も書かない**。
-         * 途中までの結果で上書きすると、まだ回っていない種別やチャンネルの
-         * 定義が消える。押した人は「やめたい」だけで「消したい」ではない
-         */
-        if (running.aborted) {
-            push('中断しました', {}, { state: 'canceled', phase: '中断', finishedAt: Date.now() });
-            return;
-        }
-
-        // 1件も見つからないまま上書きすると、今まで録れていた局まで消える
-        if (found.length === 0) {
-            throw new Error('チャンネルが1件も見つかりませんでした。チューナーとアンテナを確認してください');
-        }
-
-        push('チャンネルを保存しています...', {}, { phase: '保存' });
-        saveChannels(
-            found,
-            targets.map(([type]) => type),
-        );
-        push('完了しました', {}, { state: 'done', phase: '完了', finishedAt: Date.now() });
-        /*
-         * 局が入れ替わった。denpa は**これを合図に取り込み直す。**
-         * mirakc を入れ直していた頃と違って、こちらは何も再起動しない —
-         * 番組表を集めるのは denpa の仕事で、あちらが自分の都合で取りに行く
-         */
-        emit('channels');
-    } catch (error) {
-        push(`失敗しました: ${error}`, {}, { state: 'failed', error: String(error), finishedAt: Date.now() });
-    } finally {
-        scanner = null;
+/**
+ * チャンネルスキャンの結果を預かる。
+ *
+ * **書いてくるのは denpa。** 総当たりの選局はこちらに頼まれるが、NIT も SDT も
+ * 解かないので「何が居たか」は分からない。読むのはあちらの仕事で、
+ * こちらは控えを持って配るだけ ([roadmap.md](../docs/roadmap.md))。
+ *
+ * 保存したら `channels` を流す。**何も再起動しない** — 取り込み直すのも
+ * 番組表を集め直すのも denpa が自分の都合でやる。
+ */
+function replaceChannels(body: { channels?: unknown; scanned?: unknown }) {
+    const found = body.channels;
+    const scanned = body.scanned;
+    if (!Array.isArray(found) || !Array.isArray(scanned) || scanned.length === 0) {
+        return { ok: false, error: 'channels と scanned が要ります', channels: [] as ChannelEntry[] };
     }
-}
+    // 1件も無いまま上書きすると、今まで録れていた局まで消える
+    if (found.length === 0) {
+        return { ok: false, error: 'チャンネルが1件もありません', channels: [] as ChannelEntry[] };
+    }
 
-function stopScan() {
-    if (scan.state !== 'running' || scanner === null)
-        return { stopped: false, message: '実行中ではありません' };
-    scanner.stop();
-    push('中断しています...', {}, { phase: '中断中' });
-    return { stopped: true, message: 'チャンネルスキャンを中断しています' };
-}
-
-function startScan(body: { types?: unknown }) {
-    const requested = Array.isArray(body.types) ? body.types : ['GR', 'BS', 'CS'];
-    const types = requested.filter((type): type is ChannelType => type in CHANNEL_RANGES);
-    if (types.length === 0) return { started: false, message: 'チャンネル種別の指定が不正です' };
-
-    // 範囲は決め打ち。放送で使う物理チャンネルは決まっていて、狭めても
-    // 総当たりの時間が少し減るだけ。狭めた結果 見つからない局が出るほうが困る
-    const targets: [ChannelType, string[]][] = types.map((type) => [type, channelsFor(type)]);
-
-    if (scan.state === 'running') return { started: false, message: '既に実行中です' };
-    scan = {
-        state: 'running',
-        phase: '準備中',
-        log: [],
-        scanned: 0,
-        total: targets.reduce((sum, [, channels]) => sum + channels.length, 0),
-        channels: 0,
-        error: null,
-        startedAt: Date.now(),
-        finishedAt: null,
-    };
-    void runScan(targets);
-    return { started: true, message: 'チャンネルスキャンを始めました' };
+    const merged = saveChannels(found as ChannelEntry[], scanned as ChannelType[]);
+    log(`チャンネルを保存しました: ${found.length} 件 (${scanned.join(', ')})`);
+    emit('channels');
+    return { ok: true, error: '', channels: merged };
 }
 
 const json = (body: unknown, status = 200) =>
@@ -311,20 +227,15 @@ export function serve(port = PORT): Bun.Server {
             if (pathname === '/denpa/stream') return openStream(url, request.signal);
             if (pathname === '/denpa/events') return eventStream();
             if (pathname === '/denpa/tuners') return json({ tuners: pool.status() });
-            if (pathname === '/denpa/channels') return json(loadChannels());
+            if (pathname === '/denpa/channels' && request.method === 'GET') return json(loadChannels());
+            if (pathname === '/denpa/channels' && request.method === 'PUT') {
+                const result = replaceChannels(await request.json());
+                return result.ok ? json(result.channels) : json({ error: result.error }, 400);
+            }
             if (pathname === '/denpa/card' && request.method === 'GET') return json(await cardStatus());
-            if (pathname === '/denpa/scan' && request.method === 'GET') return json(scan);
             if (pathname === '/denpa/decode' && request.method === 'POST') {
                 const result = await decode(await request.json());
                 return json(result, result.ok ? 200 : 500);
-            }
-            if (pathname === '/denpa/scan' && request.method === 'POST') {
-                const result = startScan(await request.json());
-                return json(result, result.started ? 200 : 409);
-            }
-            if (pathname === '/denpa/scan/stop' && request.method === 'POST') {
-                const result = stopScan();
-                return json(result, result.stopped ? 200 : 409);
             }
             return json({ ok: false, error: 'not found' }, 404);
         },

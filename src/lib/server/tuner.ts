@@ -65,6 +65,27 @@ export function getChannels(): Promise<AgentChannel[]> {
     return get<AgentChannel[]>('/denpa/channels');
 }
 
+/**
+ * チャンネルスキャンの結果を預ける。
+ *
+ * **見つけたのは denpa** (総当たりの選局はエージェントに頼むが、NIT と SDT を
+ * 読むのはこちら)。それでも控えを持つのはエージェントのほうにする —
+ * アンテナに何が映るかは機材ごとの話で、エージェントを増やせば顔ぶれも変わる。
+ *
+ * `scanned` には**探した種別**を渡す。地上波だけ探したときに全部を置き換えると
+ * BS と CS が設定から消える。
+ */
+export async function putChannels(found: AgentChannel[], scanned: ChannelType[]): Promise<AgentChannel[]> {
+    const res = await fetch(`${config.agentUrl}/denpa/channels`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channels: found, scanned }),
+        signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) throw new Error(`チャンネルを保存できません (${res.status}) ${await res.text()}`);
+    return (await res.json()) as AgentChannel[];
+}
+
 export async function getTuners(): Promise<AgentTuner[]> {
     return (await get<{ tuners: AgentTuner[] }>('/denpa/tuners')).tuners;
 }
@@ -75,7 +96,15 @@ export async function getTuners(): Promise<AgentTuner[]> {
  * **ASCII だけ**にしてある。番組名は入れず録画IDだけ渡して、読める言葉に直すのは
  * 画面側でやる (routes/tuners/+page.server.ts)。
  */
-export type StreamUse = `rec ${number}` | `logo ${string}` | `epg ${string}`;
+export type StreamUse = `rec ${number}` | `logo ${string}` | `epg ${string}` | `scan ${string}`;
+
+/**
+ * チューナーに空きが無い。**待って掛け直せば通る**ので、他の失敗と分ける。
+ *
+ * 総当たりのスキャンでここを区別できないと、録画中で塞がっていただけの
+ * チャンネルを「受信できない」と判断して設定から落としてしまう。
+ */
+export class TunerBusyError extends Error {}
 
 /**
  * 物理チャンネルを丸ごと開く。**掴み方はこれ1つ。**
@@ -94,6 +123,7 @@ export async function openChannelStream(
     const res = await fetch(`${config.agentUrl}/denpa/stream?${query}`, { signal });
     if (!res.ok || res.body === null) {
         const detail = await res.text().catch(() => '');
+        if (res.status === 409) throw new TunerBusyError(`チューナーに空きがありません ${detail}`);
         throw new Error(`選局できません (${res.status}) ${detail}`);
     }
     return res.body;

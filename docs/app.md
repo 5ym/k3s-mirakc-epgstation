@@ -19,6 +19,7 @@ EPGStation の置き換えとして作ったもので、エンコード設定は
 | `src/lib/server/agent-events.ts` | エージェントからの知らせ (`/denpa/events`) の購読 |
 | `src/lib/server/epg.ts` | 局と番組表のDB書き込み、予約時刻の追従 |
 | `src/lib/server/epg-collect.ts` | 番組表集め (どのチャンネルを何本並べて開くか) |
+| `src/lib/server/scan.ts` | チャンネルスキャンの総当たり (選局はエージェント、NIT/SDT を読むのはこちら) |
 | `src/lib/server/rules.ts` | ルール(キーワード/チャンネル/ジャンル)から予約を作る |
 | `src/lib/server/reservations.ts` | 手動予約と取り消し |
 | `src/lib/server/conflict.ts` | チューナー割り当てと競合判定 (純粋関数) |
@@ -35,7 +36,6 @@ EPGStation の置き換えとして作ったもので、エンコード設定は
 | `src/lib/server/files.ts` | 録画の削除と、実体とDBの突き合わせ |
 | `src/lib/server/serve.ts` | ファイルの配信 (Range 対応) |
 | `src/lib/server/scramble.ts` | スクランブルの検出と、チューナー側への解除依頼 |
-| `src/lib/server/scan.ts` | チャンネルスキャン (チューナー側に投げて進み具合を読む) |
 | `src/lib/server/logo.ts` | 局ロゴの収集と保存 (番組表に出すPNG) |
 | `src/lib/server/logo-data.ts` | logoframe が覚えたロゴ (`.lgd`) の置き場・読み取り・破棄 |
 | `src/lib/components/LogoArea.svelte` | CM検出用のロゴ位置を画面から教える |
@@ -120,7 +120,7 @@ k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書い�
 
 | 変数 | 既定値 | 説明 |
 | --- | --- | --- |
-| `TUNER_AGENT_URL` | `http://tuner-agent:40773` | チューナーエージェント。選局もスキャンもカードも解除もここ1つ |
+| `TUNER_AGENT_URL` | `http://tuner-agent:40773` | チューナーエージェント。選局もカードも解除もここ1つ |
 | `DENPA_DB` | `/app/data/denpa.db` | SQLite の置き場。局ロゴと `.lgd` もこの隣 |
 | `RECORDED_DIR` | `/app/recorded` | 生TSの作業領域 |
 | `LIBRARY_DIR` | `/library` | エンコード済みの置き場。ここから配る |
@@ -157,14 +157,14 @@ k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書い�
 ## チューナーエージェント (`agent/`)
 
 機材に触る側。中身は読まず、掴んだチャンネルの TS をそのまま流す。
+**`src/lib/ts` に依存していない** — TS を1バイトも解釈しないため。
 なぜこの切り分けなのかは [architecture.md](architecture.md#チューナーエージェント)。
 
 | ファイル | 役割 |
 | --- | --- |
-| `agent/server.ts` | denpa からの窓口 (HTTP)。選局・スキャン・カード・解除 |
+| `agent/server.ts` | denpa からの窓口 (HTTP)。選局・チャンネルの控え・カード・解除 |
 | `agent/tuners.ts` | 優先度つきの取り合いと、選局プロセスの面倒 |
-| `agent/scan.ts` | 物理チャンネルの総当たり |
-| `agent/channels.ts` | `tuners.yml` を読み、`channels.json` を書く |
+| `agent/channels.ts` | `tuners.yml` を読み、預かった `channels.json` を書く |
 | `agent/tuners.yml` | 初回に配る設定の雛形 (機材の定義) |
 
 ## テスト

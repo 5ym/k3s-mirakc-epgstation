@@ -1,11 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { nitSection, packetize, sdtSection } from '../src/lib/ts/synth';
-import { channelEntry } from './channels';
-import { channelsFor, readServices, Scanner } from './scan';
-import { TunerPool } from './tuners';
+import { nitSection, packetize, sdtSection } from '../ts/synth';
+import { channelEntry, channelsFor, readServices } from './scan';
+
+/**
+ * 総当たりそのもの (`Scanner`) はここでは試さない。**エージェントに選局を
+ * 頼む形**になったので、相手が居ないと動かない。通しで見ているのは
+ * `tests/e2e/16-scan.spec.ts` で、本物の総当たりが偽の放送に当たっている。
+ */
 
 /** NIT と SDT だけの TS。チューナーが吐くものの代わり */
 function stream(services: [number, number, string?][], half = false): Uint8Array {
@@ -25,19 +26,6 @@ function fromBytes(data: Uint8Array, keepOpen = false): ReadableStream<Uint8Arra
             if (!keepOpen) controller.close();
         },
     });
-}
-
-/**
- * その TS を吐くチューナーを1本だけ持つプール。
- *
- * `hold` を付けると流し終えても閉じない (本物の選局は止めるまで流れ続ける)。
- * 付けないと選局が終わったことになるので、待ち時間を使い切らずに済む
- */
-function tunerPool(data: Uint8Array, hold = true): TunerPool {
-    const path = join(mkdtempSync(join(tmpdir(), 'denpa-scan-')), 'stream.ts');
-    writeFileSync(path, data);
-    const command = hold ? `cat ${path}; sleep 30` : `cat ${path}`;
-    return new TunerPool([{ name: 'a', types: ['GR'], command }]);
 }
 
 describe('選局するチャンネル', () => {
@@ -135,74 +123,22 @@ describe('1チャンネルの読み取り', () => {
     });
 
     test('失敗した理由を持ち帰る', async () => {
-        // recisdb は「デバイスが使用中」などを stderr に書く。捨てると原因が分からない
-        const pool = new TunerPool([
-            { name: 'a', types: ['GR'], command: 'echo "Cannot open device" >&2; exit 1' },
-        ]);
-        const opened = pool.open({ type: 'GR', channel: 'T21', priority: 1, use: 'scan' });
-        const { error, signal } = await readServices(opened, 5000);
+        // 選局が落ちた理由 (「デバイスが使用中」など) を捨てると原因が分からない
+        const failing = new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.error(new Error('Cannot open device'));
+            },
+        });
+        const { error, signal } = await readServices(failing, 5000);
         expect(signal).toBe(false);
         expect(error).toContain('Cannot open device');
-        pool.closeAll();
     });
 
     test('揃った時点で打ち切る', async () => {
-        // 居る局で毎回30秒待っていたら総当たりが終わらない
-        const pool = tunerPool(stream([[1024, 0x01]]));
+        // 居る局で毎回30秒待っていたら総当たりが終わらない。**閉じない読み口**で試す
         const started = Bun.nanoseconds();
-        const { error } = await readServices(
-            pool.open({ type: 'GR', channel: 'T21', priority: 1, use: 'scan' }),
-            30_000,
-        );
+        const { error } = await readServices(fromBytes(stream([[1024, 0x01]]), true), 30_000);
         expect(error).toBeNull();
         expect((Bun.nanoseconds() - started) / 1e9).toBeLessThan(10);
-        pool.closeAll();
-    });
-});
-
-describe('総当たり', () => {
-    test('チャンネル定義を組み立てる', async () => {
-        const pool = tunerPool(stream([[1024, 0x01, 'TOKYO MX1']]));
-        const found = await new Scanner(pool).run([['GR', ['T20', 'T21']]]);
-        expect(found.map((c) => c.channel)).toEqual(['T20', 'T21']);
-        expect(found[0].services).toEqual([{ serviceId: 1024, serviceType: 1, name: 'TOKYO MX1' }]);
-        pool.closeAll();
-    });
-
-    test('対応するチューナーが無い種別は飛ばす', async () => {
-        const lines: (string | undefined)[] = [];
-        const pool = tunerPool(stream([[1024, 0x01]]));
-        const scanner = new Scanner(pool, (p) => lines.push(p.line));
-        expect(await scanner.run([['BS', ['BS01_0']]])).toEqual([]);
-        expect(lines).toContain('BS: 対応するチューナーがありません');
-        pool.closeAll();
-    });
-
-    test('無効なチューナーは使わない', async () => {
-        const pool = new TunerPool([{ name: 'a', types: ['GR'], command: 'true', disabled: true }]);
-        expect(await new Scanner(pool).run([['GR', ['T20']]])).toEqual([]);
-        pool.closeAll();
-    });
-
-    test('電波は来たのに揃わなかったチャンネルはもう一度試す', async () => {
-        // NIT は 10 秒に1回。選局が落ち着くのが遅れると1回も入らないことがある
-        const lines: (string | undefined)[] = [];
-        const half = tunerPool(stream([[1024, 0x01]], true), false);
-        await new Scanner(half, (p) => lines.push(p.line)).run([['GR', ['T20']]]);
-        expect(lines).toContain('GR: 1ch をもう一度試します');
-        half.closeAll();
-
-        // 何も来なかったチャンネルは回し直さない (総当たりが倍の時間になる)
-        const quiet: (string | undefined)[] = [];
-        const silent = new TunerPool([{ name: 'a', types: ['GR'], command: 'true' }]);
-        await new Scanner(silent, (p) => quiet.push(p.line)).run([['GR', ['T20']]]);
-        expect(quiet.some((line) => line?.includes('もう一度'))).toBe(false);
-        silent.closeAll();
-    });
-
-    test('受信できなかったチャンネルは残さない', async () => {
-        const pool = new TunerPool([{ name: 'a', types: ['GR'], command: 'true' }]);
-        expect(await new Scanner(pool).run([['GR', ['T20', 'T21']]])).toEqual([]);
-        pool.closeAll();
     });
 });

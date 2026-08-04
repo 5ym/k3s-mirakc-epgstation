@@ -73,6 +73,9 @@ function fakeStream(signal: AbortSignal, services: FakeService[]): ReadableStrea
     });
 }
 
+/** 預かっているチャンネル。本物では channels.json */
+let saved = channels();
+
 /** チューナー。既定は全部空きにしておく */
 const TUNERS = [
     { index: 0, name: 'adapter0', types: ['BS', 'CS'], disabled: false },
@@ -130,19 +133,6 @@ function assign(type: string): number | null {
     return null;
 }
 
-/** スキャンの状態 */
-let scanState = {
-    state: 'idle',
-    phase: '',
-    log: [] as string[],
-    scanned: 0,
-    total: 0,
-    channels: 0,
-    error: null as string | null,
-    startedAt: null as number | null,
-    finishedAt: null as number | null,
-};
-
 /*
  * 起きたことを知らせる口 (SSE)。本物では `/denpa/events`。
  * denpa はこれを聞いてチューナー画面を更新し、スキャンの進み具合を出す
@@ -158,30 +148,6 @@ function emit(name: string, data: unknown = {}): void {
             // 既に閉じている購読者。次の cancel で片付く
         }
     }
-}
-
-/** 総当たりの進み方を真似る。1チャンネルずつ進んで、いくつか見つける */
-async function advanceScan(): Promise<void> {
-    for (let i = 0; i < scanState.total; i++) {
-        await Bun.sleep(120);
-        const found = i % 2 === 0;
-        scanState = {
-            ...scanState,
-            scanned: i + 1,
-            channels: scanState.channels + (found ? 1 : 0),
-            log: [...scanState.log, `T${20 + i}: ${found ? '2 サービス' : '受信できませんでした'}`],
-        };
-        emit('scan');
-    }
-    scanState = {
-        ...scanState,
-        state: 'done',
-        phase: '完了',
-        finishedAt: Date.now(),
-        log: [...scanState.log, '完了しました'],
-    };
-    emit('scan');
-    emit('channels');
 }
 
 function eventStream(): Response {
@@ -208,8 +174,17 @@ function openStream(url: URL, signal: AbortSignal): Response {
     const channel = url.searchParams.get('channel') ?? '';
     const use = url.searchParams.get('use') ?? '不明';
     const priority = Number(url.searchParams.get('priority') ?? 0);
+    /*
+     * 知らないチャンネルでも 404 にはしない。**本物は選局を試してから落ちる**ので、
+     * 呼んだ側からは「開けたのに1バイトも来ない」に見える。総当たりのスキャンは
+     * その見え方で「居ない」を判断している
+     */
     const services = on(type, channel);
-    if (services.length === 0) return json({ error: 'unknown channel' }, 404);
+    if (services.length === 0) {
+        return new Response(new ReadableStream({ start: (c) => c.close() }), {
+            headers: { 'Content-Type': 'video/MP2T' },
+        });
+    }
 
     // 同じチャンネルが開いていれば相乗り。無ければ空きチューナーを取る
     let index = [...leases.entries()].find(
@@ -274,7 +249,22 @@ Bun.serve({
         if (url.pathname === '/denpa/stream') return openStream(url, request.signal);
         if (url.pathname === '/denpa/events') return eventStream();
         if (url.pathname === '/denpa/tuners') return json({ tuners: tunerStatus() });
-        if (url.pathname === '/denpa/channels') return json(channels());
+        if (url.pathname === '/denpa/channels' && request.method === 'GET') return json(saved);
+        if (url.pathname === '/denpa/channels' && request.method === 'PUT') {
+            // 中身を作るのは denpa。こちらは預かって配るだけ
+            return request.json().then((body: { channels?: unknown[]; scanned?: string[] }) => {
+                if (!Array.isArray(body.channels) || body.channels.length === 0) {
+                    return json({ error: 'チャンネルが1件もありません' }, 400);
+                }
+                const scanned = body.scanned ?? [];
+                saved = [
+                    ...saved.filter((c) => !scanned.includes(c.type)),
+                    ...(body.channels as typeof saved),
+                ];
+                emit('channels');
+                return json(saved);
+            });
+        }
 
         if (url.pathname === '/denpa/card') {
             return json(
@@ -300,34 +290,6 @@ Bun.serve({
                     json(unscramble(body.root ?? 'recorded', body.input, body.output)),
                 );
         }
-        if (url.pathname === '/denpa/scan' && request.method === 'POST') {
-            return request.json().then((body: { types?: string[] }) => {
-                const types = body.types ?? ['GR'];
-                scanState = {
-                    state: 'running',
-                    phase: 'スキャン中',
-                    log: [`${types.join(', ')} を探しています...`],
-                    scanned: 0,
-                    total: types.length * 4,
-                    channels: 0,
-                    error: null,
-                    startedAt: Date.now(),
-                    finishedAt: null,
-                };
-                void advanceScan();
-                return json({ started: true, message: 'チャンネルスキャンを始めました' });
-            });
-        }
-        if (url.pathname === '/denpa/scan') return json(scanState);
-        if (url.pathname === '/denpa/scan/stop' && request.method === 'POST') {
-            if (scanState.state !== 'running') {
-                return json({ stopped: false, message: '実行中ではありません' }, 409);
-            }
-            scanState = { ...scanState, state: 'canceled', phase: '中断', finishedAt: Date.now() };
-            emit('scan');
-            return json({ stopped: true, message: 'チャンネルスキャンを中断しています' });
-        }
-
         return new Response('not found', { status: 404 });
     },
 });

@@ -129,9 +129,6 @@ function listenToAgent(): void {
                  */
                 void guard('logo', ride);
                 break;
-            case 'scan':
-                emit('scan');
-                break;
             case 'channels':
                 // スキャンで局が入れ替わった。取り込み直して番組表も集め直す
                 void guard('epg', async () => {
