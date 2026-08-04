@@ -13,6 +13,8 @@
     const scan = $derived(data.scan);
 
     const TYPE_LABEL: Record<string, string> = { GR: '地上波', BS: 'BS', CS: 'CS' };
+    /** チューナーが受けられる種別。設定の表で並べる順 */
+    const TYPES = ['GR', 'BS', 'CS'] as const;
     const STATE_LABEL: Record<string, string> = {
         running: '実行中',
         done: '完了',
@@ -456,7 +458,7 @@
                     {@const tuners = shownTuners.value}
                     {#if tuners.length === 0}
                         <p class="text-base-content/60 text-sm" data-testid="tuner-empty">
-                            チューナーが取れません。エージェントの tuners.yml を確認してください。
+                            チューナーがありません。下の「チューナーの設定」から足してください。
                         </p>
                     {:else}
                         <div class="overflow-x-auto">
@@ -511,6 +513,120 @@
                             </table>
                         </div>
                     {/if}
+                {/if}
+            </div>
+        </section>
+
+        <!--
+            チューナーの設定。**選局コマンドは出さない。**
+
+            画面から自由な文字列を渡せるようにすると、denpa に入れた人が
+            チューナー側で好きなコマンドを走らせられることになる (しかも
+            あちらは privileged)。受け渡すのはデバイスと種別だけで、
+            コマンドはエージェントが組み立てる。
+        -->
+        <section class="card bg-base-100 shadow" data-testid="tuner-config-card">
+            <div class="card-body">
+                <h2 class="card-title">チューナーの設定</h2>
+                {#await data.detected then detected}
+                    {#if detected}
+                        <p class="text-base-content/60 text-sm" data-testid="tuner-detected">
+                            いまは<strong>刺さっている機材を自動で見つけて</strong>使っています。
+                            保存するとこの内容で固定されます。
+                        </p>
+                    {/if}
+                {/await}
+
+                {#if shownTuners.value !== undefined}
+                    {@const rows = [...shownTuners.value, null]}
+                    <form method="POST" action="?/tuners" use:submitting data-testid="tuner-config-form">
+                        <div class="overflow-x-auto">
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>名前</th>
+                                        <th>デバイス</th>
+                                        <th>受けられる種別</th>
+                                        <th>LNB</th>
+                                        <th>無効</th>
+                                    </tr>
+                                </thead>
+                                <tbody data-testid="tuner-config-list">
+                                    {#each rows as tuner, index (index)}
+                                        <tr data-testid="tuner-config-row">
+                                            <td>
+                                                <input
+                                                    class="input input-sm input-bordered w-32"
+                                                    name={`name.${index}`}
+                                                    value={tuner?.name ?? ''}
+                                                    placeholder={tuner === null ? '足す' : ''}
+                                                />
+                                            </td>
+                                            <td>
+                                                <input
+                                                    class="input input-sm input-bordered w-72 font-mono text-xs"
+                                                    name={`device.${index}`}
+                                                    value={tuner?.device ?? ''}
+                                                    placeholder="/dev/dvb/adapter0/frontend0"
+                                                />
+                                            </td>
+                                            <td class="whitespace-nowrap">
+                                                {#each TYPES as type (type)}
+                                                    <label class="mr-2 inline-flex items-center gap-1">
+                                                        <input
+                                                            type="checkbox"
+                                                            class="checkbox checkbox-xs"
+                                                            name={`type.${index}.${type}`}
+                                                            checked={tuner?.types.includes(type) ?? false}
+                                                        />
+                                                        <span class="text-xs">{TYPE_LABEL[type]}</span>
+                                                    </label>
+                                                {/each}
+                                            </td>
+                                            <td>
+                                                <input
+                                                    class="input input-sm input-bordered w-20"
+                                                    name={`lnb.${index}`}
+                                                    value={tuner?.lnb ?? ''}
+                                                    placeholder="15v"
+                                                />
+                                            </td>
+                                            <td>
+                                                <input
+                                                    type="checkbox"
+                                                    class="checkbox checkbox-sm"
+                                                    name={`disabled.${index}`}
+                                                    checked={tuner?.disabled ?? false}
+                                                />
+                                            </td>
+                                        </tr>
+                                        {#if tuner?.command}
+                                            <tr>
+                                                <td colspan="5" class="text-base-content/60 text-xs">
+                                                    設定ファイルに直に書いた選局コマンドが効いています
+                                                    (画面からは変えられません):
+                                                    <code class="font-mono">{tuner.command}</code>
+                                                </td>
+                                            </tr>
+                                        {/if}
+                                    {/each}
+                                </tbody>
+                            </table>
+                        </div>
+                        <p class="text-base-content/60 mt-2 text-xs">名前を空にすると、その行は消えます。</p>
+                        <div class="card-actions mt-2">
+                            <button class="btn btn-primary btn-sm" data-testid="tuner-config-save">
+                                保存する
+                            </button>
+                            <button
+                                class="btn btn-ghost btn-sm"
+                                formaction="?/tunersAuto"
+                                data-testid="tuner-config-auto"
+                            >
+                                自動検出に戻す
+                            </button>
+                        </div>
+                    </form>
                 {/if}
             </div>
         </section>

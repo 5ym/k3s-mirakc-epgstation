@@ -7,141 +7,91 @@ namespace Denpa.Agent.Tests;
 /*
  * 取り合いと HTTP の口は `agent/conformance.test.ts` が本物を起こして当てている
  * (bun 版と同じものを通す)。こちらで見るのは、そこからは届きにくいところ —
- * **人が手で書くファイルの読み取り**と、控えの並べ方。
+ * **設定の読み書き**と、チューナー自動検出の値の読み取り。
  */
-
-public class YamlTests
-{
-    /// <summary>像が配る雛形そのもの。ここが読めなければチューナーが1本も見えない</summary>
-    private const string Template = """
-        # 繋いである機材。**ここは人が書く。**
-        #
-        # command は選局して TS を標準出力に流すもの。
-        tuners:
-            - name: adapter0
-              types: [BS, CS]
-              command: recisdb tune --device /dev/dvb/adapter0/frontend0 --channel {{channel}} -
-            - name: adapter1
-              types: [GR]
-              command: recisdb tune --device /dev/dvb/adapter1/frontend0 --channel {{channel}} -
-        """;
-
-    [Fact]
-    public void 雛形をそのまま読める()
-    {
-        var items = Yaml.ReadSequence(Template, "tuners");
-
-        Assert.Equal(2, items.Count);
-        Assert.Equal("adapter0", items[0].Scalars["name"]);
-        Assert.Equal(["BS", "CS"], items[0].Lists["types"]);
-        Assert.Equal(
-            "recisdb tune --device /dev/dvb/adapter0/frontend0 --channel {{channel}} -",
-            items[0].Scalars["command"]);
-        Assert.Equal(["GR"], items[1].Lists["types"]);
-    }
-
-    [Fact]
-    public void コメントと空行は読み飛ばす()
-    {
-        var items = Yaml.ReadSequence("""
-            tuners:
-                # 1本目
-                - name: a
-                  types: [GR]
-
-                  command: true   # 末尾のコメントも落とす
-            """, "tuners");
-
-        Assert.Single(items);
-        Assert.Equal("true", items[0].Scalars["command"]);
-    }
-
-    [Fact]
-    public void 引用符の中の井桁は残す()
-    {
-        // 選局コマンドに `#` が入っていることがある。値の一部として扱う
-        var items = Yaml.ReadSequence("""
-            tuners:
-                - name: a
-                  command: "sh -c 'echo #1'"
-            """, "tuners");
-
-        Assert.Equal("sh -c 'echo #1'", items[0].Scalars["command"]);
-    }
-
-    [Fact]
-    public void 目当ての段落以外は見ない()
-    {
-        var items = Yaml.ReadSequence("""
-            server:
-                - name: よそ
-            tuners:
-                - name: a
-            other:
-                - name: これも よそ
-            """, "tuners");
-
-        Assert.Single(items);
-        Assert.Equal("a", items[0].Scalars["name"]);
-    }
-
-    [Fact]
-    public void 読めない行は行番号を付けて断る()
-    {
-        // 半分だけ読んで「チューナーが1本足りない」より、どこが悪いか言うほうがいい
-        var error = Assert.Throws<Yaml.YamlException>(() => Yaml.ReadSequence("""
-            tuners:
-                - name: a
-                  これは名前と値の形ではない
-            """, "tuners"));
-
-        Assert.Contains("3 行目", error.Message);
-    }
-
-    [Fact]
-    public void 段落そのものが無ければ空()
-    {
-        Assert.Empty(Yaml.ReadSequence("server:\n    - name: a\n", "tuners"));
-    }
-}
 
 public class TunerSpecTests
 {
-    [Fact]
-    public void 無効の印を読む()
+    private static Config Fresh()
     {
-        var config = Write("""
-            tuners:
-                - name: a
-                  types: [GR]
-                  command: true
-                  disabled: true
-                - name: b
-                  types: [GR]
-                  command: true
-            """);
-
-        var tuners = config.LoadTuners();
-        Assert.True(tuners[0].Disabled);
-        Assert.False(tuners[1].Disabled);
+        var work = Directory.CreateTempSubdirectory();
+        return new Config(
+            Path.Combine(work.FullName, "tuners.json"), Path.Combine(work.FullName, "channels.json"));
     }
 
     [Fact]
-    public void ファイルが無ければ空を返す()
+    public void デバイスと種別から選局コマンドを組み立てる()
     {
-        // チューナーが1本も無いのは異常だが、起動できないよりは
-        // 画面に「チューナーがありません」と出したほうがいい
-        var work = Directory.CreateTempSubdirectory();
-        var config = new Config(Path.Combine(work.FullName, "無い.yml"), Path.Combine(work.FullName, "c.json"));
+        var spec = new TunerSpec("adapter0", ["GR"], false, "/dev/dvb/adapter0/frontend0");
+
+        Assert.Equal(
+            "recisdb tune --device /dev/dvb/adapter0/frontend0 --channel {{channel}} -",
+            spec.Resolve("recisdb"));
+    }
+
+    [Fact]
+    public void LNBを足せる()
+    {
+        // 衛星のアンテナに給電が要る構成。自由な文字列にせず、項目として持つ
+        var spec = new TunerSpec("bs0", ["BS", "CS"], false, "/dev/dvb/adapter0/frontend0", "15v");
+
+        Assert.Contains("--lnb 15v", spec.Resolve("recisdb"));
+    }
+
+    [Fact]
+    public void 直に書いたコマンドが勝つ()
+    {
+        // 逃げ道。**画面からは触らせない** (ファイルに直に書いたときだけ効く)
+        var spec = new TunerSpec("x", ["GR"], false, "/dev/null", null, "myTuner --ch {{channel}}");
+
+        Assert.Equal("myTuner --ch {{channel}}", spec.Resolve("recisdb"));
+    }
+
+    [Fact]
+    public void 書いて読み直すと同じものになる()
+    {
+        var config = Fresh();
+        config.SaveTuners([
+            new TunerSpec("adapter0", ["BS", "CS"], false, "/dev/dvb/adapter0/frontend0", "15v"),
+            new TunerSpec("adapter1", ["GR"], true, "/dev/dvb/adapter1/frontend0"),
+        ]);
+
+        var read = config.LoadTuners();
+        Assert.Equal(2, read.Count);
+        Assert.Equal(["BS", "CS"], read[0].Types);
+        Assert.Equal("15v", read[0].Lnb);
+        Assert.Equal("/dev/dvb/adapter0/frontend0", read[0].Device);
+        Assert.True(read[1].Disabled);
+    }
+
+    [Fact]
+    public void 空を渡すと定義を消す()
+    {
+        // 「1本も無い」を書き込むより、**無い=自分で探す**のほうが後で困らない
+        var config = Fresh();
+        config.SaveTuners([new TunerSpec("a", ["GR"], false, "/dev/null")]);
+        Assert.True(File.Exists(config.TunersFile));
+
+        config.SaveTuners([]);
+
+        Assert.False(File.Exists(config.TunersFile));
         Assert.Empty(config.LoadTuners());
     }
 
-    private static Config Write(string yaml)
+    [Fact]
+    public void 壊れたファイルは空として扱う()
     {
-        var work = Directory.CreateTempSubdirectory();
-        var tuners = Path.Combine(work.FullName, "tuners.yml");
-        File.WriteAllText(tuners, yaml);
-        return new Config(tuners, Path.Combine(work.FullName, "channels.json"));
+        // 起動できないよりは、画面に「チューナーがありません」と出したほうがいい
+        var config = Fresh();
+        File.WriteAllText(config.TunersFile, "{ これは JSON ではない");
+
+        Assert.Empty(config.LoadTuners());
+    }
+
+    [Fact]
+    public void 名前の無いものは受け取らない()
+    {
+        Assert.Null(TunerSpec.FromJson(new JsonObject { ["types"] = new JsonArray() }));
     }
 }
 
@@ -151,7 +101,7 @@ public class ChannelStoreTests
     {
         var work = Directory.CreateTempSubdirectory();
         return new Config(
-            Path.Combine(work.FullName, "tuners.yml"), Path.Combine(work.FullName, "channels.json"));
+            Path.Combine(work.FullName, "tuners.json"), Path.Combine(work.FullName, "channels.json"));
     }
 
     private static JsonArray Entries(params (string Type, string Channel)[] items)
@@ -195,7 +145,7 @@ public class ChannelStoreTests
     {
         /*
          * `channels.json` は人が開いて確かめるもの。既定の符号化器は非ASCIIを
-         * 全部 `\u30C6` の形に逃がすので、局名が1つも読めなくなる。
+         * 全部逃がすので、局名が1つも読めなくなる。
          *
          * **全角空白 (U+3000) だけは逃げたままになる。** .NET のどの符号化器も
          * ASCII でない空白は必ず逃がす作りで、`JSON.stringify` と揃わない。
@@ -270,8 +220,7 @@ public class DeviceProbeTests
     public void frontend_info_から名前を読む()
     {
         var info = new byte[168];
-        var name = System.Text.Encoding.UTF8.GetBytes("Toshiba TC90522 ISDB-S module");
-        name.CopyTo(info, 0);
+        System.Text.Encoding.UTF8.GetBytes("Toshiba TC90522 ISDB-S module").CopyTo(info, 0);
 
         Assert.Equal("Toshiba TC90522 ISDB-S module", DeviceProbe.ParseName(info));
     }

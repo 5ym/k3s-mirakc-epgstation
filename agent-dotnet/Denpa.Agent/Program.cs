@@ -19,15 +19,14 @@ using Microsoft.AspNetCore.Http.Features;
 
 var port = int.TryParse(Environment.GetEnvironmentVariable("AGENT_PORT"), out var configured)
     ? configured
-    : 40773;
+    : 25252;
 var recorded = Path.GetFullPath(Environment.GetEnvironmentVariable("RECORDED_DIR") ?? "/denpa-recorded");
 var recisdb = Environment.GetEnvironmentVariable("RECISDB") ?? "recisdb";
 
 var config = Config.FromEnvironment();
-config.InstallTemplate("/app-config-defaults/tuners.yml");
-
 var events = new Events();
-var pool = new TunerPool(config.ResolveTuners(), () => events.Emit("tuners"));
+var (tuners, detected) = config.ResolveTuners();
+var pool = new TunerPool(tuners, config.Recisdb, () => events.Emit("tuners")) { Detected = detected };
 
 var builder = WebApplication.CreateSlimBuilder(args);
 builder.WebHost.ConfigureKestrel(options =>
@@ -131,7 +130,44 @@ app.MapGet("/denpa/events", async (HttpContext http) =>
 
 // --- チューナーとチャンネル -----------------------------------------------
 app.MapGet("/denpa/tuners", (HttpContext http) =>
-    Respond.Write(http, new JsonObject { ["tuners"] = pool.Status() }));
+    Respond.Write(http, new JsonObject { ["tuners"] = pool.Status(), ["detected"] = pool.Detected }));
+
+/*
+ * 機材の定義を書き換える。**画面から。**
+ *
+ * 受け取るのはデバイスと種別だけで、選局コマンドは組み立てる。自由な文字列を
+ * 受けると「denpa に入れた人がチューナー側で好きなコマンドを走らせられる」
+ * ことになる (しかもあちらは privileged)。
+ *
+ * 空を渡すと定義そのものを消す = **自動検出に戻す**。
+ */
+app.MapPut("/denpa/tuners", async (HttpContext http) =>
+{
+    var body = await Respond.Read(http);
+    if (body?["tuners"] is not JsonArray list)
+    {
+        await Respond.Write(http, new JsonObject { ["error"] = "tuners が要ります" }, 400);
+        return;
+    }
+
+    var next = new List<TunerSpec>();
+    foreach (var node in list)
+    {
+        if (TunerSpec.FromJson(node) is not { } spec)
+        {
+            await Respond.Write(http, new JsonObject { ["error"] = "name の無いチューナーがあります" }, 400);
+            return;
+        }
+        // 画面から渡ってきたコマンドは捨てる。ファイルに直に書いたものだけ効く
+        next.Add(spec with { Command = null });
+    }
+
+    config.SaveTuners(next);
+    var (resolved, auto) = config.ResolveTuners();
+    pool.Detected = auto;
+    pool.Replace(resolved);
+    await Respond.Write(http, new JsonObject { ["tuners"] = pool.Status(), ["detected"] = pool.Detected });
+});
 
 app.MapGet("/denpa/channels", (HttpContext http) => Respond.Write(http, config.LoadChannels()));
 

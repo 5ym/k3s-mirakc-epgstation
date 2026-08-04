@@ -4,7 +4,7 @@ using System.Text;
 namespace Denpa.Agent;
 
 /// <summary>
-/// 繋いであるチューナーを自分で見つける。**`tuners.yml` を書かなくてよくする。**
+/// 繋いであるチューナーを自分で見つける。**設定を書かなくてよくする。**
 ///
 /// <para>
 /// 本数はデバイスの数を数えれば分かるが、**種別 (地上波か衛星か) はどこにも
@@ -121,7 +121,7 @@ public static partial class DeviceProbe
     /// <para>
     /// **こちらは ioctl で聞けない。** DVB と違って方式を答える口が無く、
     /// 名前と番号の決まりがそのまま種別になっている。合わなければ
-    /// `tuners.yml` に書いて上書きしてもらう。
+    /// 画面から書いて上書きしてもらう。
     /// </para>
     /// </summary>
     public static string[] TypesForChardev(string name)
@@ -195,14 +195,15 @@ public static partial class DeviceProbe
     }
 
     /// <summary>
-    /// 見つかった機材を <c>tuners.yml</c> と同じ形にして返す。
+    /// 見つかった機材を、設定に書いたのと同じ形にして返す。
     ///
     /// <para>
-    /// 選局コマンドは <c>recisdb</c> の決まり文句。**ここを変えたい人は
-    /// `tuners.yml` を書く** — 書いてあればそちらが勝つ。
+    /// 分かるのは**デバイスと受けられる方式**だけ。LNB を足したい・1本だけ
+    /// 止めたい、は人にしか決められないので、そこは画面から書いてもらう
+    /// (書いてあればそちらが勝つ)。
     /// </para>
     /// </summary>
-    public static List<TunerSpec> Detect(string recisdb = "recisdb")
+    public static List<TunerSpec> Detect()
     {
         var found = new List<TunerSpec>();
 
@@ -212,9 +213,7 @@ public static partial class DeviceProbe
             {
                 var types = Ask(frontend);
                 if (types.Length == 0) continue;
-                var name = Path.GetFileName(adapter);
-                found.Add(new TunerSpec(
-                    name, types, $"{recisdb} tune --device {frontend} --channel {{{{channel}}}} -", false));
+                found.Add(new TunerSpec(Path.GetFileName(adapter), types, false, frontend));
             }
         }
 
@@ -224,8 +223,7 @@ public static partial class DeviceProbe
             var name = Path.GetFileName(device);
             var types = TypesForChardev(name);
             if (types.Length == 0) continue;
-            found.Add(new TunerSpec(
-                name, types, $"{recisdb} tune --device {device} --channel {{{{channel}}}} -", false));
+            found.Add(new TunerSpec(name, types, false, device));
         }
 
         return found;

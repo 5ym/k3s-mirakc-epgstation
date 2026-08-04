@@ -12,7 +12,6 @@
 
     <ItemGroup>
         <Compile Include="*.cs" />
-        <Compile Include="../Denpa.Agent/Yaml.cs" />
         <Compile Include="../Denpa.Agent/Json.cs" />
         <Compile Include="../Denpa.Agent/Config.cs" />
         <Compile Include="../Denpa.Agent/TunerPool.cs" />

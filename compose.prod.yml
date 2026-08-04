@@ -7,7 +7,7 @@
 #
 # 手元に合わせるところは2つ。
 #   1. 下の devices  … チューナーとカードリーダーのデバイス
-#   2. ./config/tuners.yml … 初回起動で雛形が出てくるので、そこに機材を書く
+#   2. チューナーは画面 (/tuners) から設定する。.NET 版は自分で見つけるので普通は要らない
 name: denpa
 
 services:
@@ -27,12 +27,12 @@ services:
             # 掛かったまま録れたTSを解く先。denpa と同じ実体を見せる
             RECORDED_DIR: /denpa-recorded
         volumes:
-            # 設定。初回起動で tuners.yml の雛形が出てくるので、機材はそこに書く。
+            # 設定。チューナーもチャンネルも denpa の画面から書く。
             # スキャンの結果 (channels.json) も同じところへ書き戻される
             - ./config:/app-config
             - denpa-recorded:/denpa-recorded
         ports:
-            - '40773:40773'
+            - '25252:25252'
 
     denpa:
         image: ghcr.io/danything/denpa:latest
@@ -46,7 +46,7 @@ services:
         environment:
             TZ: Asia/Tokyo
             # チューナーに触る仕事はすべて向こうに頼む
-            TUNER_AGENT_URL: http://tuner-agent:40773
+            TUNER_AGENT_URL: http://tuner-agent:25252
             DENPA_DB: /app/data/denpa.db
             RECORDED_DIR: /app/recorded
             LIBRARY_DIR: /library

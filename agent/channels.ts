@@ -5,7 +5,7 @@
  * 残すために段落だけを差し替えるという面倒をしていたが、**チューナーの定義と
  * 分けてしまえば済む話**だった。こちらは丸ごと書き直してよい。
  *
- * - `tuners.yml` … 繋いである機材。**人が書き、こちらは読むだけ**
+ * - `tuners.json` … 繋いである機材。**denpa の画面が書き換える**
  * - `channels.json` … スキャンで分かったこと。**denpa が預けてくる**
  *
  * 中身を作るのはこちらではない。総当たりの選局こそ頼まれるが、NIT も SDT も
@@ -14,7 +14,7 @@
  * アンテナに何が映るかは機材ごとの話だから。
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { TunerSpec } from './tuners';
 
@@ -38,7 +38,8 @@ export interface ChannelEntry {
 }
 
 const CHANNELS = process.env.CHANNELS_FILE ?? '/app-config/channels.json';
-const TUNERS = process.env.TUNERS_FILE ?? '/app-config/tuners.yml';
+const TUNERS = process.env.TUNERS_FILE ?? '/app-config/tuners.json';
+const RECISDB = process.env.RECISDB ?? 'recisdb';
 
 /** 並べ替えの順。種別ごとにまとまっているほうが読みやすい */
 const TYPE_ORDER: Record<string, number> = { GR: 0, BS: 1, CS: 2 };
@@ -75,21 +76,52 @@ export function saveChannels(found: ChannelEntry[], scanned: ChannelType[]): Cha
 }
 
 /**
- * 繋いである機材。**ここは読むだけ。**
+ * 繋いである機材。**画面から書き換えられる。**
  *
- * スキャンで分かるものではないので、書き換える口も持たない。
  * ファイルが無ければ空を返す — チューナーが1本も無いことは異常だが、
- * 起動できないよりは画面に「チューナーがありません」と出したほうがいい。
+ * 起動できないよりは画面に「チューナーがありません」と出したほうがいい
+ * (.NET 版はここで自分で探しにいく)。
  */
 export function loadTuners(): TunerSpec[] {
     if (!existsSync(TUNERS)) return [];
     try {
-        const parsed = Bun.YAML.parse(readFileSync(TUNERS, 'utf8')) as { tuners?: TunerSpec[] } | null;
-        return parsed?.tuners ?? [];
+        const parsed = JSON.parse(readFileSync(TUNERS, 'utf8')) as { tuners?: TunerSpec[] } | null;
+        return Array.isArray(parsed?.tuners) ? parsed.tuners.filter((t) => typeof t?.name === 'string') : [];
     } catch (error) {
         console.error(`[agent] ${TUNERS} を読めません: ${error}`);
         return [];
     }
+}
+
+/**
+ * 画面から預かった機材で置き換える。
+ *
+ * **空を渡すと定義そのものを消す。** 「1本も無い」を書き込めるようにして
+ * おくより、無い状態=何も掴めない、のほうが後で困らない。
+ */
+export function saveTuners(tuners: TunerSpec[]): void {
+    if (tuners.length === 0) {
+        if (existsSync(TUNERS)) rmSync(TUNERS);
+        return;
+    }
+    mkdirSync(dirname(TUNERS), { recursive: true });
+    const working = `${TUNERS}.writing`;
+    writeFileSync(working, JSON.stringify({ tuners }, null, 4));
+    renameSync(working, TUNERS);
+}
+
+/**
+ * 選局に使う実際のコマンド。
+ *
+ * **デバイスと種別から組み立てる。** 自由な文字列を画面から受けると
+ * 「denpa に入れた人がチューナー側で好きなコマンドを走らせられる」ことに
+ * なる (しかもあちらは privileged)。`command` はファイルに直に書いたときの
+ * 逃げ道で、画面からは触らせない。
+ */
+export function resolveCommand(tuner: TunerSpec): string {
+    if (typeof tuner.command === 'string' && tuner.command !== '') return tuner.command;
+    const lnb = tuner.lnb === undefined || tuner.lnb === '' ? '' : ` --lnb ${tuner.lnb}`;
+    return `${RECISDB} tune --device ${tuner.device} --channel {{channel}}${lnb} -`;
 }
 
 export const paths = { channels: CHANNELS, tuners: TUNERS };

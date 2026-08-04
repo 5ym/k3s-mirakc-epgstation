@@ -9,8 +9,8 @@ spec:
   ports:
     # 選局もスキャンもスクランブル解除もここ1つ。中身は素のTSと小さなJSON
     - name: agent
-      port: 40773
-      targetPort: 40773
+      port: 25252
+      targetPort: 25252
 ---
 apiVersion: v1
 kind: Service

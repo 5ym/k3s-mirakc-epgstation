@@ -28,11 +28,29 @@ export interface AgentTuner {
     name: string;
     types: ChannelType[];
     disabled: boolean;
+    /** 選局に使うデバイス。ここからエージェントがコマンドを組み立てる */
+    device: string | null;
+    /** 衛星の給電。要る構成だけ */
+    lnb: string | null;
+    /**
+     * 選局コマンドの上書き。**設定ファイルに直に書いたときだけ入る。**
+     * 画面からは渡せない (渡せると、あちらで好きなコマンドが走ってしまう)
+     */
+    command: string | null;
     /** いま掴んでいるチャンネル。空いていれば null */
     channel: { type: ChannelType; channel: string } | null;
     users: { use: string; priority: number }[];
     pid: number | null;
     error: string | null;
+}
+
+/** 画面から書き換えられる部分だけ */
+export interface TunerConfig {
+    name: string;
+    types: ChannelType[];
+    device: string | null;
+    lnb: string | null;
+    disabled: boolean;
 }
 
 /**
@@ -88,6 +106,33 @@ export async function putChannels(found: AgentChannel[], scanned: ChannelType[])
 
 export async function getTuners(): Promise<AgentTuner[]> {
     return (await get<{ tuners: AgentTuner[] }>('/denpa/tuners')).tuners;
+}
+
+/** 定義を書いていないので自分で見つけた状態か。画面に出す */
+export async function tunersDetected(): Promise<boolean> {
+    return (await get<{ detected?: boolean }>('/denpa/tuners')).detected === true;
+}
+
+/**
+ * 機材の定義を書き換える。
+ *
+ * **選局コマンドは渡さない。** 渡せるようにすると「denpa に入れた人が
+ * チューナー側で好きなコマンドを走らせられる」ことになる (しかもあちらは
+ * privileged)。エージェントはデバイスと種別から組み立てる。
+ *
+ * **空を渡すと定義そのものが消える** = 自動検出に戻す。
+ */
+export async function putTuners(tuners: TunerConfig[]): Promise<void> {
+    const res = await fetch(`${config.agentUrl}/denpa/tuners`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tuners }),
+        signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `チューナーを保存できません (${res.status})`);
+    }
 }
 
 /**

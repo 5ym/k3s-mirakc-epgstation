@@ -32,30 +32,30 @@ const ROOT = resolve(import.meta.dir, '..');
  * 偽の放送に居る地上波は T16 と T21 の2本しかないので、チューナーが2本あると
  * 「空きが無い」も「弱い相手を蹴る」も作れない。総当たりが少し遅くなるだけで
  * 済むほうを取る。
+ *
+ * `command` は**ファイルに直に書いたときだけ効く**逃げ道。ここではそれを
+ * 使って、選局コマンドを偽物に差し替えている。
  */
-const TUNERS = `
-tuners:
-    - name: gr0
-      types: [GR]
-      command: bun ${ROOT}/tests/fake/tune.ts {{channel_type}} {{channel}}
-    - name: bs0
-      types: [BS, CS]
-      command: bun ${ROOT}/tests/fake/tune.ts {{channel_type}} {{channel}}
-    - name: bs1
-      types: [BS, CS]
-      command: bun ${ROOT}/tests/fake/tune.ts {{channel_type}} {{channel}}
-    - name: off0
-      types: [GR]
-      disabled: true
-      command: false
-`;
+const TUNE = `bun ${ROOT}/tests/fake/tune.ts {{channel_type}} {{channel}}`;
+const TUNERS = JSON.stringify(
+    {
+        tuners: [
+            { name: 'gr0', types: ['GR'], command: TUNE },
+            { name: 'bs0', types: ['BS', 'CS'], command: TUNE },
+            { name: 'bs1', types: ['BS', 'CS'], command: TUNE },
+            { name: 'off0', types: ['GR'], disabled: true, command: 'false' },
+        ],
+    },
+    null,
+    4,
+);
 
 let work: string;
 let agent: Bun.Subprocess;
 let log = '';
 
 const paths = () => ({
-    tuners: join(work, 'tuners.yml'),
+    tuners: join(work, 'tuners.json'),
     channels: join(work, 'channels.json'),
     recorded: join(work, 'recorded'),
 });
@@ -75,6 +75,9 @@ interface TunerStatus {
     name: string;
     types: string[];
     disabled: boolean;
+    device: string | null;
+    lnb: string | null;
+    command: string | null;
     channel: { type: string; channel: string } | null;
     users: { use: string; priority: number }[];
 }
@@ -399,4 +402,46 @@ describe('カードとスクランブル解除', () => {
 
 test('知らない口は 404', async () => {
     expect((await get('/denpa/nope')).status).toBe(404);
+});
+
+/*
+ * **いちばん最後に置く。** 定義を書き換えると元の顔ぶれには戻せない
+ * (選局コマンドは画面から渡せないので、偽の選局に差し替え直せない)。
+ */
+describe('機材の定義', () => {
+    /**
+     * **画面から書き換えられる。** 受け取るのはデバイスと種別だけで、
+     * 選局コマンドはエージェントが組み立てる — 自由な文字列を受けると
+     * 「denpa に入れた人がチューナー側で好きなコマンドを走らせられる」
+     * ことになる (しかもあちらは privileged)
+     */
+    test('定義を書き換えられる。選局コマンドは受け取らない', async () => {
+        const put = await request('PUT', '/denpa/tuners', {
+            tuners: [
+                {
+                    name: 'new0',
+                    types: ['GR'],
+                    device: '/dev/dvb/adapter9/frontend0',
+                    lnb: '15v',
+                    disabled: true,
+                    command: 'rm -rf /',
+                },
+            ],
+        });
+        expect(put.status).toBe(200);
+
+        const status = await tuners();
+        expect(status.map((t) => t.name)).toEqual(['new0']);
+        expect(status[0].device).toBe('/dev/dvb/adapter9/frontend0');
+        expect(status[0].lnb).toBe('15v');
+        expect(status[0].disabled).toBe(true);
+        // 画面から渡ってきたコマンドは捨てる
+        expect(status[0].command).toBeNull();
+        expect(readFileSync(paths().tuners, 'utf8')).not.toContain('rm -rf');
+    });
+
+    test('名前の無い定義は断る', async () => {
+        const res = await request('PUT', '/denpa/tuners', { tuners: [{ types: ['GR'] }] });
+        expect(res.status).toBe(400);
+    });
 });

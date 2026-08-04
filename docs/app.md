@@ -120,7 +120,7 @@ k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書い�
 
 | 変数 | 既定値 | 説明 |
 | --- | --- | --- |
-| `TUNER_AGENT_URL` | `http://tuner-agent:40773` | チューナーエージェント。選局もカードも解除もここ1つ |
+| `TUNER_AGENT_URL` | `http://tuner-agent:25252` | チューナーエージェント。選局もカードも解除もここ1つ |
 | `DENPA_DB` | `/app/data/denpa.db` | SQLite の置き場。局ロゴと `.lgd` もこの隣 |
 | `RECORDED_DIR` | `/app/recorded` | 生TSの作業領域 |
 | `LIBRARY_DIR` | `/library` | エンコード済みの置き場。ここから配る |
@@ -147,7 +147,7 @@ k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書い�
 | `/` | **予約と録画**を2ペインで並べる。**録画の行を押すと再生**、中身は「詳細」から。行の形はどの画面幅でも同じで、狭いところでは押すものが下へ回り込む。生TSを残しているときは大きさを両方出す (`43 MB (生TS 594 MB)`)。**エンコードの失敗では再生もダウンロードも消さない** — 落ちたのは焼き直しのほうで、生TSは無事 |
 | `/guide` | 番組表(グリッド)と番組検索。マスはジャンルごとに色を変える。詳細から予約・取消と、録れているものはそのまま再生できる |
 | `/rules` | 自動予約ルールの一覧と作成。「この条件で録れる番組」に**予約済みのものも競合も同じ表で**出す (1件ずつ取り消せる) |
-| `/tuners` | チャンネルスキャン (途中で中断でき、録画中でも実行できる)、チューナーの空きと何を掴んでいるか、取れているチャンネル (番組表の集まり具合つき)、エージェントとカードリーダーと局ロゴの状態 (**局ロゴを今すぐ取りに行く**: 地上波も衛星もチューナー2つで。進み具合が出る)。チューナーを掴んでいる相手は用途で出す (「録画: 番組名」「番組表 (T16)」「局ロゴ収集 (T16)」) |
+| `/tuners` | **チューナーの設定** (本数・デバイス・受けられる種別・LNB・無効化。書かなければ自動検出)、チャンネルスキャン (途中で中断でき、録画中でも実行できる)、チューナーの空きと何を掴んでいるか、取れているチャンネル (番組表の集まり具合つき)、エージェントとカードリーダーと局ロゴの状態 (**局ロゴを今すぐ取りに行く**: 地上波も衛星もチューナー2つで。進み具合が出る)。チューナーを掴んでいる相手は用途で出す (「録画: 番組名」「番組表 (T16)」「局ロゴ収集 (T16)」) |
 | `/settings` | 録画のしかた(映像コーデック — **「エンコードしない」もここ**/CMの扱い/CMの探し方/生TSを残すか/無料放送だけか)、通知先(Webhook)、ベーシック認証(パスワードの表示と作り直し)、EPGStation からの引き継ぎ |
 | `/api/recordings/<id>/file` | 録画ファイル。Range 対応。**エンコード済みがあればそちら、無ければ生TS。エンコードが走っている間は生TSのほう** (録り直しの最中は library_path がまだ古いファイルを指していて、しかもそれは終わり際に消える) |
 | `/api/recordings/<id>/frame?at=<秒>` | 録画から1コマ (JPEG)。ロゴの位置を指定するときに使う (既定で右上を 16:9 のまま拡大、覚えてある枠は掴んで動かせる) |
@@ -164,8 +164,7 @@ k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書い�
 | --- | --- |
 | `agent/server.ts` | denpa からの窓口 (HTTP)。選局・チャンネルの控え・カード・解除 |
 | `agent/tuners.ts` | 優先度つきの取り合いと、選局プロセスの面倒 |
-| `agent/channels.ts` | `tuners.yml` を読み、預かった `channels.json` を書く |
-| `agent/tuners.yml` | 初回に配る設定の雛形 (機材の定義) |
+| `agent/channels.ts` | `tuners.json` と `channels.json` の読み書き |
 
 ## チューナーエージェント (.NET 版。`agent-dotnet/`)
 
@@ -178,13 +177,12 @@ k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書い�
 | `agent-dotnet/Denpa.Agent/Program.cs` | HTTP の口 (Kestrel)。選局・チャンネルの控え・カード・解除 |
 | `agent-dotnet/Denpa.Agent/TunerPool.cs` | 優先度つきの取り合いと、選局プロセスの面倒 |
 | `agent-dotnet/Denpa.Agent/DeviceProbe.cs` | **チューナーの自動検出** (ioctl で受けられる方式を聞く) |
-| `agent-dotnet/Denpa.Agent/Config.cs` | `tuners.yml` を読み、預かった `channels.json` を書く |
-| `agent-dotnet/Denpa.Agent/Yaml.cs` | `tuners.yml` だけを読む小さな YAML (AOT のため自前) |
+| `agent-dotnet/Denpa.Agent/Config.cs` | `tuners.json` と `channels.json` の読み書き |
 | `agent-dotnet/Denpa.Agent/Interop.cs` | 選局をプロセスグループごと終わらせる (`kill`) |
 
-**`tuners.yml` は書かなくてよい。** 無ければ `/dev/dvb/*` を開いて
+**チューナーは書かなくてよい。** 定義が無ければ `/dev/dvb/*` を開いて
 `DTV_ENUM_DELSYS` で方式を聞き、地上波か衛星かまで判別する。書いてあれば
-そちらが勝つ (選局コマンド・LNB・1本だけ止める、は人にしか決められない)。
+そちらが勝つ (LNB・1本だけ止める、は人にしか決められない)。
 
 ## テスト
 

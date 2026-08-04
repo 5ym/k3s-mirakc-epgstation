@@ -15,6 +15,7 @@
  */
 
 import { type ChildProcess, spawn } from 'node:child_process';
+import { resolveCommand } from './channels';
 
 /** 止めるときの猶予。過ぎたら SIGKILL */
 const KILL_GRACE = 3_000;
@@ -40,8 +41,15 @@ const MAX_LAG = 64 * 1024 * 1024;
 export interface TunerSpec {
     name: string;
     types: string[];
-    /** 選局コマンド。`{{channel}}` にチャンネル名が入る */
-    command: string;
+    /** 選局に使うデバイス。ここからコマンドを組み立てる */
+    device?: string;
+    /** 衛星の給電。要る構成だけ (`15v` など) */
+    lnb?: string;
+    /**
+     * 選局コマンドの上書き。**ファイルに直に書いたときだけ効く。**
+     * 画面から自由な文字列を受けると、あちらで好きなコマンドが走ってしまう
+     */
+    command?: string;
     disabled?: boolean;
 }
 
@@ -228,12 +236,29 @@ export class TunerPool {
     private readonly leases = new Map<number, Lease>();
 
     constructor(
-        private readonly specs: TunerSpec[],
+        private specs: TunerSpec[],
         private readonly onChange: () => void = () => {},
     ) {}
 
     get tuners(): TunerSpec[] {
         return this.specs;
+    }
+
+    /**
+     * 機材の定義を入れ替える。**画面から書き換えたとき。**
+     *
+     * 走っている選局はそのまま続ける。名前が変わった・消えた本のものだけ、
+     * 失敗として畳む — 掴んでいるデバイスが別物になったのに流し続けると、
+     * 何が録れているのか分からなくなる。
+     */
+    replace(next: TunerSpec[]): void {
+        const before = this.specs;
+        this.specs = next;
+        for (const [index, lease] of [...this.leases]) {
+            if (before[index]?.name === next[index]?.name && next[index] !== undefined) continue;
+            this.release(lease, 'チューナーの設定が変わりました');
+        }
+        this.onChange();
     }
 
     /**
@@ -257,7 +282,7 @@ export class TunerPool {
         const spec = this.specs[index];
         const lease = new Lease(index, request.type, request.channel);
         this.leases.set(index, lease);
-        lease.start(render(spec.command, request.channel, request.type), () => {
+        lease.start(render(resolveCommand(spec), request.channel, request.type), () => {
             // 選局が落ちた。読み手には失敗として伝える (黙って終わると空ファイルになる)
             if (this.leases.get(index) !== lease) return;
             this.leases.delete(index);
@@ -349,6 +374,11 @@ export class TunerPool {
                 name: spec.name,
                 types: spec.types,
                 disabled: spec.disabled === true,
+                // 画面がそのまま編集できるように、定義もいっしょに返す
+                device: spec.device ?? null,
+                lnb: spec.lnb ?? null,
+                // 直に書いた逃げ道。**画面からは触らせない** (読めるだけ)
+                command: spec.command ?? null,
                 channel: lease === undefined ? null : { type: lease.type, channel: lease.channel },
                 users: [...(lease?.sinks ?? [])].map((sink) => ({
                     use: sink.use,

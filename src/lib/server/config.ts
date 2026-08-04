@@ -41,7 +41,7 @@ export const config = {
      * B-CASカードは pcscd 経由でしか読めず、その pcscd は向こう側にしか無い。
      * 別PCのチューナーを足すときは、そのPCのエージェントを指す
      */
-    agentUrl: str('TUNER_AGENT_URL', 'http://tuner-agent:40773').replace(/\/+$/, ''),
+    agentUrl: str('TUNER_AGENT_URL', 'http://tuner-agent:25252').replace(/\/+$/, ''),
 
     /**
      * チューナーの取り合いの強さ。**大きいほうが勝つ。**

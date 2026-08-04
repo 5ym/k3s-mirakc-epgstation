@@ -26,16 +26,13 @@ RUN apt-get update && \
     apt-get -y --no-install-recommends install ./recisdb_${RECISDB_VERSION}-1_amd64.deb && \
     apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/*
 
-# 設定は PVC (/app-config) に置く。
+# 設定は PVC (/app-config) に置く。**どちらも denpa が書く。**
 #
-# **チューナーの定義とスキャン結果は別のファイル。** 前者は人が書くもので
-# こちらは読むだけ、後者はスキャンが書き出すもの。分けておけば、スキャンの
-# たびに手で書いたコメントが消えることも、設定が飛ぶこともない
-ENV TUNERS_FILE=/app-config/tuners.yml \
+# チューナーの定義とスキャン結果を分けてあるのは、片方を書き換えるときに
+# もう片方を巻き添えにしないため
+ENV TUNERS_FILE=/app-config/tuners.json \
     CHANNELS_FILE=/app-config/channels.json
-# イメージが持っているのは初回だけ写す雛形
-COPY agent/tuners.yml /app-config-defaults/tuners.yml
 COPY --from=build /build/denpa-agent /usr/local/bin/denpa-agent
 
-EXPOSE 40773
+EXPOSE 25252
 ENTRYPOINT ["/usr/local/bin/denpa-agent"]

@@ -75,3 +75,64 @@ test.describe('チューナー画面', () => {
         await expect(coverage).toContainText('番組表の届いた局');
     });
 });
+
+/**
+ * チューナーの設定。
+ *
+ * 以前は tuners.yml をチューナー側のコンテナで手で編集するしかなかった。
+ * **選局コマンドは画面には出さない** — 自由な文字列を渡せるようにすると、
+ * denpa に入れた人がチューナー側で好きなコマンドを走らせられることになる。
+ */
+test.describe('チューナーの設定', () => {
+    /*
+     * **元の顔ぶれに戻してから抜ける。**
+     *
+     * 偽エージェントはワーカーに1つで、spec をまたいで共有している。
+     * ここで減らしたままにすると、後のファイルがチューナー不足で落ちる
+     * (実際それで、延長のテストが時々失敗した)
+     */
+    test.afterAll(async ({ request }, info) => {
+        const port = 25252 + (info.workerIndex ?? 0) * 10;
+        await request.put(`http://127.0.0.1:${port}/denpa/tuners`, {
+            data: {
+                tuners: [0, 1, 2, 3].map((index) => ({
+                    name: `adapter${index}`,
+                    types: index % 2 === 0 ? ['BS', 'CS'] : ['GR'],
+                    device: `/dev/dvb/adapter${index}/frontend0`,
+                    disabled: false,
+                })),
+            },
+        });
+    });
+
+    test('画面から本数と種別を変えられる', async ({ page }) => {
+        await goto(page, '/tuners');
+
+        const card = page.getByTestId('tuner-config-card');
+        const rows = card.getByTestId('tuner-config-row');
+        // 4本ぶん + 足すための空行
+        await expect(rows).toHaveCount(5);
+
+        // 1本目を無効にして、名前を消して1本減らす
+        await rows.nth(0).locator('input[name="disabled.0"]').check();
+        await rows.nth(3).locator('input[name="name.3"]').fill('');
+        await card.getByTestId('tuner-config-save').click();
+
+        const list = page.getByTestId('tuner-list');
+        await expect(list.getByTestId('tuner-row')).toHaveCount(3);
+        await expect(list.getByTestId('tuner-row').nth(0)).toContainText('無効');
+    });
+
+    test('種別を1つも選ばない行は断る', async ({ page }) => {
+        await goto(page, '/tuners');
+
+        const card = page.getByTestId('tuner-config-card');
+        for (const type of ['GR', 'BS', 'CS']) {
+            const box = card.locator(`input[name="type.0.${type}"]`);
+            if (await box.isChecked()) await box.uncheck();
+        }
+        await card.getByTestId('tuner-config-save').click();
+
+        await expect(page.getByTestId('tuner-error')).toContainText('種別を1つ以上');
+    });
+});

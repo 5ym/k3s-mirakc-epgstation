@@ -4,7 +4,7 @@
 実チューナーも B-CASカードも ffmpeg も要りません。
 
 ```sh
-docker compose up                           # 開発サーバ(:5173) + 偽エージェント(:40773)
+docker compose up                           # 開発サーバ(:5173) + 偽エージェント(:25252)
 docker compose run --rm unit                # 単体テスト
 docker compose run --rm e2e                 # E2E (Playwright)
 docker compose run --rm unit bun run lint   # リント + フォーマット確認

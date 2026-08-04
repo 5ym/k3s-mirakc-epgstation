@@ -13,7 +13,7 @@ import { resolve } from 'node:path';
 import { broadcast, channels, DEFAULT_KNOBS, type Knobs, on } from './broadcast';
 import type { FakeService } from './services';
 
-const PORT = Number(process.env.FAKE_AGENT_PORT ?? 40773);
+const PORT = Number(process.env.FAKE_AGENT_PORT ?? 25252);
 /** denpa の置き場。本物では同じものをエージェント側にも見せてある */
 const ROOTS: Record<string, string> = {
     recorded: resolve(process.env.RECORDED_DIR ?? '/recorded'),
@@ -77,12 +77,25 @@ function fakeStream(signal: AbortSignal, services: FakeService[]): ReadableStrea
 let saved = channels();
 
 /** チューナー。既定は全部空きにしておく */
-const TUNERS = [
-    { index: 0, name: 'adapter0', types: ['BS', 'CS'], disabled: false },
-    { index: 1, name: 'adapter1', types: ['GR'], disabled: false },
-    { index: 2, name: 'adapter2', types: ['BS', 'CS'], disabled: false },
-    { index: 3, name: 'adapter3', types: ['GR'], disabled: false },
-];
+interface FakeTuner {
+    index: number;
+    name: string;
+    types: string[];
+    disabled: boolean;
+    device: string | null;
+    lnb: string | null;
+    command: string | null;
+}
+
+let TUNERS: FakeTuner[] = [0, 1, 2, 3].map((index) => ({
+    index,
+    name: `adapter${index}`,
+    types: index % 2 === 0 ? ['BS', 'CS'] : ['GR'],
+    disabled: false,
+    device: `/dev/dvb/adapter${index}/frontend0`,
+    lnb: null,
+    command: null,
+}));
 
 interface Lease {
     type: string;
@@ -248,7 +261,30 @@ Bun.serve({
         // --- 本物と同じ口 -------------------------------------------------
         if (url.pathname === '/denpa/stream') return openStream(url, request.signal);
         if (url.pathname === '/denpa/events') return eventStream();
-        if (url.pathname === '/denpa/tuners') return json({ tuners: tunerStatus() });
+        if (url.pathname === '/denpa/tuners' && request.method === 'GET') {
+            return json({ tuners: tunerStatus(), detected: false });
+        }
+        if (url.pathname === '/denpa/tuners' && request.method === 'PUT') {
+            // 本物と同じく、選局コマンドは受け取らない
+            return request.json().then((body: { tuners?: Partial<FakeTuner>[] }) => {
+                const list = body.tuners ?? [];
+                if (list.some((t) => typeof t?.name !== 'string' || t.name === '')) {
+                    return json({ error: 'name の無いチューナーがあります' }, 400);
+                }
+                TUNERS = list.map((tuner, index) => ({
+                    index,
+                    name: tuner.name as string,
+                    types: tuner.types ?? [],
+                    disabled: tuner.disabled === true,
+                    device: tuner.device ?? null,
+                    lnb: tuner.lnb ?? null,
+                    command: null,
+                }));
+                leases.clear();
+                emit('tuners');
+                return json({ tuners: tunerStatus(), detected: false });
+            });
+        }
         if (url.pathname === '/denpa/channels' && request.method === 'GET') return json(saved);
         if (url.pathname === '/denpa/channels' && request.method === 'PUT') {
             // 中身を作るのは denpa。こちらは預かって配るだけ

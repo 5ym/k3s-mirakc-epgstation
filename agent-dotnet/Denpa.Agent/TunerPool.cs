@@ -24,7 +24,7 @@ namespace Denpa.Agent;
 /// それは次の段階 (docs/roadmap.md)。
 /// </para>
 /// </summary>
-public sealed class TunerPool(IReadOnlyList<TunerSpec> specs, Action onChange)
+public sealed class TunerPool(IReadOnlyList<TunerSpec> specs, string recisdb, Action onChange)
 {
     /// <summary>誰も読まなくなってから選局を畳むまでの間</summary>
     public static readonly TimeSpan Linger = TimeSpan.FromSeconds(5);
@@ -35,7 +35,38 @@ public sealed class TunerPool(IReadOnlyList<TunerSpec> specs, Action onChange)
     private readonly Lock _gate = new();
     private readonly Dictionary<int, Lease> _leases = [];
 
-    public IReadOnlyList<TunerSpec> Tuners { get; } = specs;
+    private IReadOnlyList<TunerSpec> _specs = specs;
+
+    public IReadOnlyList<TunerSpec> Tuners => _specs;
+
+    /// <summary>自動検出で決めたのか、書いてあるものを読んだのか。画面に出す</summary>
+    public bool Detected { get; set; }
+
+    /// <summary>
+    /// 機材の定義を入れ替える。**画面から書き換えたとき。**
+    ///
+    /// <para>
+    /// 走っている選局は**そのまま続ける**。名前が変わった・消えた本のものだけ、
+    /// 失敗として畳む — 掴んでいるデバイスが別物になったのに流し続けると、
+    /// 何が録れているのか分からなくなる。
+    /// </para>
+    /// </summary>
+    public void Replace(IReadOnlyList<TunerSpec> next)
+    {
+        lock (_gate)
+        {
+            var before = _specs;
+            _specs = next;
+            foreach (var (index, lease) in _leases.ToList())
+            {
+                var was = index < before.Count ? before[index].Name : null;
+                var now = index < next.Count ? next[index].Name : null;
+                if (was == now && now is not null) continue;
+                Release(lease, "チューナーの設定が変わりました");
+            }
+        }
+        onChange();
+    }
 
     public sealed class TunerBusyException(string message) : Exception(message);
 
@@ -61,7 +92,7 @@ public sealed class TunerPool(IReadOnlyList<TunerSpec> specs, Action onChange)
             var spec = Tuners[index];
             var lease = new Lease(index, type, channel);
             _leases[index] = lease;
-            lease.Start(Render(spec.Command, channel, type), () => OnExit(index, lease));
+            lease.Start(Render(spec.Resolve(recisdb), channel, type), () => OnExit(index, lease));
             return Join(lease, priority, use);
         }
     }
@@ -194,6 +225,11 @@ public sealed class TunerPool(IReadOnlyList<TunerSpec> specs, Action onChange)
                     ["name"] = spec.Name,
                     ["types"] = types,
                     ["disabled"] = spec.Disabled,
+                    // 画面がそのまま編集できるように、定義もいっしょに返す
+                    ["device"] = spec.Device,
+                    ["lnb"] = spec.Lnb,
+                    // 直に書いた逃げ道。**画面からは触らせない** (読めるだけ)
+                    ["command"] = spec.Command,
                     ["channel"] = lease is null
                         ? null
                         : new JsonObject { ["type"] = lease.Type, ["channel"] = lease.Channel },

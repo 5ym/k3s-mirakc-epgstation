@@ -29,7 +29,7 @@ spec:
               value: /denpa-recorded
           ports:
             # 選局・スキャン・カードの状態・スクランブル解除の窓口。**口はこれ1つ**
-            - containerPort: 40773
+            - containerPort: 25252
           volumeMounts:
             # チューナーの定義 (人が書く) とスキャン結果 (エージェントが書く)。
             # Pod を作り直しても残るように PVC に置く

@@ -2,75 +2,167 @@ using System.Text.Json.Nodes;
 
 namespace Denpa.Agent;
 
-/// <summary>繋いである機材1本ぶん。<c>tuners.yml</c> にそのまま対応する</summary>
-public sealed record TunerSpec(string Name, string[] Types, string Command, bool Disabled);
+/// <summary>
+/// 繋いである機材1本ぶん。
+///
+/// <para>
+/// **選局コマンドそのものは持たない。** 画面から書き換えられるようにした以上、
+/// 自由な文字列を受けると「denpa に入れた人がチューナー側で好きなコマンドを
+/// 走らせられる」ことになる (しかもあちらは privileged)。持つのは
+/// **デバイスと種別**だけにして、コマンドはこちらで組み立てる。
+/// </para>
+///
+/// <para>
+/// <c>Command</c> は逃げ道で、**ファイルに直に書いたときだけ**効く。画面からは
+/// 触らせず、入っていれば読めるように出すだけ。掴んだまま選局するようになれば
+/// コマンド自体が要らなくなるので、ここは短い付き合いになる。
+/// </para>
+/// </summary>
+public sealed record TunerSpec(
+    string Name,
+    string[] Types,
+    bool Disabled,
+    string? Device = null,
+    string? Lnb = null,
+    string? Command = null)
+{
+    /// <summary>選局に使う実際のコマンド</summary>
+    public string Resolve(string recisdb)
+    {
+        if (!string.IsNullOrEmpty(Command)) return Command;
+        var lnb = string.IsNullOrEmpty(Lnb) ? "" : $" --lnb {Lnb}";
+        return $"{recisdb} tune --device {Device} --channel {{{{channel}}}}{lnb} -";
+    }
+
+    public JsonObject ToJson()
+    {
+        var types = new JsonArray();
+        foreach (var type in Types) types.Add((JsonNode?)JsonValue.Create(type));
+
+        var node = new JsonObject
+        {
+            ["name"] = Name,
+            ["types"] = types,
+            ["disabled"] = Disabled,
+            ["device"] = Device,
+        };
+        if (!string.IsNullOrEmpty(Lnb)) node["lnb"] = Lnb;
+        if (!string.IsNullOrEmpty(Command)) node["command"] = Command;
+        return node;
+    }
+
+    public static TunerSpec? FromJson(JsonNode? node)
+    {
+        if (node is not JsonObject item) return null;
+        var name = item["name"]?.GetValue<string>() ?? "";
+        if (name.Length == 0) return null;
+
+        var types = new List<string>();
+        if (item["types"] is JsonArray list)
+        {
+            foreach (var entry in list)
+            {
+                if (entry?.GetValue<string>() is { Length: > 0 } type) types.Add(type);
+            }
+        }
+
+        return new TunerSpec(
+            name,
+            [.. types],
+            item["disabled"]?.GetValue<bool>() ?? false,
+            item["device"]?.GetValue<string>(),
+            item["lnb"]?.GetValue<string>(),
+            item["command"]?.GetValue<string>());
+    }
+}
 
 /// <summary>
-/// 設定ファイル2つ。
+/// 設定ファイル2つ。**どちらも JSON で、どちらも denpa が書く。**
 ///
 /// <list type="bullet">
-/// <item><c>tuners.yml</c> … 繋いである機材。**人が書き、こちらは読むだけ**</item>
-/// <item><c>channels.json</c> … スキャンで分かったこと。**denpa が預けてくる**</item>
+/// <item><c>tuners.json</c> … 繋いである機材。画面から編集する</item>
+/// <item><c>channels.json</c> … スキャンで分かったこと</item>
 /// </list>
 ///
 /// <para>
-/// 中身を作るのはこちらではない。総当たりの選局こそ頼まれるが、NIT も SDT も
-/// 解かないので「何が居たか」は分からない。読むのは denpa。それでも控えを
-/// 持つのはこちら側にする — アンテナに何が映るかは機材ごとの話だから。
+/// **YAML をやめた。** 人が手で書く前提だったからコメントを守る必要があり、
+/// そのために既製のものを入れられない AOT では小さな読み取りを自分で持っていた。
+/// 画面から書き換えるなら、書き戻せて壊れにくいほうがいい。
+/// </para>
+///
+/// <para>
+/// 中身を作るのはどちらもこちらではない。総当たりの選局こそ頼まれるが、NIT も
+/// SDT も解かないので「何が居たか」は分からない。それでも控えを持つのはこちら側
+/// にする — アンテナに何が映るかも、何本刺さっているかも、機材ごとの話だから。
 /// </para>
 /// </summary>
-public sealed class Config(string tunersFile, string channelsFile)
+public sealed class Config(string tunersFile, string channelsFile, string recisdb = "recisdb")
 {
     public string TunersFile { get; } = tunersFile;
     public string ChannelsFile { get; } = channelsFile;
+    public string Recisdb { get; } = recisdb;
 
     public static Config FromEnvironment() => new(
-        Environment.GetEnvironmentVariable("TUNERS_FILE") ?? "/app-config/tuners.yml",
-        Environment.GetEnvironmentVariable("CHANNELS_FILE") ?? "/app-config/channels.json");
+        Environment.GetEnvironmentVariable("TUNERS_FILE") ?? "/app-config/tuners.json",
+        Environment.GetEnvironmentVariable("CHANNELS_FILE") ?? "/app-config/channels.json",
+        Environment.GetEnvironmentVariable("RECISDB") ?? "recisdb");
 
-    /// <summary>
-    /// 初回だけ雛形を置く。
-    ///
-    /// <para>
-    /// 設定は PVC に置いてあるので、像を入れ替えても手で書いたものは残る。
-    /// 像側のものを直に読ませると、**編集できない設定**になってしまう。
-    /// </para>
-    /// </summary>
-    public void InstallTemplate(string template)
+    private static JsonArray ReadArray(string path, string? key)
     {
-        if (File.Exists(TunersFile) || !File.Exists(template)) return;
-        Directory.CreateDirectory(Path.GetDirectoryName(TunersFile)!);
-        File.Copy(template, TunersFile);
-        Log.Write($"チューナーの雛形を置きました: {TunersFile}");
+        try
+        {
+            var parsed = JsonNode.Parse(File.ReadAllText(path));
+            return (key is null ? parsed : parsed?[key]) as JsonArray ?? [];
+        }
+        catch
+        {
+            // まだ無い。空でよい (画面が「まだありません」と出す)
+            return [];
+        }
     }
 
-    /// <summary>
-    /// 繋いである機材。**ここは読むだけ。**
-    ///
-    /// <para>
-    /// ファイルが無ければ空を返す — チューナーが1本も無いことは異常だが、
-    /// 起動できないよりは画面に「チューナーがありません」と出したほうがいい。
-    /// </para>
-    /// </summary>
+    private static void WriteAtomic(string path, JsonNode body)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        // 書きかけを読ませない。読む側 (denpa) は起動中にも取りに来る
+        var working = $"{path}.writing";
+        File.WriteAllText(working, body.ToJsonString(Json.Pretty));
+        File.Move(working, path, overwrite: true);
+    }
+
     public List<TunerSpec> LoadTuners()
     {
         if (!File.Exists(TunersFile)) return [];
-        try
+        var found = new List<TunerSpec>();
+        foreach (var node in ReadArray(TunersFile, "tuners"))
         {
-            return [.. Yaml.ReadSequence(File.ReadAllText(TunersFile), "tuners").Select(item =>
-            {
-                var name = item.Scalars.GetValueOrDefault("name") ?? "";
-                var command = item.Scalars.GetValueOrDefault("command") ?? "";
-                var types = item.Lists.GetValueOrDefault("types") ?? [];
-                var disabled = item.Scalars.GetValueOrDefault("disabled") is "true" or "yes";
-                return new TunerSpec(name, [.. types], command, disabled);
-            })];
+            if (TunerSpec.FromJson(node) is { } spec) found.Add(spec);
         }
-        catch (Exception error)
+        return found;
+    }
+
+    /// <summary>
+    /// 画面から預かった機材で置き換える。
+    ///
+    /// <para>
+    /// **空を渡すと設定そのものを消す。** そのまま「自動検出に戻す」になる。
+    /// 1本も無い状態を書き込めるようにしておくより、無い状態=自分で探す、の
+    /// ほうが後で困らない。
+    /// </para>
+    /// </summary>
+    public void SaveTuners(List<TunerSpec> tuners)
+    {
+        if (tuners.Count == 0)
         {
-            Log.Write($"{TunersFile} を読めません: {error.Message}");
-            return [];
+            if (File.Exists(TunersFile)) File.Delete(TunersFile);
+            Log.Write("チューナーの定義を消しました (次からは自動検出)");
+            return;
         }
+
+        var list = new JsonArray();
+        foreach (var tuner in tuners) list.Add((JsonNode)tuner.ToJson());
+        WriteAtomic(TunersFile, new JsonObject { ["tuners"] = list });
+        Log.Write($"チューナーの定義を保存しました: {tuners.Count} 本");
     }
 
     /// <summary>
@@ -78,24 +170,24 @@ public sealed class Config(string tunersFile, string channelsFile)
     ///
     /// <para>
     /// 自動で分かるのは「刺さっているデバイスと、それが受けられる方式」だけ。
-    /// 選局コマンドを変えたい・LNB を足したい・1本だけ止めたい・別PCのぶんを
-    /// 混ぜたい、はどれも人にしか決められないので、そのときは書いてもらう。
+    /// LNB を足したい・1本だけ止めたい・別PCのぶんを混ぜたい、は人にしか
+    /// 決められないので、そのときは画面から書く。
     /// </para>
     /// </summary>
-    public List<TunerSpec> ResolveTuners()
+    public (List<TunerSpec> Tuners, bool Detected) ResolveTuners()
     {
         var written = LoadTuners();
-        if (written.Count > 0) return written;
+        if (written.Count > 0) return (written, false);
 
         var found = DeviceProbe.Detect();
         if (found.Count == 0)
         {
             Log.Write($"チューナーが見つかりません ({TunersFile} に書けば、そちらを使います)");
-            return found;
+            return (found, true);
         }
         Log.Write($"{TunersFile} に定義が無いので、刺さっている機材を使います:");
-        foreach (var tuner in found) Log.Write($"  {tuner.Name} [{string.Join(", ", tuner.Types)}]");
-        return found;
+        foreach (var tuner in found) Log.Write($"  {tuner.Name} [{string.Join(", ", tuner.Types)}] {tuner.Device}");
+        return (found, true);
     }
 
     /// <summary>並べ替えの順。知らない種別は後ろに送る</summary>
@@ -107,18 +199,7 @@ public sealed class Config(string tunersFile, string channelsFile)
         _ => 9,
     };
 
-    public JsonArray LoadChannels()
-    {
-        try
-        {
-            return JsonNode.Parse(File.ReadAllText(ChannelsFile)) as JsonArray ?? [];
-        }
-        catch
-        {
-            // まだ1度もスキャンしていない。空でよい (画面が「まだありません」と出す)
-            return [];
-        }
-    }
+    public JsonArray LoadChannels() => ReadArray(ChannelsFile, null);
 
     /// <summary>
     /// 預かった顔ぶれで差し替える。
@@ -154,12 +235,7 @@ public sealed class Config(string tunersFile, string channelsFile)
 
         var merged = new JsonArray();
         foreach (var entry in entries) merged.Add(entry);
-
-        Directory.CreateDirectory(Path.GetDirectoryName(ChannelsFile)!);
-        // 書きかけを読ませない。読む側 (denpa) は起動中にも取りに来る
-        var working = $"{ChannelsFile}.writing";
-        File.WriteAllText(working, merged.ToJsonString(Json.Pretty));
-        File.Move(working, ChannelsFile, overwrite: true);
+        WriteAtomic(ChannelsFile, merged);
         return merged;
     }
 }

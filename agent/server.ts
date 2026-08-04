@@ -14,8 +14,8 @@
  * mirakc はもう抱えていない。取り合いも、どのチャンネルが使えるかも、ここが持つ。
  */
 
-import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
     type ChannelEntry,
     type ChannelType,
@@ -23,10 +23,11 @@ import {
     loadTuners,
     paths,
     saveChannels,
+    saveTuners,
 } from './channels';
-import { TunerPool } from './tuners';
+import { TunerPool, type TunerSpec } from './tuners';
 
-const PORT = Number(process.env.AGENT_PORT ?? 40773);
+const PORT = Number(process.env.AGENT_PORT ?? 25252);
 /** denpa の生TSの置き場。掛かったままのTSは必ずここにある */
 const RECORDED = resolve(process.env.RECORDED_DIR ?? '/denpa-recorded');
 const RECISDB = process.env.RECISDB ?? 'recisdb';
@@ -69,23 +70,38 @@ function emit(name: string, data: unknown = {}): void {
     }
 }
 
-/**
- * 初回だけ雛形を置く。
- *
- * 設定は PVC に置いてあるので、イメージを入れ替えても手で書いたものは残る。
- * イメージ側のものを直に読ませると、**編集できない設定**になってしまう
- */
-const TEMPLATE = '/app-config-defaults/tuners.yml';
-
-function installTemplate(): void {
-    if (existsSync(paths.tuners) || !existsSync(TEMPLATE)) return;
-    mkdirSync(dirname(paths.tuners), { recursive: true });
-    copyFileSync(TEMPLATE, paths.tuners);
-    log(`チューナーの雛形を置きました: ${paths.tuners}`);
-}
-
-installTemplate();
 const pool = new TunerPool(loadTuners(), () => emit('tuners'));
+
+/**
+ * 機材の定義を書き換える。**画面から。**
+ *
+ * 受け取るのはデバイスと種別だけで、選局コマンドは組み立てる。自由な文字列を
+ * 受けると「denpa に入れた人がチューナー側で好きなコマンドを走らせられる」
+ * ことになる (しかもあちらは privileged)。
+ */
+function replaceTuners(body: { tuners?: unknown }) {
+    if (!Array.isArray(body.tuners)) return { ok: false, error: 'tuners が要ります' };
+
+    const next: TunerSpec[] = [];
+    for (const item of body.tuners as Partial<TunerSpec>[]) {
+        if (typeof item?.name !== 'string' || item.name === '') {
+            return { ok: false, error: 'name の無いチューナーがあります' };
+        }
+        next.push({
+            name: item.name,
+            types: Array.isArray(item.types) ? item.types.filter((t) => typeof t === 'string') : [],
+            disabled: item.disabled === true,
+            device: typeof item.device === 'string' ? item.device : undefined,
+            lnb: typeof item.lnb === 'string' && item.lnb !== '' ? item.lnb : undefined,
+            // 画面から渡ってきたコマンドは捨てる。ファイルに直に書いたものだけ効く
+        });
+    }
+
+    saveTuners(next);
+    pool.replace(next);
+    log(`チューナーの定義を保存しました: ${next.length} 本`);
+    return { ok: true, error: '' };
+}
 
 /**
  * カードリーダーが見えているか。
@@ -226,7 +242,16 @@ export function serve(port = PORT): Bun.Server {
 
             if (pathname === '/denpa/stream') return openStream(url, request.signal);
             if (pathname === '/denpa/events') return eventStream();
-            if (pathname === '/denpa/tuners') return json({ tuners: pool.status() });
+            if (pathname === '/denpa/tuners' && request.method === 'GET') {
+                // bun 版は自分では探せない。書いてあるものだけ
+                return json({ tuners: pool.status(), detected: false });
+            }
+            if (pathname === '/denpa/tuners' && request.method === 'PUT') {
+                const result = replaceTuners(await request.json());
+                return result.ok
+                    ? json({ tuners: pool.status(), detected: false })
+                    : json({ error: result.error }, 400);
+            }
             if (pathname === '/denpa/channels' && request.method === 'GET') return json(loadChannels());
             if (pathname === '/denpa/channels' && request.method === 'PUT') {
                 const result = replaceChannels(await request.json());

@@ -22,7 +22,7 @@ export const TEST_ROOT = '/tmp/denpa-e2e';
  */
 const STRIDE = 10;
 const APP_PORT = 4173;
-const AGENT_PORT = 40773;
+const AGENT_PORT = 25252;
 const WEBHOOK_PORT = 8096;
 
 /** 立ち上がりを待つ上限。ここを短くすると混んでいるマシンで落ちる */

@@ -4,7 +4,15 @@ import { collectState } from '$lib/server/epg-collect';
 import { stats as logoStats, sweepNow, sweepState } from '$lib/server/logo';
 import { refresh, start, stop } from '$lib/server/scan';
 import { cardStatus } from '$lib/server/scramble';
-import { type AgentTuner, getChannels, getTuners, ping } from '$lib/server/tuner';
+import {
+    type AgentTuner,
+    getChannels,
+    getTuners,
+    ping,
+    putTuners,
+    type TunerConfig,
+    tunersDetected,
+} from '$lib/server/tuner';
 import type { ChannelType, Service } from '$lib/types';
 
 const TYPES: ChannelType[] = ['GR', 'BS', 'CS'];
@@ -70,6 +78,13 @@ export async function load() {
         // 実際の状況はエージェントが持っている。開いた時点で取りに行く
         scan: await refresh(),
         /*
+         * 定義を書いていないので自動で見つけた状態か。
+         *
+         * 出さないと「画面の内容がどこから来たのか」が分からない — 保存すると
+         * それが固定されるので、そこは言っておく必要がある
+         */
+        detected: tunersDetected().catch(() => false),
+        /*
          * 以下は相手待ちなので promise のまま返して後から流し込む。
          * 待つと画面が出ない
          */
@@ -113,6 +128,68 @@ export const actions = {
         const result = await start({ types });
         if (!result.started) return fail(409, { message: result.message });
         return { success: true, scan: result.message };
+    },
+
+    /**
+     * 機材の定義を書き換える。
+     *
+     * **選局コマンドは受け取らない。** 画面から自由な文字列を渡せるようにすると、
+     * denpa に入れた人がチューナー側で好きなコマンドを走らせられることになる
+     * (しかもあちらは privileged)。エージェントがデバイスと種別から組み立てる。
+     */
+    tuners: async ({ request }) => {
+        const form = await request.formData();
+
+        /*
+         * 行ごとに `name.0` `device.0` … と名前を分けてある。
+         *
+         * 同じ名前を並べて `getAll()` で拾う形だと、チェックの外れた行が
+         * 送られてこないぶんだけ番号がずれて、別の行の設定が混ざる
+         */
+        const rows = new Set<number>();
+        for (const key of form.keys()) {
+            const match = key.match(/^name\.(\d+)$/);
+            if (match !== null) rows.add(Number(match[1]));
+        }
+
+        const tuners: TunerConfig[] = [];
+        for (const index of [...rows].sort((a, b) => a - b)) {
+            const name = String(form.get(`name.${index}`) ?? '').trim();
+            // 名前を空にした行は「消した」とみなす
+            if (name === '') continue;
+
+            const types = TYPES.filter((type) => form.get(`type.${index}.${type}`) !== null);
+            if (types.length === 0) {
+                return fail(400, { message: `${name}: 受けられる種別を1つ以上選んでください` });
+            }
+            const device = String(form.get(`device.${index}`) ?? '').trim();
+            if (device === '') return fail(400, { message: `${name}: デバイスを入れてください` });
+
+            tuners.push({
+                name,
+                types,
+                device,
+                lnb: String(form.get(`lnb.${index}`) ?? '').trim() || null,
+                disabled: form.get(`disabled.${index}`) !== null,
+            });
+        }
+
+        try {
+            await putTuners(tuners);
+        } catch (error) {
+            return fail(502, { message: String(error) });
+        }
+        return { success: true, tuners: `チューナーを ${tuners.length} 本 保存しました` };
+    },
+
+    /** 定義を消して自動検出に戻す。刺さっている機材をエージェントが自分で見つける */
+    tunersAuto: async () => {
+        try {
+            await putTuners([]);
+        } catch (error) {
+            return fail(502, { message: String(error) });
+        }
+        return { success: true, tuners: '自動検出に戻しました' };
     },
 
     /** 走っているスキャンを中断する。設定は書き換えないまま止まる */

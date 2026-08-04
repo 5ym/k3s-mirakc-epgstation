@@ -31,13 +31,13 @@ RUN apt-get update && \
     apt-get -y --no-install-recommends install ./recisdb_${RECISDB_VERSION}-1_amd64.deb && \
     apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/*
 
-# 設定は PVC (/app-config) に置く。
+# 設定は PVC (/app-config) に置く。**どちらも denpa の画面が書く。**
 #
-# **どちらも無くて構わない。** tuners.yml が無ければ刺さっている機材を
+# **どちらも無くて構わない。** tuners.json が無ければ刺さっている機材を
 # 自分で見つけるし、channels.json はスキャンするまで空でよい。
-ENV TUNERS_FILE=/app-config/tuners.yml \
+ENV TUNERS_FILE=/app-config/tuners.json \
     CHANNELS_FILE=/app-config/channels.json
 COPY --from=build /out/denpa-agent /usr/local/bin/denpa-agent
 
-EXPOSE 40773
+EXPOSE 25252
 ENTRYPOINT ["/usr/local/bin/denpa-agent"]
