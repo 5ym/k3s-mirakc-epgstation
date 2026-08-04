@@ -27,15 +27,13 @@ curl -LO https://raw.githubusercontent.com/danything/denpa/main/compose.prod.yml
 docker compose -f compose.prod.yml up -d
 ```
 
-初回起動で `./config/tuners.yml` が出てきます。**そこの `tuners:` と、
-`compose.prod.yml` の `devices:` を手元の機材に合わせて**から、
+手元に合わせるのは `compose.prod.yml` の `devices:` だけです。**チューナーは
+書かなくても動きます** — 定義が無ければエージェントが `/dev/dvb/*` を開いて、
+地上波か衛星かまで自分で判別します。LNB や「1本だけ止める」を決めたいときは
+画面の「チューナー」から書き換えます (`./config/tuners.json`)。
 
-```sh
-docker compose -f compose.prod.yml restart tuner-agent
-```
-
-チャンネルは書きません。**スキャンで見つかったものは別のファイル**
-(`channels.json`) に書き出されるので、手で書いたものが消えることはありません。
+チャンネルも書きません。**スキャンで見つかったものは別のファイル**
+(`channels.json`) に書き出されるので、機材の定義が巻き添えで消えることはありません。
 
 ## Kubernetes で動かす
 

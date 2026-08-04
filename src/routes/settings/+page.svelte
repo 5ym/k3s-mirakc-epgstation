@@ -177,24 +177,14 @@
                             data-testid="global-logo-level"
                             disabled={recording.cmDetector !== 'jls'}
                         >
-                            <option value="8" selected={recording.logoLevel >= 8}>
-                                ロゴを最優先する
-                            </option>
-                            <option
-                                value="6"
-                                selected={recording.logoLevel < 8 && recording.logoLevel >= 5}
-                            >
+                            <option value="8" selected={recording.logoLevel >= 8}> ロゴを最優先する </option>
+                            <option value="6" selected={recording.logoLevel < 8 && recording.logoLevel >= 5}>
                                 ふつう (おすすめ)
                             </option>
-                            <option
-                                value="3"
-                                selected={recording.logoLevel < 5 && recording.logoLevel >= 2}
-                            >
+                            <option value="3" selected={recording.logoLevel < 5 && recording.logoLevel >= 2}>
                                 ロゴは参考程度
                             </option>
-                            <option value="1" selected={recording.logoLevel <= 1}>
-                                ロゴを使わない
-                            </option>
+                            <option value="1" selected={recording.logoLevel <= 1}> ロゴを使わない </option>
                         </select>
                         <span class="text-base-content/60 text-xs">
                             ロゴは合っているのにCMを取り違えるなら上げ、覚えたロゴが怪しいなら下げます

@@ -16,7 +16,6 @@
         onclose,
         notes = [],
         cmNote = null,
-        extra,
         actions,
     }: {
         program: ProgramDetail;
@@ -31,8 +30,6 @@
         notes?: { title: string; text: string }[];
         /** 何を使って検出したか (無音 / join_logo_scp)。判定の当てにできるか分かる */
         cmNote?: string | null;
-        /** 開いた場所だけで要るもの (録画ならロゴ位置の指定)。無ければ何も出ない */
-        extra?: Snippet;
         actions?: Snippet;
     } = $props();
 
@@ -125,22 +122,13 @@
                 入っている。時刻を並べていた頃は、長い一覧が説明文の下を埋めていた。
 
                 ロゴを教える口を出すかどうかも、この文言から決めている
-                (`format.logoUnusable`)。その口 (LogoArea) はこのすぐ下に続くので、
-                **あちらに見出しは付けない** — 同じことを2回読ませないため
+                (`format.logoUnusable`)。口そのものはチューナー画面にある — ロゴは
+                録画ごとではなく**局ごと**の話で、一度教えれば以降の全部に効く
             -->
             <div class="mt-3" data-testid="detail-cm">
                 <div class="text-sm font-medium">CM</div>
                 <div class="text-base-content/60 text-xs" data-testid="detail-cm-note">{cmNote}</div>
             </div>
-        {/if}
-
-        <!--
-            ロゴの位置を教える口。**CM の覚え書きのすぐ下に置く。**
-            失敗の理由 (下) を挟んでいた頃は、上の「jls は使えず…」と離れてしまい、
-            見出しが無いと何の話か分からなくなっていた
-        -->
-        {#if extra}
-            {@render extra()}
         {/if}
 
         {#each notes as note (note.title)}

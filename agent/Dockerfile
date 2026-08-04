@@ -4,8 +4,8 @@
 # **Native AOT で実行ファイル1個。** 別のPCへ置くときに「まず何かを入れて
 # ください」が要らないことが条件なので、ここは外せない (docs/roadmap.md)。
 #
-# bun 版 (agent/) と**同じ口**を持ち、同じ適合テスト
-# (agent/conformance.test.ts) を通る。入れ替えは像のタグを変えるだけ。
+# denpa から見える口は agent/conformance.test.ts が押さえている
+# (本物を起こして HTTP で当てる)。入れ替えは像のタグを変えるだけ。
 # ---------------------------------------------------------------------------
 # 既定の像がそのまま trixie (`-trixie` という札は無い)
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build

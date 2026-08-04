@@ -38,7 +38,8 @@ EPGStation の置き換えとして作ったもので、エンコード設定は
 | `src/lib/server/scramble.ts` | スクランブルの検出と、チューナー側への解除依頼 |
 | `src/lib/server/logo.ts` | 局ロゴの収集と保存 (番組表に出すPNG) |
 | `src/lib/server/logo-data.ts` | logoframe が覚えたロゴ (`.lgd`) の置き場・読み取り・破棄 |
-| `src/lib/components/LogoArea.svelte` | CM検出用のロゴ位置を画面から教える |
+| `src/lib/server/logo-learn.ts` | CM検出用のロゴを**録画より先に**覚える (局をまとめる決まりもここ) |
+| `src/lib/components/LogoArea.svelte` | CM検出用のロゴを画面で確かめ、位置を教え、捨てる |
 | `src/lib/components/Toasts.svelte` | 押した結果を画面の右下に浮かせて出す (本文を押し下げない) |
 | `src/lib/ts/psi.ts` | TS の PSI (NIT / SDT) を読む。エージェント側と共通 |
 | `src/lib/ts/aribtext.ts` | ARIB STD-B24 の8単位符号を読む (番組名・局名) |
@@ -112,7 +113,7 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 (`src/lib/server/config.ts` に直に書いてあります)。
 
 **画面から変えたいものは設定画面** (`src/lib/server/settings.ts`)。映像コーデック・CMの扱い・
-CMの探し方・生TSを残すか・無料放送だけか・ベーシック認証がここです。
+CMの探し方・ロゴの当てにしかた・生TSを残すか・無料放送だけか・ベーシック認証がここです。
 
 k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書いていません。
 残りは既定値がそのままあの構成なので、同じ値を書き写すと片方だけ直したときに
@@ -135,7 +136,12 @@ k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書い�
 | `EPG_CHANNEL_INTERVAL` | `21600000` | 同じチャンネルを集め直すまでの間(ms) |
 | `EPG_CHANNEL_TIMEOUT` | `300000` | 1チャンネルを開いておく上限(ms)。普段は EIT が揃った時点で閉じる |
 | `EPG_MIN_COVERAGE` | `259200000` | 番組表がここまで埋まっていない局は周期を待たずに集め直す(ms) |
+| `EPG_CHANNEL_RETRY` | `7200000` | 空のまま帰ってきた局を休ませる下限(ms)。EIT が来ない局を毎周回選ばないため |
 | `CHANNEL_SYNC_INTERVAL` | `60000` | 局だけを取り直す間隔(ms)。スキャンの結果はここで届く |
+| `SERVICE_FORGET_AFTER` | `1800000` | 局を見かけなくなってから持ち物を片付けるまで(ms)。1回の欠けでは片付けない |
+| `RULE_RETRACT_GRACE` | `3600000` | 条件から外れた予約を引っ込めなくなる、放送開始までの余裕(ms) |
+| `JLS_LOGO_LEVEL` | `6` | ロゴをどれだけ当てにするか(1〜8)の初期値。設定画面で変えられる |
+| `CM_CUT_MARGIN` | `0.8` | CMを実カットするとき、残す区間の頭を戻す長さ(秒) |
 | `SHUTDOWN_WAIT` | `21600000` | 止められたとき、録画が終わるまで待つ上限(ms)。`0` で待たない |
 | `EPGSTATION_*` | — | 引き継ぎ元の DB と録画置き場 |
 | `DENPA_AUTOSTART` | `1` | `0` で常駐処理を止める |
@@ -147,8 +153,8 @@ k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書い�
 | `/` | **予約と録画**を2ペインで並べる。**録画の行を押すと再生**、中身は「詳細」から。行の形はどの画面幅でも同じで、狭いところでは押すものが下へ回り込む。生TSを残しているときは大きさを両方出す (`43 MB (生TS 594 MB)`)。**エンコードの失敗では再生もダウンロードも消さない** — 落ちたのは焼き直しのほうで、生TSは無事 |
 | `/guide` | 番組表(グリッド)と番組検索。マスはジャンルごとに色を変える。詳細から予約・取消と、録れているものはそのまま再生できる |
 | `/rules` | 自動予約ルールの一覧と作成。「この条件で録れる番組」に**予約済みのものも競合も同じ表で**出す (1件ずつ取り消せる) |
-| `/tuners` | **チューナーの設定** (本数・デバイス・受けられる種別・LNB・無効化。書かなければ自動検出)、チャンネルスキャン (途中で中断でき、録画中でも実行できる)、チューナーの空きと何を掴んでいるか、取れているチャンネル (番組表の集まり具合つき)、エージェントとカードリーダーと局ロゴの状態 (**局ロゴを今すぐ取りに行く**: 地上波も衛星もチューナー2つで。進み具合が出る)。チューナーを掴んでいる相手は用途で出す (「録画: 番組名」「番組表 (T16)」「局ロゴ収集 (T16)」) |
-| `/settings` | 録画のしかた(映像コーデック — **「エンコードしない」もここ**/CMの扱い/CMの探し方/生TSを残すか/無料放送だけか)、通知先(Webhook)、ベーシック認証(パスワードの表示と作り直し)、EPGStation からの引き継ぎ |
+| `/tuners` | **チューナーの設定** (本数・デバイス・受けられる種別・LNB・無効化。書かなければ自動検出)、チャンネルスキャン (途中で中断でき、録画中でも実行できる)、チューナーの空きと何を掴んでいるか、取れているチャンネル (番組表の集まり具合つき)、エージェントとカードリーダーと局ロゴの状態 (**局ロゴを今すぐ取りに行く**: 地上波も衛星もチューナー2つで。進み具合が出る)。チューナーを掴んでいる相手は用途で出す (「録画: 番組名」「番組表 (T16)」「局ロゴ収集 (T16)」)。**CM検出用のロゴもここ** — 局ごとに覚えた絵を出し、位置を教える・捨てて覚え直す |
+| `/settings` | 録画のしかた(映像コーデック — **「エンコードしない」もここ**/CMの扱い/CMの探し方/ロゴの当てにしかた/生TSを残すか/無料放送だけか)、通知先(Webhook)、ベーシック認証(パスワードの表示と作り直し)、EPGStation からの引き継ぎ |
 | `/api/recordings/<id>/file` | 録画ファイル。Range 対応。**エンコード済みがあればそちら、無ければ生TS。エンコードが走っている間は生TSのほう** (録り直しの最中は library_path がまだ古いファイルを指していて、しかもそれは終わり際に消える) |
 | `/api/recordings/<id>/frame?at=<秒>` | 録画から1コマ (JPEG)。ロゴの位置を指定するときに使う (既定で右上を 16:9 のまま拡大、覚えてある枠は掴んで動かせる) |
 | `/api/services/<id>/logo-data` | **logoframe がいま覚えているロゴ** (白黒PNG)。番組表に出すロゴとは別物で、絵になっているかを確かめるためのもの |
@@ -158,27 +164,19 @@ k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書い�
 
 機材に触る側。中身は読まず、掴んだチャンネルの TS をそのまま流す。
 **`src/lib/ts` に依存していない** — TS を1バイトも解釈しないため。
+.NET の Native AOT で実行ファイル1個。
 なぜこの切り分けなのかは [architecture.md](architecture.md#チューナーエージェント)。
 
 | ファイル | 役割 |
 | --- | --- |
-| `agent/server.ts` | denpa からの窓口 (HTTP)。選局・チャンネルの控え・カード・解除 |
-| `agent/tuners.ts` | 優先度つきの取り合いと、選局プロセスの面倒 |
-| `agent/channels.ts` | `tuners.json` と `channels.json` の読み書き |
-
-## チューナーエージェント (.NET 版。`agent/`)
-
-**同じ口を持つ、書き直したほう。** bun 版と同じ適合テストを通る
-(`AGENT_CMD` を差し替えて2回走らせる)。Native AOT で実行ファイル1個。
-まだ配備には出していない ([roadmap.md](roadmap.md#チューナーを開いたままにする-エージェントの-net-化))。
-
-| ファイル | 役割 |
-| --- | --- |
 | `agent/Denpa.Agent/Program.cs` | HTTP の口 (Kestrel)。選局・チャンネルの控え・カード・解除 |
-| `agent/Denpa.Agent/TunerPool.cs` | 優先度つきの取り合いと、選局プロセスの面倒 |
+| `agent/Denpa.Agent/TunerPool.cs` | 優先度つきの取り合いと、掴んでいるデバイスの面倒 |
+| `agent/Denpa.Agent/Tuning.cs` | 選局そのもの (DVB / chardev)。掴んだまま変えられる |
+| `agent/Denpa.Agent/ChannelTable.cs` | チャンネル名 → 周波数と TSID |
+| `agent/Denpa.Agent/AribB25.cs` / `CardShare.cs` | B25 の解除と、鍵を他の拠点へ配る口 |
 | `agent/Denpa.Agent/DeviceProbe.cs` | **チューナーの自動検出** (ioctl で受けられる方式を聞く) |
 | `agent/Denpa.Agent/Config.cs` | `tuners.json` と `channels.json` の読み書き |
-| `agent/Denpa.Agent/Interop.cs` | 選局をプロセスグループごと終わらせる (`kill`) |
+| `agent/Denpa.Agent/Interop.cs` | 外の選局コマンド (`command`) をプロセスグループごと終わらせる |
 
 **チューナーは書かなくてよい。** 定義が無ければ `/dev/dvb/*` を開いて
 `DTV_ENUM_DELSYS` で方式を聞き、地上波か衛星かまで判別する。書いてあれば
@@ -192,9 +190,8 @@ k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書い�
 | `tests/stack.ts` | ワーカーごとに denpa と偽エージェントを1式立てる (これでファイル単位に並べられる) |
 | `tests/fake/` | 偽エージェント・偽の選局コマンド・偽の通知先・偽ffmpeg。**電波は `broadcast.ts` が組み立てる** (EIT も SDT も NIT も。同じものを偽エージェントと偽選局コマンドの両方が流す) |
 | `src/**/*.test.ts` | 純粋関数の境界条件 (bun test) |
-| `agent/*.test.ts` | チューナー側 (取り合い) |
-| `agent/Denpa.Agent.Tests/` | .NET 版 (手で書く設定の読み取り、チューナー自動検出の値の読み取り) |
-| `agent/conformance.test.ts` | **本物のエージェントを起こして HTTP の口に当てる。** チューナーの代わりは偽の選局コマンド。`AGENT_CMD` を差し替えれば、書き直したエージェントにも同じものを通せる |
+| `agent/Denpa.Agent.Tests/` | エージェント側 (手で書く設定の読み取り、選局表、チューナー自動検出) |
+| `agent/conformance.test.ts` | **本物のエージェントを起こして HTTP の口に当てる。** チューナーの代わりは偽の選局コマンド (`AGENT_CMD` で差し替えられる) |
 | `windows/verify.ps1` `mac/verify.sh` | `denpa://` の登録役 |
 
 回し方と方針は [development.md](development.md) に置いてある。
