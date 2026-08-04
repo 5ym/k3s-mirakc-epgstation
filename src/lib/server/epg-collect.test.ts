@@ -5,7 +5,7 @@ import type { AgentChannel } from './tuner';
  * どのチャンネルを集めに行くか。
  *
  * **ここが実機で暴走した。** 番組表が7日先まで埋まっているのに、30分ごとの
- * 周回で毎回ほぼ全チャンネルが選ばれ、1本あたり5分の上限まで開きっぱなしに
+ * 周回で毎回ほぼ全チャンネルが選ばれ、1本ぶんの上限まで開きっぱなしに
  * なっていた ([config.ts](config.ts) の epgChannelTimeout)。
  */
 const { config } = await import('./config');
@@ -87,7 +87,7 @@ describe('pickChannels', () => {
     /*
      * **実機に受信できない CS が 24 局残っていた。** 開いても EIT が1件も来ない
      * ので永久に薄いままで、「薄いから行く」だけで選んでいた頃は周回のたびに
-     * 選ばれ、5分の上限まで開きっぱなしになっていた
+     * 選ばれ、上限まで開きっぱなしになっていた
      */
     test('薄くても、行った直後は行き直さない', () => {
         const justNow = NOW - config.epgChannelRetry + 1;

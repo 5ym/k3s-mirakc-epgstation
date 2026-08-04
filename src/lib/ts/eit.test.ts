@@ -144,12 +144,59 @@ describe('集まり具合', () => {
         expect(progress.complete).toBe(true);
     });
 
+    /*
+     * **番号は飛ぶ。** 1つの table_id が受け持つのは4日ぶんで、基本は 0x50 から、
+     * 詳細は 0x58 から始まる。8日ぶんの放送なら 0x52〜0x57 は永久に来ない。
+     * 0x50 から last_table_id まで全部待っていた頃は、詳細を積んでいる局が
+     * **一度も揃わず**、5分の上限まで開きっぱなしになっていた
+     */
+    test('間の使われていない表は待たない', () => {
+        const progress = new ScheduleProgress();
+        progress.add({ ...at(0x50, 0, 0), lastTableId: 0x59 });
+        progress.add({ ...at(0x51, 0, 0), lastTableId: 0x59 });
+        progress.add({ ...at(0x58, 0, 0), lastTableId: 0x59 });
+        // 0x52〜0x57 は来ないが、いちばん後ろの 0x59 はまだ
+        expect(progress.complete).toBe(false);
+        progress.add({ ...at(0x59, 0, 0), lastTableId: 0x59 });
+        expect(progress.complete).toBe(true);
+    });
+
     test('版が変わったら数え直す。古い版で揃ったことにしない', () => {
         const progress = new ScheduleProgress();
         progress.add(at(0x50, 0, 0));
         expect(progress.complete).toBe(true);
         progress.add({ ...at(0x50, 0, 1, 1), version: 2 });
         expect(progress.complete).toBe(false);
+    });
+
+    /*
+     * **版は table_id ごとに別々に振られる。** 番組表の1つの表は
+     * table_id + 局 + TS で決まり、`version_number` はその単位で動く。
+     * 局に1つだけ持っていた頃は、基本 (0x50〜) と詳細 (0x58〜) を行き来する
+     * たびに数えたものを全部捨てていて、**揃ったと分かることが二度と無かった**。
+     * どのチャンネルも1本5分の上限まで開きっぱなしになる
+     */
+    test('別の表の版が違っても、こちらの数えたものは捨てない', () => {
+        const progress = new ScheduleProgress();
+        progress.add({ ...at(0x50, 0, 0), lastTableId: 0x58 });
+        // 詳細の表は別の版で流れてくる。ここで基本のぶんを捨ててはいけない
+        progress.add({ ...at(0x58, 0, 0), lastTableId: 0x58, version: 9 });
+
+        // 0x51〜0x57 は使われていないので、この2つで揃っている
+        expect(progress.complete).toBe(true);
+    });
+
+    test('同じ表の版が変わったときだけ、その表を数え直す', () => {
+        const progress = new ScheduleProgress();
+        progress.add({ ...at(0x50, 0, 0), lastTableId: 0x58 });
+        progress.add({ ...at(0x58, 0, 0), lastTableId: 0x58, version: 9 });
+        expect(progress.complete).toBe(true);
+
+        // 詳細だけ版が上がった。基本はそのまま、詳細だけ待ち直す
+        progress.add({ ...at(0x58, 0, 1, 1), lastTableId: 0x58, version: 10 });
+        expect(progress.complete).toBe(false);
+        progress.add({ ...at(0x58, 1, 1, 1), lastTableId: 0x58, version: 10 });
+        expect(progress.complete).toBe(true);
     });
 });
 

@@ -134,7 +134,7 @@ k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書い�
 | `RECONCILE_INTERVAL` | `300000` | 保存先の実体とDBを突き合わせる間隔(ms) |
 | `EPG_COLLECT_INTERVAL` | `1800000` | 番組表を集め直す局を選び直す間隔(ms) |
 | `EPG_CHANNEL_INTERVAL` | `21600000` | 同じチャンネルを集め直すまでの間(ms) |
-| `EPG_CHANNEL_TIMEOUT` | `300000` | 1チャンネルを開いておく上限(ms)。普段は EIT が揃った時点で閉じる |
+| `EPG_CHANNEL_TIMEOUT` | `600000` | 1チャンネルを開いておく上限(ms)。普段は EIT が揃った時点で閉じる |
 | `EPG_MIN_COVERAGE` | `259200000` | 番組表がここまで埋まっていない局は周期を待たずに集め直す(ms) |
 | `EPG_CHANNEL_RETRY` | `7200000` | 空のまま帰ってきた局を休ませる下限(ms)。EIT が来ない局を毎周回選ばないため |
 | `CHANNEL_SYNC_INTERVAL` | `60000` | 局だけを取り直す間隔(ms)。スキャンの結果はここで届く |

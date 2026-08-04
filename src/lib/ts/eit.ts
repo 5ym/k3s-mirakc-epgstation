@@ -292,17 +292,27 @@ export class ScheduleProgress {
     /** `table_id` → 最後のセクション番号 */
     private readonly lastSection = new Map<number, number>();
     private lastTableId = SCHEDULE_ACTUAL_MIN;
-    /** 版が変わったら数え直す。古い版のセクションで揃ったことにしない */
-    private version = -1;
+    /**
+     * `table_id` → 版。変わったらその表だけ数え直す。
+     *
+     * **版は `table_id` ごとに別々に振られる。** 番組表の1つの表 (sub_table) は
+     * `table_id` + 局 + TS で決まり、`version_number` はその単位で動く。
+     * 局に1つだけ持っていた頃は、**基本 (0x50〜) と詳細 (0x58〜) を行き来する
+     * たびに版が違って数えたものを全部捨てて**いた。揃ったと分かることが
+     * 二度と無いので、どのチャンネルも1本5分の上限まで開きっぱなしになる。
+     */
+    private readonly version = new Map<number, number>();
 
     add(section: EitSection): void {
         // p/f は番組表の完成度とは関係ない (いつでも2番組しか無い)
         if (section.tableId < SCHEDULE_ACTUAL_MIN) return;
-        if (section.version !== this.version) {
-            this.seen.clear();
-            this.segmentLast.clear();
-            this.lastSection.clear();
-            this.version = section.version;
+        if (section.version !== this.version.get(section.tableId)) {
+            for (const key of [...this.segmentLast.keys()]) {
+                if (key.startsWith(`${section.tableId}:`)) this.segmentLast.delete(key);
+            }
+            this.seen.delete(section.tableId);
+            this.lastSection.delete(section.tableId);
+            this.version.set(section.tableId, section.version);
         }
 
         const numbers = this.seen.get(section.tableId) ?? new Set<number>();
@@ -316,10 +326,25 @@ export class ScheduleProgress {
         this.lastTableId = Math.max(this.lastTableId, section.lastTableId);
     }
 
-    /** 使われている table_id を全部揃えられたか */
+    /**
+     * 使われている table_id を全部揃えられたか。
+     *
+     * **番号が飛ぶ。** 1つの `table_id` が受け持つのは4日ぶんで、基本は
+     * `0x50` から、詳細は `0x58` から始まる。日本の放送は8日ぶんなので、
+     * 実際に流れてくるのは `0x50` `0x51` と `0x58` `0x59` あたりだけで、
+     * **`0x52`〜`0x57` は永久に来ません**。
+     *
+     * `0x50` から `last_table_id` まで全部を待っていた頃は、詳細を積んでいる局が
+     * **一度も「揃った」にならず**、どのチャンネルも1本5分の上限まで開きっぱなしに
+     * なっていました (実機で、詳細の無い BS11 だけが早く閉じていた)。
+     *
+     * 見かけた表と、`last_table_id` が指す表だけを見ます。
+     */
     get complete(): boolean {
         if (this.seen.size === 0) return false;
-        for (let tableId = SCHEDULE_ACTUAL_MIN; tableId <= this.lastTableId; tableId++) {
+        // いちばん後ろの表は必ず流れてくる。来ていないなら、まだ途中
+        if (!this.seen.has(this.lastTableId)) return false;
+        for (const tableId of this.seen.keys()) {
             if (!this.completeTable(tableId)) return false;
         }
         return true;
