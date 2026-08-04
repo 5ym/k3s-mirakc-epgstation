@@ -305,9 +305,14 @@ export function parseFrameRate(value: string | undefined): number {
  * ffmpeg の stderr に出る `Duration:` を当てにしていた頃は、TS によっては
  * 拾えず、進み具合が最後まで 0% のままになっていた。先に ffprobe で押さえる。
  */
-export async function probeVideo(
-    input: string,
-): Promise<{ duration: number; fps: number; width: number; height: number; videoStart: number }> {
+export async function probeVideo(input: string): Promise<{
+    duration: number;
+    fps: number;
+    width: number;
+    height: number;
+    videoStart: number;
+    sar: number;
+}> {
     const read = async (args: string[]): Promise<string> => {
         const proc = Bun.spawn([config.ffprobe, '-v', 'error', ...args, input], {
             stdout: 'pipe',
@@ -322,18 +327,22 @@ export async function probeVideo(
     let fps = NaN;
     let width = NaN;
     let height = NaN;
-    let videoStart = NaN;
+    let videoStart = 0;
+    let sar = 1;
     try {
         // `nk=1` (鍵を出さない) にはしない。鍵で引くために必ず `key=value` で受ける
-        const format = fields(await read(['-show_entries', 'format=duration', '-of', 'default=nw=1']));
+        const format = fields(
+            await read(['-show_entries', 'format=duration,start_time', '-of', 'default=nw=1']),
+        );
         duration = Number(format.get('duration'));
+        const formatStart = Number(format.get('start_time'));
 
         const stream = fields(
             await read([
                 '-select_streams',
                 'v:0',
                 '-show_entries',
-                'stream=avg_frame_rate,width,height,start_time',
+                'stream=avg_frame_rate,width,height,start_time,sample_aspect_ratio',
                 '-of',
                 'default=nw=1',
             ]),
@@ -341,7 +350,8 @@ export async function probeVideo(
         fps = parseFrameRate(stream.get('avg_frame_rate'));
         width = Number(stream.get('width'));
         height = Number(stream.get('height'));
-        videoStart = Number(stream.get('start_time'));
+        sar = parseRatio(stream.get('sample_aspect_ratio'));
+        videoStart = leadIn(Number(stream.get('start_time')), formatStart);
     } catch {
         // ffprobe が使えない環境。呼ぶ側が NaN を見て諦める
     }
@@ -362,8 +372,41 @@ export async function probeVideo(
          * では、そのぶん字幕が早く出る (実機で「字幕が少し早い」として出ていた)。
          * ずらすのに使う (encoder.buildArgs の `-output_ts_offset`)
          */
-        videoStart: Number.isFinite(videoStart) && videoStart > 0 ? videoStart : 0,
+        videoStart,
+        /**
+         * 画素の横長さ。1440x1080 の地上波HDは 4:3 で、これを掛けると 1920 になる。
+         * 読めなければ 1 (正方形) とみなす
+         */
+        sar,
     };
+}
+
+/**
+ * 映像が始まるまでの間。**入れ物の始まりから数える。**
+ *
+ * TS の `start_time` は**放送の時刻そのもの** (PTS) で、頭からの秒数ではない。
+ * 引き算をせずに使っていたときは `-output_ts_offset -62170` (−17時間) を
+ * 渡してしまい、エンコードの進み具合が動かなくなった (実機)。
+ *
+ * ずれが数秒を超えたら 0 にする。読み違えているほうが疑わしく、
+ * 大きくずらすと壊れ方が派手になる
+ */
+const MAX_LEAD_IN = 5;
+
+export function leadIn(streamStart: number, formatStart: number): number {
+    if (!Number.isFinite(streamStart)) return 0;
+    const from = Number.isFinite(formatStart) ? formatStart : 0;
+    const lead = streamStart - from;
+    return lead > 0 && lead <= MAX_LEAD_IN ? lead : 0;
+}
+
+/** `4:3` のような比を数にする。読めなければ 1 */
+export function parseRatio(value: string | undefined): number {
+    const match = /^(\d+)[:/](\d+)$/.exec((value ?? '').trim());
+    if (match === null) return 1;
+    const [, a, b] = match;
+    const ratio = Number(a) / Number(b);
+    return Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
 }
 
 /** 尺だけを軽く取る。CM区間を秒で扱うために必要 */

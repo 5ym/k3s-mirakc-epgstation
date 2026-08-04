@@ -22,8 +22,32 @@ import { resolveConflicts } from './scheduler';
 import { chunks } from './stream';
 import { type AgentChannel, getChannels, getTuners, openChannelStream, serviceKey } from './tuner';
 
-/** 最後に集め終わった時刻。`type:channel` ごと */
+/**
+ * 最後に集め終わった時刻。`type:channel` ごと。
+ *
+ * **DBから起こす。** 覚えているだけだと Pod が入れ替わるたびに「1度も行って
+ * いない」に戻り、番組表が7日先まで埋まっているのに**全チャンネルを回し直して
+ * いた** (実機で、入れ替えのたびに46チャンネルぶん)。
+ *
+ * 番組の行の `updated_at` がそのまま「最後に取り込んだ時刻」なので、
+ * 数え直せば再起動をまたいで残る。
+ */
 const collected = new Map<string, number>();
+
+/** その物理チャンネルを最後に集めた時刻。**番組の行から数える** */
+function lastCollected(): Map<string, number> {
+    const rows = queryAll<{ type: string; channel: string; at: number }>(
+        `SELECT s.type, s.channel, MAX(p.updated_at) AS at
+           FROM services s JOIN programs p ON p.service_id = s.id
+          GROUP BY s.type, s.channel`,
+    );
+    const map = new Map(rows.map((row) => [`${row.type}:${row.channel}`, row.at]));
+    // 覚えているほうが新しければそちらを採る (取り込む番組が0件だった回)
+    for (const [name, at] of collected) {
+        if (at > (map.get(name) ?? 0)) map.set(name, at);
+    }
+    return map;
+}
 
 const key = (channel: AgentChannel) => `${channel.type}:${channel.channel}`;
 
@@ -90,12 +114,13 @@ interface Work {
 export function pickChannels(
     channels: AgentChannel[],
     reachOf: (channel: AgentChannel) => number,
+    lastOf: (channel: AgentChannel) => number,
     at: number,
 ): AgentChannel[] {
     const work: Work[] = channels.map((channel) => ({
         channel,
         reach: reachOf(channel),
-        last: collected.get(key(channel)) ?? 0,
+        last: lastOf(channel),
     }));
 
     return work
@@ -213,9 +238,12 @@ async function run(): Promise<number> {
      * さっき集め終えたところで押すと1本も回らず、何も起きていないように見える。
      * 押した人は「いま集め直したい」なので、全部回って薄いほうから行く
      */
+    const last = lastCollected();
+    const lastOf = (channel: AgentChannel) => last.get(key(channel)) ?? 0;
+
     const targets = boosted
         ? [...channels].sort((a, b) => reachOf(a) - reachOf(b))
-        : pickChannels(channels, reachOf, at);
+        : pickChannels(channels, reachOf, lastOf, at);
     if (targets.length === 0) return 0;
 
     const tuners = (await getTuners().catch(() => [])).filter((tuner) => !tuner.disabled);

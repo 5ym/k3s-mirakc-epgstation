@@ -6,7 +6,9 @@ import {
     fields,
     invertRanges,
     isCmLength,
+    leadIn,
     parseFrameRate,
+    parseRatio,
     parseSilences,
     widenKeep,
 } from './cm';
@@ -132,6 +134,42 @@ describe('残す区間の頭を戻す', () => {
             { start: 0, end: 100 },
             { start: 129.2, end: 200 },
         ]);
+    });
+});
+
+/**
+ * TS の `start_time` は**放送の時刻そのもの** (PTS) で、頭からの秒数ではない。
+ * 引き算をせずに使って `-output_ts_offset -62170` (−17時間) を渡し、
+ * エンコードの進み具合が動かなくなった (実機)
+ */
+describe('映像が始まるまでの間', () => {
+    test('入れ物の始まりから数える', () => {
+        expect(leadIn(62170.583, 62169.916)).toBeCloseTo(0.667, 3);
+    });
+
+    test('数秒を超えるずれは信じない', () => {
+        // 引き算を忘れたときの値。そのまま渡すと出来上がりが壊れる
+        expect(leadIn(62170.583, 0)).toBe(0);
+        expect(leadIn(62170.583, Number.NaN)).toBe(0);
+    });
+
+    test('映像のほうが先なら 0', () => {
+        expect(leadIn(10, 10.5)).toBe(0);
+        expect(leadIn(Number.NaN, 0)).toBe(0);
+    });
+});
+
+describe('画素の横長さ', () => {
+    test('比を数にする', () => {
+        expect(parseRatio('4:3')).toBeCloseTo(4 / 3, 6);
+        expect(parseRatio('1:1')).toBe(1);
+    });
+
+    test('読めなければ 1 (正方形)', () => {
+        // ffmpeg は分からないとき 0:1 や N/A を返す。0 を掛けると幅が消える
+        expect(parseRatio('0:1')).toBe(1);
+        expect(parseRatio('N/A')).toBe(1);
+        expect(parseRatio(undefined)).toBe(1);
     });
 });
 

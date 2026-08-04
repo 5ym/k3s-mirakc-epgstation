@@ -105,25 +105,30 @@ function resolveCodec(codec: VideoCodec): 'av1' | 'h264' {
  * ところが**添え書きを見ないプレイヤーがある。** Android の VLC は
  * ハードウェア再生のとき画素の数だけを見るので、4:3 に潰れて出る (実機で確認)。
  *
- * 横を SAR ぶん伸ばして 1920x1080 にし、SAR を 1 にしておけば、
- * どのプレイヤーでも同じ形で出る。もともと正方形の素材 (1920x1080) では
- * 何も変わらない。奇数幅にならないよう2の倍数に丸める
+ * **大きさはこちらで測って渡す** (`probeVideo` の width と sar)。
+ * `scale=trunc(iw*sar/2)*2` のように ffmpeg の式で書くと、SAR が読めない
+ * 素材で `sar` が 0 になり、幅 0 で落ちる。数で渡せばその目はない
  */
-const SQUARE_PIXELS = 'scale=trunc(iw*sar/2)*2:ih,setsar=1';
+function squarePixels(size: { width: number; height: number } | undefined): string | null {
+    if (size === undefined) return null;
+    return `scale=${size.width}:${size.height},setsar=1`;
+}
 
-function videoArgs(codec: 'av1' | 'h264', smooth: boolean): { filter: string; encoder: string[] } {
+function videoArgs(
+    codec: 'av1' | 'h264',
+    smooth: boolean,
+    scale: string | null,
+): { filter: string; encoder: string[] } {
+    const steps = [deinterlace(smooth), ...(scale === null ? [] : [scale])];
     if (codec === 'h264') {
         return {
-            filter: `${deinterlace(smooth)},${SQUARE_PIXELS},format=yuv420p`,
+            filter: [...steps, 'format=yuv420p'].join(','),
             // 実測で AV1 とほぼ同じ速さ。SVT-AV1 の既定より遅い preset を
             // 指定すると逆に倍かかるので、どちらも既定のままにしてある
             encoder: ['libx264', '-preset', 'medium', '-crf', '22'],
         };
     }
-    return {
-        filter: `${deinterlace(smooth)},${SQUARE_PIXELS},format=yuv420p10le`,
-        encoder: ['libsvtav1'],
-    };
+    return { filter: [...steps, 'format=yuv420p10le'].join(','), encoder: ['libsvtav1'] };
 }
 
 const DUAL_MONO = 2;
@@ -179,6 +184,11 @@ export interface EncodeOptions {
      * プレイヤー**ではそのぶん字幕が早く出る (実機で「字幕が少し早い」として出た)
      */
     videoStart?: number;
+    /**
+     * 正方形の画素で出したときの大きさ。**渡されたときだけ引き伸ばす。**
+     * 1440x1080 (SAR 4:3) なら 1920x1080。もともと正方形の素材では渡さない
+     */
+    displaySize?: { width: number; height: number };
 }
 
 /**
@@ -196,7 +206,11 @@ export function buildArgs(
     codec: VideoCodec = 'av1',
     options: EncodeOptions = {},
 ): string[] {
-    const video = videoArgs(resolveCodec(codec), options.smoothMotion === true);
+    const video = videoArgs(
+        resolveCodec(codec),
+        options.smoothMotion === true,
+        squarePixels(options.displaySize),
+    );
 
     const args = ['-y'];
 
@@ -858,6 +872,17 @@ async function runJob(jobId: number): Promise<void> {
     }
     // 映像が始まるまでの間。全部のトラックをこのぶん前へ寄せて 0 秒から始める
     encodeOptions.videoStart = measured.videoStart;
+
+    /*
+     * 画素が横長なら、正方形に直した大きさで焼く (地上波HDは 1440x1080 の SAR 4:3)。
+     * **もともと正方形なら渡さない** — 同じ大きさへの scale は仕事が増えるだけ
+     */
+    if (Number.isFinite(measured.width) && Number.isFinite(measured.height) && measured.sar !== 1) {
+        const width = Math.round((measured.width * measured.sar) / 2) * 2;
+        if (width > 0 && width !== measured.width) {
+            encodeOptions.displaySize = { width, height: measured.height };
+        }
+    }
 
     /*
      * 放送どおりに描いた字幕を PGS にしておく。
