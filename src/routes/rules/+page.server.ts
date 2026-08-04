@@ -361,12 +361,16 @@ function ruleName(
  * 「新しい番組に当ててほしい」だから、というつもりだったが、そのぶん
  * 数MBの取得と2万件の書き戻しを待たされていた。
  *
- * いまは mirakc が番組表の更新を知らせてくるので (`/events`)、手元の番組表は
- * 常に新しい。取り直す理由がなくなったので当てるだけにする。
+ * いまは番組表を持っているのが denpa 自身なので、取り直す理由がない。当てるだけ。
+ *
+ * @param rule そのルールだけを当てる。**足したときにしか使えない** —
+ *   新しいルールは他の予約を外すことができないので、範囲を絞れる
+ *   (`rules.applyRules`)
  */
-async function reapply(): Promise<void> {
-    applyRules();
+async function reapply(rule?: number): Promise<number> {
+    const { dropped } = applyRules(rule === undefined ? {} : { rule });
     await resolveConflicts();
+    return dropped;
 }
 
 export const actions = {
@@ -385,7 +389,7 @@ export const actions = {
         const services = queryAll<Service>('SELECT * FROM services');
         const name = ruleName(keyword, types, ids, genreIds, services);
 
-        database()
+        const created = database()
             .prepare(
                 // 焼き方は書かない。エンコードもCMも全体設定で、焼くときに読む
                 `INSERT INTO rules (name, keyword, ignore_keyword, search_fields, service_ids, service_types,
@@ -404,7 +408,8 @@ export const actions = {
                 now(),
             );
 
-        await reapply();
+        // 足したルールは他の予約を外せないので、そのルールだけ当てれば足りる
+        await reapply(Number(created.lastInsertRowid));
         return { success: true };
     },
 
@@ -442,8 +447,12 @@ export const actions = {
                 id,
             );
 
-        // 条件が変わったので、これから録るぶんは組み直す。
-        // 条件から外れた予約は残しておく(意図して個別に残している場合があるため)
+        /*
+         * 条件が変わったので、これから録るぶんは組み直す。
+         * **条件に入ったものは立ち、外れたものは引っ込む** (`rules.applyRules`)。
+         * 外れたぶんを残していた頃は、条件を狭めても消す手立てが1件ずつの
+         * 取り消ししか無かった
+         */
         await reapply();
         redirect(303, '/rules');
     },
@@ -480,27 +489,31 @@ export const actions = {
         const id = Number(form.get('id'));
         if (!Number.isFinite(id)) return fail(400, { message: 'ルールIDが不正です' });
         /*
-         * まだ1コマも録っていない予約は行ごと消す。残すと、ルールを消したのに
-         * 録画だけ続く。
+         * **取り消しの記録だけ先に消す。** ルールごと無くなるので、
+         * 「このルールには作り直させない」という目印を残す意味がない。
+         * 残していた頃は、後から `scheduled` に戻ったときに**消したはずの
+         * ルールの予約が「ルール: (削除済み)」として一覧に並んでいた**
+         * (実機で 45 件)。
          *
-         * 「取り消し」にはしない。applyRules は予約行が既にあると INSERT OR IGNORE で
-         * 飛ばすので(手で取り消したものをルールが復活させないため)、取り消しで残すと
-         * 同じルールを作り直しても二度と予約が立たなくなる。
-         *
-         * **状態では選ばない。** `scheduled`/`conflict` だけ消していた頃は、
-         * 取り消し済みのぶんがルールとの紐付けを外されただけで残っていた。
-         * それが後から `scheduled` に戻ると、**消したはずのルールの予約が
-         * 「ルール: (削除済み)」として一覧に並ぶ**。実機で 45 件そうなった
+         * まだ立っている予約はここでは触らない。**他のルールが引き取れるかどうかを
+         * 見てから決める** — 消したのが「アニメ」でも、「無職転生」が残っていれば
+         * その予約は生き続けるべき (`rules.applyRules` が付け替える)
          */
-        const canceled = database()
-            .prepare('DELETE FROM reservations WHERE rule_id = ? AND started_at IS NULL')
+        database()
+            .prepare(
+                `DELETE FROM reservations
+                  WHERE rule_id = ? AND started_at IS NULL AND state = 'canceled'`,
+            )
             .run(id);
         // 録画中・録画済みのぶんは履歴として残すので、ルールとの紐付けだけ外す
-        database().prepare('UPDATE reservations SET rule_id = NULL WHERE rule_id = ?').run(id);
+        database()
+            .prepare('UPDATE reservations SET rule_id = NULL WHERE rule_id = ? AND started_at IS NOT NULL')
+            .run(id);
         database().prepare('DELETE FROM rules WHERE id = ?').run(id);
 
-        await resolveConflicts();
-        return { success: true, canceled: canceled.changes };
+        // 引き取り手の無い予約はここで消える (猶予は効かない = 人が押した結果なので)
+        const dropped = await reapply();
+        return { success: true, canceled: dropped };
     },
 
     apply: async () => {

@@ -1,6 +1,7 @@
 import { type Genre, genreMatches } from '$lib/arib';
 import { parseSearchFields, type SearchField } from '../search';
 import type { Program, Rule } from '../types';
+import { config } from './config';
 import { database, now, queryAll } from './db';
 import { settings } from './settings';
 import { toHalfWidth } from './title';
@@ -171,14 +172,63 @@ function textCache(program: Program): (fields: SearchField[]) => string {
     };
 }
 
+export interface RuleSync {
+    /** 新しく立てた予約 */
+    created: number;
+    /** どのルールにも当たらなくなって消した予約 */
+    dropped: number;
+    /** 別のルールが引き取った予約 */
+    moved: number;
+}
+
 /**
- * 有効なルールを未来の番組に当てて予約を作る。
- * 既に予約がある番組は UNIQUE(program_id) で弾かれるので、手動予約やユーザーが
- * キャンセルした予約をルールが勝手に作り直すことはない。
+ * ルールを取り込みたい予約。まだ立てていないものと、いま立っているものを突き合わせる。
  */
-export function applyRules(): number {
+interface Held {
+    id: number;
+    program_id: number;
+    rule_id: number | null;
+    start_at: number;
+}
+
+/**
+ * ルールを番組表に当て直して、予約をそろえる。
+ *
+ * **足すだけでなく、外れたものは消す。** 足すだけだった頃は、番組表が書き換わって
+ * 条件から外れた予約がそのまま残り、消す手立てが画面の「取り消し」しか無かった。
+ *
+ * - 当たるのに予約が無い → **作る**
+ * - 予約があるのに、どのルールにも当たらなくなった → **消す**
+ * - 当てているルールが変わった (別のルールが引き取った) → **付け替える**
+ *
+ * **消すのであって「取り消し」にはしない。** 取り消しは*人が押したこと*の記録で、
+ * ルールは二度と作り直さない (`INSERT OR IGNORE`)。番組表が動いただけのものを
+ * 取り消しにすると、条件に戻ってきても永久に予約が立たなくなる。
+ *
+ * ### 引っ込めないもの
+ *
+ * 手違いで消すほうが、余分に録るより高くつく。次のどれかに当たるものは残す。
+ *
+ * - **手動の予約と、録り始めたもの** (`manual` / `started_at`)
+ * - **人が取り消したもの。** 取り消しの記録はそのまま残す
+ * - **番組表からその番組ごと消えているとき。** 「条件から外れた」のか
+ *   「まだ読めていない」のか区別が付かない
+ * - **題名が空の番組。** 放送が名前を出していないのではなく、こちらがまだ
+ *   読めていないだけのことがある (実機で 23,000 件のうち 11,000 件がそうだった)
+ * - **もうすぐ始まるもの** (`config.ruleRetractGrace`)。番組表は放送直前まで
+ *   書き換わるので、そこで条件を外れても手遅れになるより録っておく。
+ *   ただし**ルールごと消された/止められたぶんは、直前でも引っ込める** —
+ *   そちらは人が押した結果なので迷う理由がない
+ *
+ * @param options.rule そのルールだけを当てる。**足すことしかしない。**
+ *   ルールを足した直後用 — 新しいルールは他の予約を外すことができないので、
+ *   全ルール × 全番組 (実機で 318 × 25,608) を回し直さずに済む
+ */
+export function applyRules(options: { rule?: number } = {}): RuleSync {
+    const result: RuleSync = { created: 0, dropped: 0, moved: 0 };
     const rules = database().prepare('SELECT * FROM rules WHERE enabled = 1').all() as Rule[];
-    if (rules.length === 0) return 0;
+    const adding = options.rule !== undefined;
+    if (rules.length === 0 && adding) return result;
 
     const at = now();
     // 録画のしかたは全体で1つ。ルールごとに持たせるとどこで決まったか分からなくなる
@@ -191,45 +241,86 @@ export function applyRules(): number {
         at,
     );
 
+    const compiled = rules.map(compile);
+    const searching = adding ? compiled.filter((c) => c.rule.id === options.rule) : compiled;
+
+    /** 番組 → 受け持つルール。同じ番組に何本当たっても予約は1つで、**先勝ち** */
+    const wanted = new Map<number, { rule: Rule; program: Program }>();
+    for (const program of programs) {
+        const textOf = textCache(program);
+        for (const candidate of searching) {
+            if (!matchesCompiled(candidate, program, program.service_type, recording.freeOnly, textOf))
+                continue;
+            wanted.set(program.id, { rule: candidate.rule, program });
+            break;
+        }
+    }
+
     const insert = database().prepare(`
         INSERT OR IGNORE INTO reservations
             (program_id, rule_id, service_id, name, description, start_at, end_at,
              priority, manual, encode, keep_original, cm_cut, codec, state, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 'scheduled', ?, ?)
     `);
+    const drop = database().prepare('DELETE FROM reservations WHERE id = ?');
+    const move = database().prepare(
+        'UPDATE reservations SET rule_id = ?, priority = ?, updated_at = ? WHERE id = ?',
+    );
 
-    const compiled = rules.map(compile);
+    /** いまルールが立てている予約。手動と、録り始めたものは入らない */
+    const held = adding
+        ? []
+        : queryAll<Held>(
+              `SELECT id, program_id, rule_id, start_at FROM reservations
+                WHERE manual = 0 AND started_at IS NULL AND state IN ('scheduled', 'conflict')`,
+          );
+    /** 番組表にまだ載っている番組。読めていないだけのものと区別する */
+    const listed = new Map(programs.map((program) => [program.id, program]));
+    /** まだ生きているルール。消された/止められたぶんは猶予を置かずに引っ込める */
+    const enabled = new Set(rules.map((rule) => rule.id));
+    const grace = at + config.ruleRetractGrace;
 
-    let created = 0;
     const tx = database().transaction(() => {
-        for (const program of programs) {
-            const textOf = textCache(program);
-            for (const candidate of compiled) {
-                if (!matchesCompiled(candidate, program, program.service_type, recording.freeOnly, textOf))
-                    continue;
-                const rule = candidate.rule;
-                const res = insert.run(
-                    program.id,
-                    rule.id,
-                    program.service_id,
-                    program.name,
-                    program.description,
-                    program.start_at,
-                    program.end_at,
-                    rule.priority,
-                    recording.encode ? 1 : 0,
-                    recording.keepOriginal ? 1 : 0,
-                    recording.cmCut,
-                    recording.codec,
-                    at,
-                    at,
-                );
-                if (res.changes > 0) created++;
-                // 同じ番組に複数ルールが当たっても予約は1つ。先勝ちで次の番組へ
-                break;
+        for (const { rule, program } of wanted.values()) {
+            const res = insert.run(
+                program.id,
+                rule.id,
+                program.service_id,
+                program.name,
+                program.description,
+                program.start_at,
+                program.end_at,
+                rule.priority,
+                recording.encode ? 1 : 0,
+                recording.keepOriginal ? 1 : 0,
+                recording.cmCut,
+                recording.codec,
+                at,
+                at,
+            );
+            if (res.changes > 0) result.created++;
+        }
+
+        for (const reservation of held) {
+            const owner = wanted.get(reservation.program_id);
+            if (owner !== undefined) {
+                // 別のルールが引き取った。付け替えるだけで、録るものは変わらない
+                if (owner.rule.id !== reservation.rule_id) {
+                    move.run(owner.rule.id, owner.rule.priority, at, reservation.id);
+                    result.moved++;
+                }
+                continue;
             }
+            const program = listed.get(reservation.program_id);
+            // 番組表から消えているだけかもしれない。題名が空のものも判断材料にならない
+            if (program === undefined || program.name === '') continue;
+            // ルールが生きているのに外れた = 番組表が動いた。直前なら録っておく
+            const byChurn = reservation.rule_id !== null && enabled.has(reservation.rule_id);
+            if (byChurn && reservation.start_at < grace) continue;
+            drop.run(reservation.id);
+            result.dropped++;
         }
     });
     tx();
-    return created;
+    return result;
 }

@@ -327,6 +327,8 @@ export interface SyncResult {
     retimed: number;
     pruned: number;
     reserved: number;
+    /** 条件から外れて引っ込めた予約 */
+    dropped: number;
 }
 
 /**
@@ -335,14 +337,20 @@ export interface SyncResult {
  * ルールを当て直し、予約の時刻を合わせ、古い番組を捨て、取り合いを裁き直す。
  * **番組を読むところとは分けてある** — 1チャンネル集めるたびに全部やり直すと、
  * 52チャンネルぶん同じことを52回することになる。
+ *
+ * **ルールを当て直すのはここ。** 決まった時刻に見回るのではなく、
+ * **番組表が動いたとき**にそろえる。書き換わって条件に入ったものは立ち、
+ * 外れたものは引っ込む (`rules.applyRules`)。
  */
 export function settle(programs = 0): SyncResult {
+    const rules = applyRules();
     const result: SyncResult = {
         services: 0,
         programs,
         retimed: syncReservationTimes(),
         pruned: pruneOldPrograms(),
-        reserved: applyRules(),
+        reserved: rules.created,
+        dropped: rules.dropped,
     };
     emit('programs');
     return result;
