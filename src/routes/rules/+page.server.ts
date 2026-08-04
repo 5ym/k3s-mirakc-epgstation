@@ -52,8 +52,13 @@ function conditionsFrom(params: URLSearchParams): Rule | null {
         free_only: 1,
         enabled: 1,
         priority: 2,
-        encode: 1,
-        keep_original: 0,
+        /*
+         * **録画のしかたは設定画面から取る。** ここに 1 / 0 と書いていた頃は、
+         * 設定を変えても新しいルールだけ昔の値で出てきて、開くたびに直すことに
+         * なっていた (実際に効くのは設定のほうなので、画面が嘘をついていた)
+         */
+        encode: settings().encode ? 1 : 0,
+        keep_original: settings().keepOriginal ? 1 : 0,
         cm_cut: settings().cmCut,
         codec: settings().codec,
         source: null,

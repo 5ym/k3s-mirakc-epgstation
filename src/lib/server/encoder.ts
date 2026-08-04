@@ -597,7 +597,12 @@ async function prepareCm(
     signal: AbortSignal,
 ): Promise<EncodeOptions & { chaptersFile: string | null }> {
     const none = { keep: null, chaptersFile: null };
-    if (recording.cm_cut === 'off') return none;
+    /*
+     * **CMの扱いは焼くときの設定に従う。** 録画の行にも写してあるが、それは
+     * 録り始めた時点の値で、設定を変えても直らない (`keepOriginal` は前から
+     * 設定を見ている。ここだけ食い違っていた)
+     */
+    if (settings().cmCut === 'off') return none;
 
     setPhase(jobId, 'cm', 'CMを探しています');
 
@@ -637,7 +642,7 @@ async function prepareCm(
         .run(`CM ${detection.cm.length} 箇所 (${detection.note})`, jobId);
     if (detection.cm.length === 0) return none;
 
-    if (recording.cm_cut === 'cut') {
+    if (settings().cmCut === 'cut') {
         /*
          * **頭を少し戻してから切る。** 切り出しはキーフレーム単位なので、
          * 判定どおりの位置から始めると本編の頭が1 GOP ぶん削れる (widenKeep)。
@@ -876,13 +881,21 @@ async function runJob(jobId: number): Promise<void> {
         return finishCanceled(jobId, decoded);
     }
 
+    /*
+     * **焼き方は焼くときの設定に従う。**
+     *
+     * 録画の行にもコーデックとCMの扱いが写してあるが、それは**録り始めた時点**の
+     * 値で、設定を変えても直らない。同じ設定が2箇所にあると、どちらで決まったのか
+     * 分からなくなる (生TSを残すかどうかは前から設定を見ていて、ここだけ
+     * 食い違っていた)。予約にもルールにも持たせない、が揃った形
+     */
     let result = await runFfmpeg(
         job,
         source,
         working,
         recording.audio_type,
         null,
-        recording.codec,
+        settings().codec,
         encodeOptions,
         measured,
     );
@@ -896,7 +909,7 @@ async function runJob(jobId: number): Promise<void> {
             working,
             recording.audio_type,
             config.encodeRetrySeek,
-            recording.codec,
+            settings().codec,
             encodeOptions,
             measured,
         );

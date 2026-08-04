@@ -325,16 +325,15 @@
                                             {/if}
                                         </div>
                                     {/if}
-                                    {#if !res.encode || res.keep_original}
-                                        <div class="mt-1 flex flex-wrap gap-1">
-                                            {#if !res.encode}
-                                                <span class="badge badge-ghost badge-sm">TSのみ</span>
-                                            {/if}
-                                            {#if res.keep_original}
-                                                <span class="badge badge-ghost badge-sm">生TSも残す</span>
-                                            {/if}
-                                        </div>
-                                    {/if}
+                                    <!--
+                                        **焼き方の札は出さない。**
+
+                                        予約の行にも「TSのみ」「生TSも残す」が写して
+                                        あったが、それは予約を立てた時点の値で、実際に
+                                        効くのは**焼くときの設定** (settings)。
+                                        設定を変えても札は昔のまま残るので、画面が
+                                        嘘をついていた。決まるところは設定画面ひとつ
+                                    -->
                                 </div>
 
                                 <div class="flex shrink-0 flex-wrap items-center gap-2">
