@@ -97,12 +97,21 @@ describe('消えた局の片付け', () => {
             .run(serviceId, Date.now(), Date.now() + 1800_000, Date.now(), Date.now());
     }
 
+    /** その局を「しばらく見かけていない」ことにする。時計を進める代わり */
+    function unseenFor(serviceId: number, ms: number): void {
+        db()
+            .prepare('UPDATE services SET updated_at = ? WHERE id = ?')
+            .run(Date.now() - ms, serviceId);
+    }
+
     test('番組表は消し、まだ始めていない予約は取り消す。局の行は残す', async () => {
         await syncServicesOnly();
         seed(3239123608);
 
         // 局が丸ごと入れ替わった (スキャンのやり直し)
         offered = [channel(23609, '別の局')];
+        await syncServicesOnly();
+        unseenFor(3239123608, config.serviceForgetAfter + 1);
         await syncServicesOnly();
 
         expect(db().query('SELECT COUNT(*) AS n FROM programs').get()).toEqual({ n: 0 });
@@ -126,6 +135,27 @@ describe('消えた局の片付け', () => {
          * 読むと、次の取り込みまで番組表が丸ごと消える
          */
         offered = [];
+        await syncServicesOnly();
+
+        expect(db().query('SELECT COUNT(*) AS n FROM programs').get()).toEqual({ n: 1 });
+        expect(db().query('SELECT state FROM reservations WHERE id = 1').get()).toEqual({
+            state: 'scheduled',
+        });
+    });
+
+    /*
+     * **実機で踏んだところ。** エージェントからは空だけでなく*欠けた*一覧も返る。
+     * そちらは「1局も返ってこなかった」の網に掛からないので、まだ現役の局
+     * (NHK総合1・TOKYO MX1・テレ東…) の予約が 44 件まとめて取り消されていた。
+     * 一覧は1分ごとに取り直しているので、1回ぐらい欠けても待てばいい
+     */
+    test('1回見かけなかっただけでは片付けない', async () => {
+        offered = [channel(23608, 'ＴＯＫＹＯ　ＭＸ'), channel(23609, '別の局')];
+        await syncServicesOnly();
+        seed(3239123608);
+
+        // 一覧が欠けた回
+        offered = [channel(23609, '別の局')];
         await syncServicesOnly();
 
         expect(db().query('SELECT COUNT(*) AS n FROM programs').get()).toEqual({ n: 1 });

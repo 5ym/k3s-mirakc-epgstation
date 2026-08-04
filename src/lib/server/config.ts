@@ -204,6 +204,15 @@ export const config = {
     /** 局の一覧をエージェントから取り直す間隔。スキャンの結果はここで届く */
     channelSyncInterval: num('CHANNEL_SYNC_INTERVAL', 1 * MIN),
     /**
+     * 続けて見かけなかった局の持ち物 (番組表・まだ始めていない予約) を片付けるまでの間。
+     *
+     * **1回見かけなかっただけでは片付けない。** エージェントから欠けた一覧が
+     * 返ることがあり、実機ではそれで**現役の局の予約が44件まとめて取り消された**。
+     * 一覧は1分ごとに取り直すので、ここまで見かけないなら本当に居ない
+     * (`epg.forgetMissing`)
+     */
+    serviceForgetAfter: num('SERVICE_FORGET_AFTER', 30 * MIN),
+    /**
      * 止められたとき、録画が終わるまで待つ上限。
      *
      * 0 で待たずに止まる。**Kubernetes の terminationGracePeriodSeconds と

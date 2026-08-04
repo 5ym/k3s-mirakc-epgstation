@@ -18,7 +18,15 @@
         serviceName,
         area = null,
     }: {
-        recordingId: number;
+        /**
+         * コマを出す録画。**まだ1本も録っていない局では null。**
+         *
+         * その場合でも**覚えているロゴは出す** — 事前学習は録画を待たずに回るので、
+         * 「録画が無い ＝ ロゴも無い」ではない。出さずに畳んでいた頃は、
+         * ちゃんと覚えている局を開いても「録画が1本要ります」しか出ず、
+         * 覚えているのかどうかを画面から確かめる手立てが無かった
+         */
+        recordingId: number | null;
         serviceId: number;
         serviceName: string;
         /** 既に入れてある範囲 ("x,y,w,h")。やり直すとき用 */
@@ -65,7 +73,7 @@
     let frame = $state<{ url: string; width: number; height: number } | null>(null);
     $effect(() => {
         // 畳んでいる間は取り出さない。1コマ出すのに録画を頭から読ませることになる
-        if (!open) return;
+        if (!open || recordingId === null) return;
         const position = at;
         const controller = new AbortController();
         let url: string | null = null;
@@ -141,7 +149,7 @@
      * 覚えているものが無いときだけは、ここで教えるしか手が無いので開いておく。
      */
     let opened = $state<boolean | null>(null);
-    const open = $derived(opened ?? (checked && learned === null));
+    const open = $derived(opened ?? (checked && learned === null && recordingId !== null));
 
     /** 記録されているコマの座標 ↔ 画面上の座標。倍率は横と縦で違う */
     const scale = $derived(
@@ -262,6 +270,8 @@
     <p class="text-base-content/70 text-sm">
         {#if learned !== null}
             {serviceName} のロゴは覚えています。下の絵がロゴになっていれば位置は合っているので、 まずはそのまま様子を見てください。
+        {:else if recordingId === null}
+            {serviceName} のロゴはまだ覚えていません。空いているチューナーで掴んで覚えます。
         {:else}
             ロゴが出ているコマまで送って、<strong>ロゴを四角で囲って</strong>ください。 枠は<strong
                 >掴んで動かせます</strong
@@ -317,51 +327,60 @@
         開いたままだと詳細の他の中身が画面の外へ押し出されていた。
         覚えているものが無いときだけ開いて出す (それ以外に教える手が無いので)
     -->
-    <details
-        class="mt-2"
-        {open}
-        ontoggle={(event) => (opened = event.currentTarget.open)}
-        data-testid="logo-area-details"
-    >
-        <summary class="cursor-pointer text-sm font-medium" data-testid="logo-area-toggle">
-            ロゴを四角で囲って教える
-        </summary>
+    {#if recordingId === null}
         <!--
+            囲うにはコマが要る。**それでも上の「いま覚えているロゴ」は出る** —
+            事前学習は録画を待たずに回るので、録画が無くても覚えていることはある
+        -->
+        <p class="text-base-content/60 mt-2 text-xs" data-testid="logo-area-no-recording">
+            位置を教えるにはこの局の録画が1本要ります (コマを出すため)。
+        </p>
+    {:else}
+        <details
+            class="mt-2"
+            {open}
+            ontoggle={(event) => (opened = event.currentTarget.open)}
+            data-testid="logo-area-details"
+        >
+            <summary class="cursor-pointer text-sm font-medium" data-testid="logo-area-toggle">
+                ロゴを四角で囲って教える
+            </summary>
+            <!--
             きっちり囲うと失敗する。実機の TOKYO MX で試すと、文字ぴったりの
             146×24 では「有効な画素が少なすぎる」と弾かれ、周りを空けた 200×70 で
             初めて覚えられた。まわりの背景も見て判断しているらしい
         -->
-        <p class="text-base-content/60 mt-1 text-xs">
-            <strong>ロゴのまわりを少し広めに</strong>囲ってください。文字にぴったり合わせると、
-            まわりの背景が足りずに覚えられないことがあります。
-        </p>
+            <p class="text-base-content/60 mt-1 text-xs">
+                <strong>ロゴのまわりを少し広めに</strong>囲ってください。文字にぴったり合わせると、
+                まわりの背景が足りずに覚えられないことがあります。
+            </p>
 
-        <div class="mt-2 flex flex-wrap items-end gap-2">
-            <label class="flex flex-col gap-1">
-                <span class="text-xs font-medium">見る位置 (秒)</span>
-                <input
-                    type="number"
-                    min="0"
-                    step="30"
-                    bind:value={at}
-                    class="input input-bordered input-sm w-28"
-                    data-testid="logo-at"
-                />
-            </label>
-            <!-- ロゴはほぼ右上。全体を出すとその一角が小さすぎて掴めない -->
-            <label class="flex items-center gap-1 text-xs">
-                <input
-                    type="checkbox"
-                    class="checkbox checkbox-xs"
-                    bind:checked={zoomed}
-                    data-testid="logo-zoom"
-                />
-                右上を拡大
-            </label>
-            <span class="text-base-content/60 text-xs">ロゴが出ていない場面なら位置を変えてください</span>
-        </div>
+            <div class="mt-2 flex flex-wrap items-end gap-2">
+                <label class="flex flex-col gap-1">
+                    <span class="text-xs font-medium">見る位置 (秒)</span>
+                    <input
+                        type="number"
+                        min="0"
+                        step="30"
+                        bind:value={at}
+                        class="input input-bordered input-sm w-28"
+                        data-testid="logo-at"
+                    />
+                </label>
+                <!-- ロゴはほぼ右上。全体を出すとその一角が小さすぎて掴めない -->
+                <label class="flex items-center gap-1 text-xs">
+                    <input
+                        type="checkbox"
+                        class="checkbox checkbox-xs"
+                        bind:checked={zoomed}
+                        data-testid="logo-zoom"
+                    />
+                    右上を拡大
+                </label>
+                <span class="text-base-content/60 text-xs">ロゴが出ていない場面なら位置を変えてください</span>
+            </div>
 
-        <!--
+            <!--
         画像の上で掴んで引く。canvas は使わない (画像に重ねた div で足りるうえ、
         拡大縮小の計算が1箇所で済む)。
 
@@ -371,82 +390,88 @@
         切り取り窓は拡大していても **16:9 のまま**にする。窓を絵なりの高さにしていた頃は
         縦長の帯が出ていて、しかも中の絵を寄せていなかったので左上が見えていた
     -->
-        <div
-            class="bg-base-200 mt-2 max-w-full overflow-hidden"
-            style={zoomed ? 'aspect-ratio: 16 / 9' : ''}
-            data-testid="logo-viewport"
-        >
             <div
-                class="relative touch-none select-none"
-                style={zoomed ? `width:${SCALE * 100}%; margin-left:-${SHIFT}%` : 'width:100%'}
-                onpointerdown={down}
-                onpointermove={move}
-                onpointerup={up}
-                role="presentation"
+                class="bg-base-200 mt-2 max-w-full overflow-hidden"
+                style={zoomed ? 'aspect-ratio: 16 / 9' : ''}
+                data-testid="logo-viewport"
             >
-                {#if frame !== null}
-                    <img
-                        src={frame.url}
-                        alt="ロゴの位置を選ぶためのコマ"
-                        class="block w-full"
-                        bind:clientWidth={shownWidth}
-                        bind:clientHeight={shownHeight}
-                        data-testid="logo-frame"
-                    />
-                {:else}
-                    <!-- 取り出している間も掴む場所を残しておく。出た瞬間に大きさが変わらないように -->
-                    <div
-                        class="flex h-48 items-center justify-center text-sm"
-                        data-testid="logo-frame-loading"
-                    >
-                        {failed ? '' : 'コマを取り出しています…'}
-                    </div>
-                {/if}
-                {#if box !== null}
-                    <div
-                        class="border-primary bg-primary/20 pointer-events-none absolute border-2"
-                        style="left:{box.x}px; top:{box.y}px; width:{box.w}px; height:{box.h}px;"
-                        data-testid="logo-box"
-                    ></div>
-                {/if}
-            </div>
-        </div>
-        {#if zoomed}
-            <!-- 切り取って出しているので、見えていない側があることは言っておく -->
-            <p class="text-base-content/60 mt-1 text-xs">
-                右上だけを{SCALE}倍で出しています。ロゴが他の隅にある局は「右上を拡大」を外してください。
-            </p>
-        {/if}
-
-        {#if failed}
-            <div class="text-error mt-1 text-sm" data-testid="logo-frame-error">
-                そのコマを取り出せませんでした。位置を変えてみてください。
-            </div>
-        {/if}
-
-        <form method="POST" action="?/logoArea" use:submitting class="mt-2 flex flex-wrap items-center gap-2">
-            <input type="hidden" name="serviceId" value={serviceId} />
-            <input type="hidden" name="area" {value} />
-            <button
-                class="btn btn-sm btn-primary"
-                disabled={value === '' || unchanged}
-                data-testid="logo-save"
-            >
-                この位置で覚える
-            </button>
-            <span class="text-base-content/60 font-mono text-xs" data-testid="logo-value">
-                {value === '' ? '囲ってください' : unchanged ? `いまの設定: ${value}` : value}
-            </span>
-            {#if area}
-                <button
-                    class="btn btn-sm btn-ghost"
-                    formaction="?/logoAreaClear"
-                    data-testid="logo-clear"
-                    type="submit"
+                <div
+                    class="relative touch-none select-none"
+                    style={zoomed ? `width:${SCALE * 100}%; margin-left:-${SHIFT}%` : 'width:100%'}
+                    onpointerdown={down}
+                    onpointermove={move}
+                    onpointerup={up}
+                    role="presentation"
                 >
-                    自動に戻す
-                </button>
+                    {#if frame !== null}
+                        <img
+                            src={frame.url}
+                            alt="ロゴの位置を選ぶためのコマ"
+                            class="block w-full"
+                            bind:clientWidth={shownWidth}
+                            bind:clientHeight={shownHeight}
+                            data-testid="logo-frame"
+                        />
+                    {:else}
+                        <!-- 取り出している間も掴む場所を残しておく。出た瞬間に大きさが変わらないように -->
+                        <div
+                            class="flex h-48 items-center justify-center text-sm"
+                            data-testid="logo-frame-loading"
+                        >
+                            {failed ? '' : 'コマを取り出しています…'}
+                        </div>
+                    {/if}
+                    {#if box !== null}
+                        <div
+                            class="border-primary bg-primary/20 pointer-events-none absolute border-2"
+                            style="left:{box.x}px; top:{box.y}px; width:{box.w}px; height:{box.h}px;"
+                            data-testid="logo-box"
+                        ></div>
+                    {/if}
+                </div>
+            </div>
+            {#if zoomed}
+                <!-- 切り取って出しているので、見えていない側があることは言っておく -->
+                <p class="text-base-content/60 mt-1 text-xs">
+                    右上だけを{SCALE}倍で出しています。ロゴが他の隅にある局は「右上を拡大」を外してください。
+                </p>
             {/if}
-        </form>
-    </details>
+
+            {#if failed}
+                <div class="text-error mt-1 text-sm" data-testid="logo-frame-error">
+                    そのコマを取り出せませんでした。位置を変えてみてください。
+                </div>
+            {/if}
+
+            <form
+                method="POST"
+                action="?/logoArea"
+                use:submitting
+                class="mt-2 flex flex-wrap items-center gap-2"
+            >
+                <input type="hidden" name="serviceId" value={serviceId} />
+                <input type="hidden" name="area" {value} />
+                <button
+                    class="btn btn-sm btn-primary"
+                    disabled={value === '' || unchanged}
+                    data-testid="logo-save"
+                >
+                    この位置で覚える
+                </button>
+                <span class="text-base-content/60 font-mono text-xs" data-testid="logo-value">
+                    {value === '' ? '囲ってください' : unchanged ? `いまの設定: ${value}` : value}
+                </span>
+                {#if area}
+                    <button
+                        class="btn btn-sm btn-ghost"
+                        formaction="?/logoAreaClear"
+                        data-testid="logo-clear"
+                        type="submit"
+                    >
+                        自動に戻す
+                    </button>
+                {/if}
+            </form>
+        </details>
+    {/if}
 </div>

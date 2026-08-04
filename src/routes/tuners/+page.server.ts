@@ -1,5 +1,6 @@
 import { fail } from '@sveltejs/kit';
 import { database, queryAll, queryOne } from '$lib/server/db';
+import { CURRENT_SERVICES } from '$lib/server/epg';
 import { collectNow, collectState } from '$lib/server/epg-collect';
 import { stats as logoStats, sweepNow, sweepState } from '$lib/server/logo';
 import { forgetLogoData } from '$lib/server/logo-data';
@@ -167,7 +168,18 @@ export async function load() {
     };
 }
 
-/** 局ごとの、CM検出ロゴの覚え具合。教えるときのコマは直近の録画から出す */
+/**
+ * 局ごとの、CM検出ロゴの覚え具合。教えるときのコマは直近の録画から出す。
+ *
+ * **録画は `services.id` で引く。** `recordings.service_id` に入っているのは
+ * denpa の内部ID (3239123608) で、`services.service_id` の ARIB のサービスID
+ * (23608) とは別物。突き合わせる相手を間違えていた頃は**どの局も1本も
+ * 見つからず**、全部の局が「位置を教えるにはこの局の録画が1本要ります」に
+ * なっていた (実機で、録画が3本ある TOKYO MX1 でもそう出ていた)。
+ *
+ * **いま選局できる局だけ**にする。数え上げ (`logo-learn.stats`) と揃えないと、
+ * 「6 / 46 局」と出ている下に 125 局が並ぶ。
+ */
 function cmLogoState(): CmLogo[] {
     const services = queryAll<{
         id: number;
@@ -177,10 +189,10 @@ function cmLogoState(): CmLogo[] {
     }>(`
         SELECT s.id, s.name, s.logo_area,
                (SELECT r.id FROM recordings r
-                 WHERE r.service_id = s.service_id AND r.deleted_at IS NULL
+                 WHERE r.service_id = s.id AND r.deleted_at IS NULL
                  ORDER BY r.id DESC LIMIT 1) AS recording_id
           FROM services s
-         WHERE s.service_type = 1
+         WHERE s.service_type = 1 AND ${CURRENT_SERVICES}
          ORDER BY s.remote_control_key IS NULL, s.remote_control_key, s.id
     `);
     return services.map((service) => ({ ...service, learned: learned(service.id) }));

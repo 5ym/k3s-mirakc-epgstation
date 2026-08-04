@@ -12,8 +12,15 @@
     // 番組表を集めている最中の様子も 'tuners' で流れてくる
     liveUpdates(['scan', 'services', 'logos', 'tuners', 'programs']);
     const scan = $derived(data.scan);
-    /** まだ覚えていない局だけ並べる。覚えている局に用は無い */
-    const unlearned = $derived(data.cmLogos.filter((service) => !service.learned));
+    /**
+     * CM検出のロゴ。**覚えていない局を先に、でも全部並べる。**
+     *
+     * 覚えていない局だけ出していた頃は、**覚えているロゴを確かめる場所が
+     * どこにも無かった**。自動探索はロゴでない縁を拾うこともあるので、
+     * 「当たらない」と思ったときに絵を見られることのほうが要る。
+     * 畳んであるので、並べても1行ずつ
+     */
+    const cmLogos = $derived([...data.cmLogos].sort((a, b) => Number(a.learned) - Number(b.learned)));
 
     const TYPE_LABEL: Record<string, string> = { GR: '地上波', BS: 'BS', CS: 'CS' };
     /** チューナーが受けられる種別。設定の表で並べる順 */
@@ -504,30 +511,37 @@
                             録画より先に、空いているチューナーで数分ぶん掴んで覚えます。覚えられなかった局は、
                             下から位置を教えてください (薄いロゴや動くロゴは自動では見つかりません)。
                         </dd>
-                        {#if unlearned.length > 0}
+                        {#if cmLogos.length > 0}
                             <dd class="w-full space-y-2" data-testid="cm-logo-missing">
-                                {#each unlearned as service (service.id)}
+                                {#each cmLogos as service (service.id)}
                                     <details class="rounded border-base-300 border p-2">
                                         <summary class="cursor-pointer text-sm">
                                             {service.name}
+                                            <!--
+                                                覚えたかどうかは畳んだまま分かるようにする。
+                                                開かないと分からない頃は、100局ぶん開いて回る
+                                                しかなかった
+                                            -->
+                                            <span
+                                                class="badge badge-xs {service.learned
+                                                    ? 'badge-success'
+                                                    : 'badge-ghost'}"
+                                                data-testid="cm-logo-state"
+                                            >
+                                                {service.learned ? '覚えました' : 'まだ'}
+                                            </span>
                                             {#if service.logo_area !== null}
                                                 <span class="text-base-content/60 text-xs">
                                                     — 教えた範囲 {service.logo_area}
                                                 </span>
                                             {/if}
                                         </summary>
-                                        {#if service.recording_id === null}
-                                            <p class="text-base-content/60 mt-2 text-xs">
-                                                位置を教えるにはこの局の録画が1本要ります (コマを出すため)。
-                                            </p>
-                                        {:else}
-                                            <LogoArea
-                                                recordingId={service.recording_id}
-                                                serviceId={service.id}
-                                                serviceName={service.name}
-                                                area={service.logo_area}
-                                            />
-                                        {/if}
+                                        <LogoArea
+                                            recordingId={service.recording_id}
+                                            serviceId={service.id}
+                                            serviceName={service.name}
+                                            area={service.logo_area}
+                                        />
                                     </details>
                                 {/each}
                             </dd>

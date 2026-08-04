@@ -145,11 +145,20 @@ export function syncServices(channels: AgentChannel[]): number {
  *
  * **1局も取れなかった回では何もしない** (`count > 0` のときだけ呼ぶ)。エージェントが
  * 起動直後や不調で空を返すことはあり、それを「全部消えた」と読むと番組表ごと消える。
+ *
+ * **1回見かけなかっただけでも片付けない。** 空ではなく*欠けた*一覧が返ることも
+ * あり、そちらは `count > 0` の網に掛からない。実機では、まだ現役の局
+ * (NHK総合1・TOKYO MX1・テレ東・テレビ朝日・フジテレビ…) の予約が
+ * **44件まとめて取り消されていた** — 一覧が欠けた1分間の取り込みが1回あっただけで。
+ *
+ * 見かけた局には毎回 `updated_at` を入れているので、**そこから見かけていない
+ * 時間が測れる**。それが `serviceForgetAfter` を超えた局だけ片付ける。
+ * エージェントが一時的に転んだだけなら、戻ってきた時点で時計が巻き戻る。
  */
 function forgetMissing(at: number, seen: Set<number>): number {
-    const stale = queryAll<{ id: number; name: string }>('SELECT id, name FROM services').filter(
-        (service) => !seen.has(service.id),
-    );
+    const stale = queryAll<{ id: number; name: string; updated_at: number }>(
+        'SELECT id, name, updated_at FROM services',
+    ).filter((service) => !seen.has(service.id) && at - service.updated_at >= config.serviceForgetAfter);
     if (stale.length === 0) return 0;
 
     const dropPrograms = database().prepare('DELETE FROM programs WHERE service_id = ?');
