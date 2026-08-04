@@ -17,8 +17,9 @@ using Microsoft.AspNetCore.Http.Features;
  * チャンネルスキャンで見つかった局を判断するのもあちらの仕事 (docs/roadmap.md)。
  */
 
-// 実機で選局だけ試す口。サーバは立てない (Probe.cs)
+// 実機で選局と復号だけ試す口。サーバは立てない (Probe.cs)
 if (args.ElementAtOrDefault(0) == "--tune") return Probe.Run(args);
+if (args.ElementAtOrDefault(0) == "--decode-file") return Probe.Decode(args);
 
 var port = int.TryParse(Environment.GetEnvironmentVariable("AGENT_PORT"), out var configured)
     ? configured

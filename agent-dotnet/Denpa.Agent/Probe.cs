@@ -26,6 +26,56 @@ public static class Probe
     /// <summary>1チャンネルあたり読む時間</summary>
     private static readonly TimeSpan Read = TimeSpan.FromSeconds(3);
 
+    /// <summary>
+    /// ファイルを1つ解く。**チューナーを使わずに B25 だけ確かめる。**
+    ///
+    /// <para>
+    /// 掛かったまま録れてしまったものを救うのにも使える (いまは
+    /// <c>/denpa/decode</c> が <c>recisdb</c> を起こしてやっている)。
+    /// </para>
+    /// </summary>
+    public static int Decode(string[] args)
+    {
+        var source = args.ElementAtOrDefault(1);
+        var destination = args.ElementAtOrDefault(2);
+        if (source is null || destination is null)
+        {
+            Console.Error.WriteLine("usage: denpa-agent --decode-file <in.ts> <out.ts>");
+            return 2;
+        }
+
+        using var b25 = AribB25.Open();
+        Console.WriteLine($"カード {string.Join(" / ", b25.Ids())}");
+
+        using var input = File.OpenRead(source);
+        using var output = File.Create(destination);
+        var buffer = new byte[188 * 1024];
+        long read;
+        long written = 0;
+        long scrambled = 0;
+        long packets = 0;
+
+        while ((read = input.Read(buffer)) > 0)
+        {
+            for (var at = 0; at + 188 <= read; at += 188)
+            {
+                packets++;
+                if (Scrambled(buffer.AsSpan(at))) scrambled++;
+            }
+            var decoded = b25.Decode(buffer.AsSpan(0, (int)read));
+            output.Write(decoded);
+            written += decoded.Length;
+        }
+
+        var rest = b25.Flush();
+        output.Write(rest);
+        written += rest.Length;
+
+        var before = packets == 0 ? 0 : 100.0 * scrambled / packets;
+        Console.WriteLine($"{input.Length} -> {written} バイト  元は {before:F1}% が掛かっていました");
+        return 0;
+    }
+
     public static int Run(string[] args)
     {
         var device = args.ElementAtOrDefault(1);
@@ -38,8 +88,16 @@ public static class Probe
 
         var lnbAt = Array.IndexOf(args, "--lnb");
         var lnb = lnbAt >= 0 ? args.ElementAtOrDefault(lnbAt + 1) : null;
+        var decode = args.Contains("--decode");
 
         var known = Config.FromEnvironment().StreamIds();
+
+        using var b25 = decode ? AribB25.Open() : null;
+        if (b25 is not null)
+        {
+            var ids = b25.Ids();
+            Console.WriteLine($"カード {(ids.Length == 0 ? "(番号を読めません)" : string.Join(" / ", ids))}");
+        }
 
         using ITuneDevice tuner = device.Contains("/dvb/", StringComparison.Ordinal)
             ? new DvbTuner(device, lnb)
@@ -73,14 +131,14 @@ public static class Probe
             }
             Console.WriteLine($"    同期 {(DateTime.UtcNow - started).TotalMilliseconds:F0} ms");
 
-            Measure(tuner.Output, name);
+            Measure(tuner.Output, name, b25);
         }
 
         return 0;
     }
 
-    /// <summary>読めたバイト数と、それが TS の形をしているか</summary>
-    private static void Measure(Stream stream, string name)
+    /// <summary>読めたバイト数と、それが TS の形をしているか。解かせたなら解けたか</summary>
+    private static void Measure(Stream stream, string name, AribB25? b25)
     {
         var buffer = new byte[188 * 1024];
         var started = DateTime.UtcNow;
@@ -89,6 +147,9 @@ public static class Probe
         long total = 0;
         long sync = 0;
         long packets = 0;
+        long scrambledIn = 0;
+        long outPackets = 0;
+        long scrambledOut = 0;
 
         while (DateTime.UtcNow < deadline)
         {
@@ -101,6 +162,16 @@ public static class Probe
             {
                 packets++;
                 if (buffer[at] == 0x47) sync++;
+                if (Scrambled(buffer.AsSpan(at))) scrambledIn++;
+            }
+
+            if (b25 is null) continue;
+
+            var decoded = b25.Decode(buffer.AsSpan(0, read));
+            for (var at = 0; at + 188 <= decoded.Length; at += 188)
+            {
+                outPackets++;
+                if (Scrambled(decoded[at..])) scrambledOut++;
             }
         }
 
@@ -109,6 +180,22 @@ public static class Probe
         Console.WriteLine(
             $"    最初の1バイト {first.TotalMilliseconds:F0} ms  "
             + $"{total / 1024} KiB  {mbps:F2} Mbps  同期バイト {ratio:F1}%");
+
+        var before = packets == 0 ? 0 : 100.0 * scrambledIn / packets;
+        if (b25 is null)
+        {
+            Console.WriteLine($"    掛かっているパケット {before:F1}%");
+            return;
+        }
+
+        var after = outPackets == 0 ? 0 : 100.0 * scrambledOut / outPackets;
+        Console.WriteLine($"    掛かっているパケット {before:F1}% -> 解いたあと {after:F1}% ({outPackets} 個)");
         if (total == 0) Console.Error.WriteLine($"    {name}: 1バイトも来ていません");
     }
+
+    /// <summary>
+    /// スクランブルが掛かっているか。**4バイト目の上2ビット** (transport_scrambling_control)。
+    /// 解けていれば 0 になる
+    /// </summary>
+    private static bool Scrambled(ReadOnlySpan<byte> packet) => (packet[3] & 0xC0) != 0;
 }
