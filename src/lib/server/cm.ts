@@ -353,7 +353,32 @@ export async function probeVideo(input: string): Promise<{
         width = Number(stream.get('width'));
         height = Number(stream.get('height'));
         sar = parseRatio(stream.get('sample_aspect_ratio'));
-        videoStart = leadIn(Number(stream.get('start_time')), formatStart);
+
+        /*
+         * **頭出しは「実際に復号できた1コマ目」で測る。** stream の start_time は
+         * 最初の**パケット**の時刻で、そこから何コマかは参照先が録れておらず
+         * 捨てられる。実機ではその差が 0.567 秒 (17コマ = 半GOP) あった。
+         *
+         *     start_time 6115.872 / 実際に出た1コマ目 6116.439 (I)
+         *
+         * 上限 (MAX_LEAD_IN) より先まで読んでも使わないので、そのぶんだけ見る
+         */
+        const first = firstFrameTime(
+            await read([
+                '-select_streams',
+                'v:0',
+                '-show_frames',
+                '-read_intervals',
+                `%+${MAX_LEAD_IN + 1}`,
+                '-show_entries',
+                'frame=best_effort_timestamp_time',
+                '-of',
+                'default=nw=1',
+            ]),
+        );
+        // 復号できるコマが見つからなければパケットの時刻で代用する
+        const start = Number.isFinite(first) ? first : Number(stream.get('start_time'));
+        videoStart = leadIn(start, formatStart);
     } catch {
         // ffprobe が使えない環境。呼ぶ側が NaN を見て諦める
     }
@@ -366,13 +391,16 @@ export async function probeVideo(input: string): Promise<{
         width: positive(width),
         height: positive(height),
         /**
-         * **映像が始まるまでの間。** TS は音声のほうが先に始まっていることが多く、
-         * 実機の録画では映像の1コマ目が 0.667 秒あとだった。
+         * **映像が始まるまでの間。入れ物の始まりから、実際に映る1コマ目まで。**
          *
-         * そのまま焼くと出来上がりの映像も 0.667 秒から始まる。時刻をそのまま
-         * 読むプレイヤーなら合っているが、**1コマ目を 0 秒として数えるプレイヤー**
-         * では、そのぶん字幕が早く出る (実機で「字幕が少し早い」として出ていた)。
-         * ずらすのに使う (encoder.buildArgs の `-output_ts_offset`)
+         * TS は音声のほうが先に始まっているのがふつうで、実機では 0.930 秒あった。
+         * そのまま焼くと出来上がりも音声だけの区間から始まり、**1コマ目を 0 秒
+         * として数えるプレイヤー**ではそのぶん字幕が早く出る。
+         *
+         * **ここを捨てる** (encoder.buildArgs の `-ss`)。ずらす (`-output_ts_offset`)
+         * のでは直らなかった — Matroska は負の時刻を持てないので、下がった音声を
+         * muxer が押し戻し、全トラックまとめて元の位置に戻る。実測でも 0.363 秒
+         * 渡して動いたのは 0.022 秒だけだった
          */
         videoStart,
         /**
@@ -405,6 +433,24 @@ export async function probeVideo(input: string): Promise<{
  * 大きくずらすと壊れ方が派手になる
  */
 const MAX_LEAD_IN = 5;
+
+/**
+ * `ffprobe -show_frames` の吐き出しから、**最初に復号できたコマの時刻**を読む。
+ *
+ * 頭のほうは参照先が録れていないコマが混ざるので、ffprobe も ffmpeg も
+ * 最初の I フレームまで捨てる。ここで返るのは捨て終わったあとの1コマ目。
+ * 1件も無ければ NaN (呼ぶ側がパケットの時刻で代用する)
+ */
+export function firstFrameTime(output: string): number {
+    for (const line of output.split('\n')) {
+        const match = /^best_effort_timestamp_time=(-?[\d.]+)/.exec(line.trim());
+        if (match !== null) {
+            const at = Number(match[1]);
+            if (Number.isFinite(at)) return at;
+        }
+    }
+    return NaN;
+}
 
 export function leadIn(streamStart: number, formatStart: number): number {
     if (!Number.isFinite(streamStart)) return 0;

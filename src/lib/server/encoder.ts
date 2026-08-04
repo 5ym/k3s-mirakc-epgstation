@@ -188,12 +188,11 @@ export interface EncodeOptions {
      */
     pgsFile?: string | null;
     /**
-     * 映像が始まるまでの間(秒)。**出来上がりの映像を 0 秒から始めるために引く。**
+     * 映像が出るまでの音声だけの区間(秒)。**頭から捨てる長さ** (`probeVideo`)。
      *
-     * TS は音声のほうが先に始まっていることが多く、実機の録画では映像の1コマ目が
-     * 0.667 秒あとだった。そのまま焼くと出来上がりの映像も 0.667 秒から始まる。
-     * 時刻をそのまま読むプレイヤーなら合っているが、**1コマ目を 0 秒として数える
-     * プレイヤー**ではそのぶん字幕が早く出る (実機で「字幕が少し早い」として出た)
+     * 捨てると映像・音声・字幕が同じ瞬間から始まるので、時刻を読むプレイヤーでも
+     * 1コマ目から数えるプレイヤーでも同じ絵になる。捨てるのは映像がまだ無い
+     * ところなので、見えるものは減らない
      */
     videoStart?: number;
     /**
@@ -201,6 +200,20 @@ export interface EncodeOptions {
      * 1440x1080 (SAR 4:3) なら 1920x1080。もともと正方形の素材では渡さない
      */
     displaySize?: { width: number; height: number };
+}
+
+/** これ以下は捨てない。1コマにも満たないずれのために seek を掛けても得るものが無い */
+const MIN_SKIP = 0.05;
+
+/**
+ * 頭から捨てる長さ。**焼くほうと字幕を作るほうで同じ値を使う。**
+ *
+ * ここが食い違うと、捨てたぶんだけ字幕がずれる。片方だけ「短いから捨てない」と
+ * 判断することがないよう、判断そのものをここ1箇所に置く
+ */
+export function headSkip(videoStart: number | undefined): number {
+    const start = videoStart ?? 0;
+    return Number.isFinite(start) && start > MIN_SKIP ? start : 0;
 }
 
 /**
@@ -226,12 +239,23 @@ export function buildArgs(
 
     const args = ['-y'];
 
-    if (seek !== null) {
-        // 録画開始直後の1秒未満だけ、多重化されたもう一方の映像ストリームのPAT/PMTが確定しておらず
-        // エンコーダの初期化(fps/解像度確定)自体が失敗することがある。
-        // 最初の失敗を検知した後だけ頭を少し捨てて再試行する(常時捨てると本編側が削れるため)
-        args.push('-ss', String(seek));
-    }
+    /*
+     * **頭を捨てる。** 2つの理由が足し算になる。
+     *
+     * - `videoStart` … 映像が出るまでの音声だけの区間 (実機で 0.930 秒)。
+     *   ここを残すと、1コマ目を 0 秒として数えるプレイヤーで字幕がそのぶん早く出る。
+     *   **ずらす (`-output_ts_offset`) のでは直らない** — Matroska は負の時刻を
+     *   持てないので muxer が全トラックまとめて押し戻す (実測: 0.363 渡して
+     *   動いたのは 0.022 だけ)。捨てれば映像も音声も 0.000 から始まる
+     * - `seek` … 録画開始直後の1秒未満だけ、多重化されたもう一方の映像ストリームの
+     *   PAT/PMT が確定しておらず、エンコーダの初期化 (fps/解像度確定) 自体が
+     *   失敗することがある。最初の失敗を検知した後だけ渡す
+     *   (常時捨てると本編側が削れるため)
+     *
+     * 字幕 (`.sup`) は捨てたぶんを引いた時刻で作ってある (subtitle.rebase)。
+     */
+    const skip = (seek ?? 0) + headSkip(options.videoStart);
+    if (skip > 0) args.push('-ss', String(skip));
     // チャンネル切り替え直後は前番組のPAT/PMTの残骸が先頭に混ざるため、長めにprobeしてから構成を確定させる
     args.push('-analyzeduration', '15000000', '-probesize', '30000000');
     args.push('-i', input);
@@ -288,16 +312,6 @@ export function buildArgs(
     // トラックのdefaultフラグを明示(未設定だとプレイヤーが自動選択せず音声が出ないことがある。
     // 字幕は上で入れたときだけ立てる)
     args.push('-disposition:v:0', 'default', '-disposition:a:0', 'default');
-    /*
-     * **映像を 0 秒から始める。**
-     *
-     * 音声のほうが先に始まっている TS では、そのまま焼くと映像も途中から
-     * 始まる (実機で 0.667 秒)。1コマ目を 0 秒として数えるプレイヤーでは
-     * そのぶん字幕だけが早く出る。全部のトラックを同じだけ前へ寄せれば、
-     * どちらの数え方でも合う (前へ出すぎた頭は入れ物側で 0 に詰められる)
-     */
-    const start = options.videoStart ?? 0;
-    if (start > 0.05) args.push('-output_ts_offset', String(-start));
 
     // 進捗を key=value 形式で標準出力に吐かせる。stderr の人間向けログを目視パースするより確実
     args.push('-progress', 'pipe:1');
@@ -918,11 +932,15 @@ async function runJob(jobId: number): Promise<void> {
      * 作れなければ黙って諦める (字幕トラックが1本減るだけ)
      */
     setPhase(jobId, 'encode', '字幕を絵にしています');
+    /*
+     * 字幕の 0 秒を**焼き上がりの 0 秒に合わせる。** 焼くほうは入れ物の始まりから
+     * 数え直したうえで、映像が出るまで (`headSkip`) を捨てる。同じところを引く
+     */
     const pgs = await buildPgs(
         source,
         encodeOptions.canvasSize,
         SUBTITLE_FONTS,
-        measured.formatStart,
+        measured.formatStart + headSkip(measured.videoStart),
         signal,
     );
     if (pgs !== null) {

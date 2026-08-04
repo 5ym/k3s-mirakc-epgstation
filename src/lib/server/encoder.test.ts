@@ -5,6 +5,7 @@ import {
     buildSegmentArgs,
     concatList,
     failureReason,
+    headSkip,
     isVideoCodec,
     parseProgressBlock,
     smoothMotionFor,
@@ -154,20 +155,39 @@ describe('コマ数の決め方', () => {
     });
 
     /**
-     * TS は音声のほうが先に始まっていることが多い。実機の録画では映像の1コマ目が
-     * 0.667 秒あとで、焼き上がりも映像だけ 0.667 秒から始まっていた。
-     * 1コマ目を 0 秒として数えるプレイヤーでは、そのぶん字幕が早く出る
+     * TS は音声のほうが先に始まっていることが多い。実機では映像の1コマ目が
+     * 0.930 秒あとで、焼き上がりも音声だけの区間から始まっていた。
+     * 1コマ目を 0 秒として数えるプレイヤーでは、そのぶん字幕が早く出る。
+     *
+     * **ずらすのではなく捨てる。** `-output_ts_offset` では直らなかった —
+     * Matroska は負の時刻を持てないので、下がった音声を muxer が押し戻し、
+     * 全トラックまとめて元の位置に戻る (実測: 0.363 渡して動いたのは 0.022 だけ)。
+     * 捨てれば映像も音声も 0.000 から始まる (実測で確認)
      */
-    test('映像が途中から始まる素材は、全部のトラックを前へ寄せる', () => {
-        const args = buildArgs('/in.m2ts', '/out.mkv', 1, null, 'av1', { videoStart: 0.667 });
-        expect(argValue(args, '-output_ts_offset')).toBe('-0.667');
+    test('映像が出るまでの音声だけの区間は捨てる', () => {
+        const args = buildArgs('/in.m2ts', '/out.mkv', 1, null, 'av1', { videoStart: 0.93 });
+        expect(argValue(args, '-ss')).toBe('0.93');
+        // ずらす方式は効かないので使わない
+        expect(args).not.toContain('-output_ts_offset');
     });
 
-    test('ほぼ 0 なら寄せない', () => {
-        // 数ミリ秒のずれでオプションを増やしても、見た目は変わらない
-        expect(argValue(buildArgs('/in.m2ts', '/out.mkv', 1, null), '-output_ts_offset')).toBeUndefined();
+    test('捨てるのは入力側 (最初の -i より前)', () => {
+        // 出力側に置くと、読み飛ばさずに全部復号してから捨てることになる
+        const args = buildArgs('/in.m2ts', '/out.mkv', 1, null, 'av1', { videoStart: 0.93 });
+        expect(args.indexOf('-ss')).toBeLessThan(args.indexOf('-i'));
+    });
+
+    test('ほぼ 0 なら捨てない', () => {
+        // 数ミリ秒のずれのために seek を掛けても、得るものが無い
+        expect(argValue(buildArgs('/in.m2ts', '/out.mkv', 1, null), '-ss')).toBeUndefined();
         const args = buildArgs('/in.m2ts', '/out.mkv', 1, null, 'av1', { videoStart: 0.02 });
-        expect(argValue(args, '-output_ts_offset')).toBeUndefined();
+        expect(argValue(args, '-ss')).toBeUndefined();
+    });
+
+    test('再試行の頭捨てと足し算になる', () => {
+        // 再試行 (PAT/PMT が固まる前) と音声だけの区間は別の理由。両方捨てる
+        const args = buildArgs('/in.m2ts', '/out.mkv', 1, 0.2, 'av1', { videoStart: 0.93 });
+        expect(Number(argValue(args, '-ss'))).toBeCloseTo(1.13, 5);
     });
 
     /**
@@ -275,5 +295,24 @@ describe('CMを切ったTSを作る', () => {
 
     test('一覧のパスは ' + "'" + ' をエスケープする', () => {
         expect(concatList(['/tmp/a.ts', "/tmp/b's.ts"])).toBe("file '/tmp/a.ts'\nfile '/tmp/b'\\''s.ts'");
+    });
+});
+
+/*
+ * **焼くほうと字幕を作るほうで、捨てる長さを同じにする。**
+ *
+ * 片方だけ「短いから捨てない」と判断すると、そのぶん字幕がずれる。
+ * 判断そのものを1箇所に置いてある
+ */
+describe('頭から捨てる長さ', () => {
+    test('そのまま返す', () => {
+        expect(headSkip(0.93)).toBe(0.93);
+    });
+
+    test('ごく短いものと、測れなかったものは捨てない', () => {
+        expect(headSkip(0.02)).toBe(0);
+        expect(headSkip(0)).toBe(0);
+        expect(headSkip(undefined)).toBe(0);
+        expect(headSkip(Number.NaN)).toBe(0);
     });
 });

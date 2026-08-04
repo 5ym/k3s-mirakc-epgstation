@@ -4,6 +4,7 @@ import {
     chapterMetadata,
     detectCmRanges,
     fields,
+    firstFrameTime,
     invertRanges,
     isCmLength,
     leadIn,
@@ -134,6 +135,38 @@ describe('残す区間の頭を戻す', () => {
             { start: 0, end: 100 },
             { start: 129.2, end: 200 },
         ]);
+    });
+});
+
+/*
+ * **頭出しは「実際に復号できた1コマ目」で測る。**
+ *
+ * stream の `start_time` は最初のパケットの時刻で、そこから何コマかは
+ * 参照先が録れておらず捨てられる。実機ではその差が 0.567 秒 (17コマ = 半GOP) で、
+ * そのぶんだけ字幕が早く出ていた。
+ */
+describe('最初に復号できたコマ', () => {
+    const output = [
+        'best_effort_timestamp_time=6116.439489',
+        'best_effort_timestamp_time=6116.472856',
+        'best_effort_timestamp_time=6116.506222',
+    ].join('\n');
+
+    test('先頭の1件を読む', () => {
+        expect(firstFrameTime(output)).toBeCloseTo(6116.439489, 6);
+    });
+
+    test('1件も無ければ NaN (呼ぶ側がパケットの時刻で代用する)', () => {
+        expect(firstFrameTime('')).toBeNaN();
+        expect(firstFrameTime('best_effort_timestamp_time=N/A')).toBeNaN();
+    });
+
+    test('他の行が混ざっていても拾える', () => {
+        // ffprobe は復号できないコマについて警告を吐くことがある
+        expect(firstFrameTime(`[mpeg2video] Invalid frame dimensions 0x0.\n${output}`)).toBeCloseTo(
+            6116.439489,
+            6,
+        );
     });
 });
 
