@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: tuner-agent
-          image: ghcr.io/danything/denpa-agent:sha-8979f2b6ff19
+          image: ghcr.io/danything/denpa-agent-dotnet:latest
           imagePullPolicy: IfNotPresent
           securityContext:
             privileged: true

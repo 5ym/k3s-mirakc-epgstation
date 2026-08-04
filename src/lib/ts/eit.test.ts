@@ -202,4 +202,38 @@ describe('EpgReader', () => {
         // p/f だけでは番組表が揃ったことにはならない
         expect(reader.complete).toBe(false);
     });
+
+    /*
+     * **実機で踏んだところ。** running_status を 4 にしてくれない局がある
+     * (NHK は 74 節ぜんぶ 0 だった)。4 だけを見ていると、そういう局では
+     * 延長追従が丸ごと効かない。p/f は仕様で section 0 が現在なので、
+     * 0 (未定義) のときはそちらで決める (docs/roadmap.md)
+     */
+    test('running_status を入れてこない局でも「放送中」が分かる', () => {
+        const reader = new EpgReader();
+        reader.feed(
+            packets(
+                section([event({ runningStatus: 0, name: 'いま放送中' })], {
+                    tableId: 0x4e,
+                    sectionNumber: 0,
+                    lastSectionNumber: 1,
+                }),
+            ),
+        );
+        expect(reader.present.get(SERVICE)?.name).toBe('いま放送中');
+    });
+
+    test('次の番組は「放送中」にしない', () => {
+        const reader = new EpgReader();
+        reader.feed(
+            packets(
+                section([event({ runningStatus: 0, name: 'つぎの番組' })], {
+                    tableId: 0x4e,
+                    sectionNumber: 1,
+                    lastSectionNumber: 1,
+                }),
+            ),
+        );
+        expect(reader.present.has(SERVICE)).toBe(false);
+    });
 });

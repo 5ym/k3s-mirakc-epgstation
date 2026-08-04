@@ -125,9 +125,9 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
-            for image in denpa-agent denpa; do
+            for image in denpa-agent-dotnet denpa; do
               case "$image" in
-                denpa-agent) tag="${{ steps.tag.outputs.agent }}" ;;
+                denpa-agent-dotnet) tag="${{ steps.tag.outputs.agent_dotnet }}" ;;
                 denpa) tag="${{ steps.tag.outputs.denpa }}" ;;
               esac
               sed -i -E "s#image: [^[:space:]]*/${image}:[^[:space:]]*#image: ${{ env.REGISTRY }}/${OWNER}/${image}:${tag}#g" ${FILES}

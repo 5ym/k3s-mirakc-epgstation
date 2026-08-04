@@ -372,9 +372,8 @@ export class EpgReader {
                     this.progress.set(section.serviceId, progress);
                 }
                 for (const event of section.events) {
-                    if (section.tableId === TABLE_PF_ACTUAL) {
-                        // 4 = 放送中。次の番組 (1 = まもなく) は延長の当てにならない
-                        if (event.runningStatus === 4) this.present.set(event.serviceId, event);
+                    if (section.tableId === TABLE_PF_ACTUAL && this.onAir(section, event)) {
+                        this.present.set(event.serviceId, event);
                     }
                     if (event.startAt === null || event.duration === null) continue;
                     this.events.set(`${event.serviceId}:${event.eventId}`, event);
@@ -383,6 +382,23 @@ export class EpgReader {
             }
         }
         return added;
+    }
+
+    /**
+     * p/f で「いま流れている」と言えるか。
+     *
+     * **`running_status` を当てにしきれない。** 4 (放送中) を入れてくる局も
+     * あれば、**0 (未定義) しか入れてこない局もある** — 実機の NHK は 74 節
+     * ぜんぶ 0 だった。4 だけを見ていると、そういう局では延長追従が丸ごと
+     * 効かなくなる (docs/roadmap.md)。
+     *
+     * そこで 0 のときは**節の番号で決める**。p/f は仕様で
+     * **section 0 が現在・section 1 が次**と決まっていて、こちらは局の都合で
+     * 変わらない。1 (まもなく) や 2 (停止中) は今までどおり入れない。
+     */
+    private onAir(section: EitSection, event: EitEvent): boolean {
+        if (event.runningStatus === 4) return true;
+        return event.runningStatus === 0 && section.sectionNumber === 0;
     }
 
     /** 溜まった番組。開始時刻の順に並べて返す */
