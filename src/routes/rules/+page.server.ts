@@ -515,9 +515,4 @@ export const actions = {
         const dropped = await reapply();
         return { success: true, canceled: dropped };
     },
-
-    apply: async () => {
-        await reapply();
-        return { success: true };
-    },
 };

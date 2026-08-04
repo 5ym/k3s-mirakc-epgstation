@@ -419,12 +419,14 @@
     </div>
 {/if}
 
-<div class="mb-2 flex justify-end">
-    <form method="POST" action="?/apply" use:submitting>
-        <button class="btn btn-sm" data-testid="rule-apply">今すぐ全ルールを適用</button>
-    </form>
-</div>
+<!--
+    **「今すぐ全ルールを適用」は置かない。**
 
+    ルールを当て直すのは番組表が動いたとき (`epg.settle`) と、ルールを
+    足した/変えた/消したとき。押す理由のある場面が残っていない。
+    番組表そのものを取りに行きたいなら、チューナー画面の
+    「番組表をいますぐ集める」がその口で、集め終わりに当て直しまで通る
+-->
 <div class="overflow-x-auto rounded-box bg-base-100 shadow">
     <table class="table table-zebra">
         <thead>

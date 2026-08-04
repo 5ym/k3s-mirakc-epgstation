@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 /**
  * 古い履歴の片付け。
@@ -17,7 +17,7 @@ config.dbPath = join(mkdtempSync(join(tmpdir(), 'denpa-files-')), 'denpa.db');
 config.historyRetention = 14 * 24 * 60 * 60 * 1000;
 
 const { database } = await import('./db');
-const { pruneHistory } = await import('./files');
+const { pruneHistory, reconcile } = await import('./files');
 
 const DAY = 24 * 60 * 60 * 1000;
 const now = Date.now();
@@ -92,5 +92,81 @@ describe('古い履歴の片付け', () => {
         seed();
         pruneHistory();
         expect(pruneHistory()).toEqual({ reservations: 0, recordings: 0, jobs: 0 });
+    });
+});
+
+/**
+ * 実体との照合。**両方向を見る。**
+ *
+ * 行はあるが実体が無いものは削除済みに倒す。逆に、動画が消えたあとに残った
+ * 付き添い (索引・NFO・サムネイル) は片付ける。**動画そのものには触らない** —
+ * 手で置いたものかもしれないので、数えるだけ。
+ */
+describe('実体との照合', () => {
+    /** 置き場を作り直して、そこに置いたファイルの一覧を返す */
+    function files(): string[] {
+        return readdirSync(config.recordedDir).sort();
+    }
+
+    function put(root: string, name: string): string {
+        const path = join(root, name);
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, 'x');
+        return path;
+    }
+
+    function fresh(): void {
+        const root = mkdtempSync(join(tmpdir(), 'denpa-recon-'));
+        config.recordedDir = join(root, 'recorded');
+        config.libraryDir = join(root, 'library');
+        mkdirSync(config.recordedDir, { recursive: true });
+        mkdirSync(config.libraryDir, { recursive: true });
+        database().exec('DELETE FROM recordings');
+    }
+
+    /*
+     * chapter_exe と logoframe は TS を直接読むのに dtvindex の索引を作り、
+     * `<入力>.dtvi` に置く。生TSを残さない設定だと TS が消えたあとも索引だけが
+     * 居座り、録るたびに3MBずつ積もる (実機で9本 22MB)
+     */
+    test('連れ合いの消えた索引を片付ける', () => {
+        fresh();
+        put(config.recordedDir, 'のこる.m2ts');
+        put(config.recordedDir, 'のこる.m2ts.dtvi');
+        put(config.recordedDir, 'きえた.m2ts.dtvi');
+        put(config.recordedDir, 'きえた.m2ts.jls.chapterexe.txt');
+
+        expect(reconcile().swept).toBe(2);
+        expect(files()).toEqual(['のこる.m2ts', 'のこる.m2ts.dtvi']);
+    });
+
+    test('動画の残っている NFO とサムネイルは残す', () => {
+        fresh();
+        put(config.libraryDir, '番組/Season 2026/番組 - 1.mkv');
+        put(config.libraryDir, '番組/Season 2026/番組 - 1.nfo');
+        put(config.libraryDir, '番組/Season 2026/番組 - 1-thumb.jpg');
+        put(config.libraryDir, '番組/tvshow.nfo');
+
+        expect(reconcile().swept).toBe(0);
+    });
+
+    test('動画の消えた NFO とサムネイルは、シリーズごと片付ける', () => {
+        fresh();
+        put(config.libraryDir, '番組/Season 2026/番組 - 1.nfo');
+        put(config.libraryDir, '番組/Season 2026/番組 - 1-thumb.jpg');
+        put(config.libraryDir, '番組/tvshow.nfo');
+
+        expect(reconcile().swept).toBe(3);
+        expect(existsSync(join(config.libraryDir, '番組'))).toBe(false);
+    });
+
+    test('DBに無い動画は数えるだけ。手で置いたものかもしれない', () => {
+        fresh();
+        put(config.libraryDir, '手で置いた/Season 2026/手で置いた - 1.mkv');
+
+        const result = reconcile();
+        expect(result.strays).toBe(1);
+        expect(result.swept).toBe(0);
+        expect(existsSync(join(config.libraryDir, '手で置いた/Season 2026/手で置いた - 1.mkv'))).toBe(true);
     });
 });

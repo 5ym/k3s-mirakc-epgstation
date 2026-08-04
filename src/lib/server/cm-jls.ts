@@ -292,14 +292,21 @@ export async function detectWithJls(
  *
  * 名前を並べて消すのではなく**頭で拾う**。logoframe は渡した名前に `_1.txt` や
  * `_list.ini` を自分で足して作るので、こちらが知っている名前だけでは取りこぼす。
+ *
+ * **`.dtvi` も拾う。** chapter_exe と logoframe は TS を直接読むのに
+ * dtvindex の索引を作り、それを `<入力>.dtvi` に置く — こちらが渡した
+ * 名前 (`<入力>.jls…`) の外なので、`.jls` の頭だけで拾っていた頃は
+ * **1本あたり3MBずつ残り続けていた** (実機の生TSの置き場に9本 22MB)。
+ * 生TSを残さない設定だと、TS が消えたあとも索引だけが居座る。
  */
+const LEAVINGS = ['.jls', '.dtvi'];
+
 function cleanup(input: string): void {
-    const prefix = workPrefix(input);
-    const dir = dirname(prefix);
-    const head = basename(prefix);
+    const dir = dirname(input);
+    const heads = LEAVINGS.map((suffix) => `${basename(input)}${suffix}`);
     try {
         for (const name of readdirSync(dir)) {
-            if (name.startsWith(head)) rmSync(join(dir, name), { force: true });
+            if (heads.some((head) => name.startsWith(head))) rmSync(join(dir, name), { force: true });
         }
     } catch {
         // 置き場ごと消えていることもある。片付けで録画を止めない

@@ -62,11 +62,16 @@
         const list: Notice[] = [];
         if (form?.message) list.push({ key: 'dashboard-error', kind: 'error', text: form.message });
         if (form?.reconcile) {
-            list.push({
-                key: 'reconcile-result',
-                kind: 'info',
-                text: `照合 ${form.reconcile.checked} 件 / 実体が無く削除済み ${form.reconcile.removed} 件`,
-            });
+            /*
+             * **両方向ぶん出す。** 「実体が無く削除済み」だけ出していた頃は、
+             * 逆向き (行の無いファイル) を見ていないことが画面から分からなかった。
+             * 動画そのものには触らないので、その数だけは出しておく
+             */
+            const { checked, removed, swept, strays } = form.reconcile;
+            const parts = [`照合 ${checked} 件`, `実体が無く削除済み ${removed} 件`];
+            if (swept > 0) parts.push(`連れ合いの無い付き添いを片付け ${swept} 件`);
+            if (strays > 0) parts.push(`DBに無い動画 ${strays} 件 (消していません)`);
+            list.push({ key: 'reconcile-result', kind: 'info', text: parts.join(' / ') });
         }
         return list;
     });
