@@ -37,6 +37,8 @@ export interface CollectState {
     finishedAt: number | null;
     /** 直近の周回で取り込んだ番組数 */
     programs: number;
+    /** 人が押して、最優先で回している最中か */
+    boosted: boolean;
 }
 
 let state: CollectState = {
@@ -46,6 +48,7 @@ let state: CollectState = {
     startedAt: null,
     finishedAt: null,
     programs: 0,
+    boosted: false,
 };
 
 export function collectState(): CollectState {
@@ -118,7 +121,8 @@ async function collectChannel(channel: AgentChannel): Promise<number> {
             channel.channel,
             controller.signal,
             `epg ${channel.channel}`,
-            config.priority.epg,
+            // 押されている間は、開くたびに強いほうで掴む
+            boosted ? config.priority.epgNow : config.priority.epg,
         );
         for await (const chunk of chunks(stream)) {
             if (reader.feed(chunk) && reader.complete) break;
@@ -150,6 +154,9 @@ async function collectChannel(channel: AgentChannel): Promise<number> {
  */
 let inflight: Promise<number> | null = null;
 
+/** 人が押して待っている間だけ立つ。開くたびに読むので、走っている回にも効く */
+let boosted = false;
+
 export function collectOnce(): Promise<number> {
     /*
      * **走っている最中に呼ばれたら、その回に相乗りする。** 断って 0 を返していると、
@@ -162,6 +169,27 @@ export function collectOnce(): Promise<number> {
     return inflight;
 }
 
+/**
+ * **いますぐ、全チューナーで、最優先で集める。**
+ *
+ * 入れたばかりのときのためのもの。普段の周回 (`collectOnce`) は録画にも
+ * スキャンにもロゴにも譲るので、他が動いていると番組表がなかなか埋まらない。
+ * 押されている間は**録画以外を全部蹴って**掴みに行く。
+ *
+ * **既に回っている最中なら、その回を強くする。** 開くのは1チャンネルずつなので、
+ * 次に開くところから効く (待たせて仕切り直すより早い)。
+ *
+ * 局の一覧も先に取り込む。スキャンの直後は、局が入る前にここへ来ることがある。
+ */
+export function collectNow(): Promise<number> {
+    boosted = true;
+    update({ boosted: true });
+    return collectOnce().finally(() => {
+        boosted = false;
+        update({ boosted: false });
+    });
+}
+
 async function run(): Promise<number> {
     const channels = await getChannels().catch(() => [] as AgentChannel[]);
     if (channels.length === 0) return 0;
@@ -170,49 +198,56 @@ async function run(): Promise<number> {
 
     const reach = coverage();
     const at = Date.now();
-    const targets = pickChannels(
-        channels,
-        (channel) => {
-            const reaches = channel.services.map(
-                (service) => reach.get(serviceKey(channel.networkId, service.serviceId)) ?? 0,
-            );
-            // 乗っている局のうち、いちばん薄いものに合わせる
-            return reaches.length === 0 ? 0 : Math.min(...reaches);
-        },
-        at,
-    );
+    const reachOf = (channel: AgentChannel) => {
+        const reaches = channel.services.map(
+            (service) => reach.get(serviceKey(channel.networkId, service.serviceId)) ?? 0,
+        );
+        // 乗っている局のうち、いちばん薄いものに合わせる
+        return reaches.length === 0 ? 0 : Math.min(...reaches);
+    };
+
+    /*
+     * 押されたときは**選り好みしない。**
+     *
+     * 普段は「薄い」か「しばらく行っていない」チャンネルだけ回るので、
+     * さっき集め終えたところで押すと1本も回らず、何も起きていないように見える。
+     * 押した人は「いま集め直したい」なので、全部回って薄いほうから行く
+     */
+    const targets = boosted
+        ? [...channels].sort((a, b) => reachOf(a) - reachOf(b))
+        : pickChannels(channels, reachOf, at);
     if (targets.length === 0) return 0;
 
-    const tuners = await getTuners().catch(() => []);
-    const lanes = new Map<string, number>();
-    for (const tuner of tuners) {
-        if (tuner.disabled) continue;
-        for (const type of tuner.types) lanes.set(type, (lanes.get(type) ?? 0) + 1);
-    }
+    const tuners = (await getTuners().catch(() => [])).filter((tuner) => !tuner.disabled);
 
     update({ running: true, startedAt: at, finishedAt: null, pending: targets.length, programs: 0 });
     let programs = 0;
     try {
-        // 種別ごとに分けて、その種別のチューナー本数だけ並べる
-        const byType = new Map<string, AgentChannel[]>();
-        for (const channel of targets) {
-            byType.set(channel.type, [...(byType.get(channel.type) ?? []), channel]);
-        }
+        /*
+         * **1本に1人。** 種別ごとに「その種別のチューナー本数」だけ並べていた頃は、
+         * BS と CS を同時に集めると衛星の本数を二重に数えていた (同じ2本が
+         * BS でも CS でも1人前に見える)。溢れたぶんは 409 で弾かれ、その回は
+         * 集められないまま落ちる。1つの列を全チューナーで引けば数は合う
+         */
+        const queue = [...targets];
+        const take = (types: string[]) => {
+            const at = queue.findIndex((channel) => types.includes(channel.type));
+            return at === -1 ? undefined : queue.splice(at, 1)[0];
+        };
+        const lane = async (types: string[]) => {
+            for (;;) {
+                const channel = take(types);
+                if (channel === undefined) return;
+                update({ pending: state.pending - 1 });
+                programs += await collectChannel(channel);
+            }
+        };
 
+        // エージェントに聞けなかったときは1本だけで回す (聞けないだけで、居はする)
         await Promise.all(
-            [...byType.entries()].map(async ([type, queue]) => {
-                const width = Math.max(1, lanes.get(type) ?? 1);
-                await Promise.all(
-                    Array.from({ length: width }, async () => {
-                        for (;;) {
-                            const channel = queue.shift();
-                            if (channel === undefined) return;
-                            update({ pending: state.pending - 1 });
-                            programs += await collectChannel(channel);
-                        }
-                    }),
-                );
-            }),
+            tuners.length === 0
+                ? [lane([...new Set(targets.map((channel) => channel.type))])]
+                : tuners.map((tuner) => lane(tuner.types)),
         );
     } finally {
         update({ running: false, finishedAt: Date.now(), active: [], pending: 0, programs });

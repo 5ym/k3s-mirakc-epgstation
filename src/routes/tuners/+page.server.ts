@@ -1,6 +1,6 @@
 import { fail } from '@sveltejs/kit';
 import { database, queryAll, queryOne } from '$lib/server/db';
-import { collectState } from '$lib/server/epg-collect';
+import { collectNow, collectState } from '$lib/server/epg-collect';
 import { stats as logoStats, sweepNow, sweepState } from '$lib/server/logo';
 import { forgetLogoData } from '$lib/server/logo-data';
 import { learned, stats as learnStats } from '$lib/server/logo-learn';
@@ -219,6 +219,20 @@ export const actions = {
         // 教えた枠で覚えたものが残っていると、自動に戻しても効かない
         forgetLogoData(serviceId);
         return { success: true, message: 'ロゴの位置を自動に戻しました' };
+    },
+
+    /**
+     * 番組表をいますぐ集める。**全チューナーで、録画以外は蹴って。**
+     *
+     * 入れたばかりのときのためのもの。普段の周回はスキャンにもロゴにも譲るので、
+     * 何か動いていると番組表がなかなか埋まらない。
+     *
+     * **待たない。** 全チャンネル回ると数分〜十数分かかる。押した人には
+     * 始めたことだけ返して、進み具合は画面に流す (`collect`)
+     */
+    collectNow: async () => {
+        void collectNow().catch(() => undefined);
+        return { success: true, scan: '番組表を集めています。空いているチューナーを全部使います' };
     },
 
     scan: async ({ request }) => {

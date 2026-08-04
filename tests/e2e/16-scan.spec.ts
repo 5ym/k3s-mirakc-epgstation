@@ -30,6 +30,28 @@ test.describe('チューナー画面', () => {
         await expect(card.getByTestId('scan-log')).toContainText('2 サービス');
     });
 
+    /**
+     * 入れたばかりのとき用の口。
+     *
+     * 普段の周回は録画にもスキャンにもロゴにも譲るので、何か動いていると
+     * 番組表がなかなか埋まらない。押されている間は**録画以外を蹴る**優先度で
+     * 掴みに行くので、そこまで見ておく (画面の「優先度」がそれ)
+     */
+    test('番組表をいますぐ集められる。掴む強さも上がる', async ({ page, request }) => {
+        await syncEpg(request);
+        await goto(page, '/tuners');
+
+        await page.getByTestId('epg-collect-now').click();
+
+        // 掴んだ相手が誰で、どの強さで掴んでいるかはチューナー画面に出る
+        await expect(page.getByTestId('tuner-list')).toContainText('番組表', { timeout: 30_000 });
+        await expect(page.getByTestId('tuner-list')).toContainText('優先度 8');
+
+        // 終わったら押せる状態に戻る。戻らないと次に押せない
+        await expect(page.getByTestId('epg-collect-now')).toBeEnabled({ timeout: 120_000 });
+        await expect(page.getByTestId('channel-coverage')).toContainText('番組表の届いた局');
+    });
+
     test('種別を1つも選ばなければ断る', async ({ page }) => {
         await goto(page, '/tuners');
         const card = page.getByTestId('scan-card');

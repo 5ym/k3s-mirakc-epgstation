@@ -78,13 +78,35 @@
                     が1チャンネルずつ開いて集めるので、少し遅れて埋まります。
                     集まるたびに知らせが来るので、この画面は開いたままで構いません。
                 </p>
-                {#if data.collect.running}
-                    <!-- 番組表を集めている最中。1チャンネルに数分かかるので、黙っていると止まって見える -->
-                    <div class="text-base-content/70 text-sm" data-testid="epg-collect">
-                        番組表を集めています ({data.collect.active.join(', ') || '準備中'}) ・ 残り {data
-                            .collect.pending} チャンネル
-                    </div>
-                {/if}
+                <!--
+                    **入れたばかりのとき用。** 普段の周回は録画にもスキャンにもロゴにも
+                    譲るので、何か動いていると番組表がなかなか埋まらない。
+                    押されている間は録画以外を蹴って、全チューナーで回る
+                -->
+                <div class="flex flex-wrap items-center gap-2">
+                    <form method="POST" action="?/collectNow" use:submitting>
+                        <button
+                            class="btn btn-sm"
+                            disabled={data.collect.boosted}
+                            data-testid="epg-collect-now"
+                        >
+                            {data.collect.boosted ? '集めています…' : '番組表をいますぐ集める'}
+                        </button>
+                    </form>
+                    {#if data.collect.running}
+                        <!-- 1チャンネルに数分かかる。黙っていると止まって見える -->
+                        <span class="text-base-content/70 text-sm" data-testid="epg-collect">
+                            {data.collect.boosted ? '最優先で集めています' : '番組表を集めています'}
+                            ({data.collect.active.join(', ') || '準備中'}) ・ 残り {data.collect.pending} チャンネル
+                        </span>
+                    {/if}
+                </div>
+                <div class="text-base-content/60 text-xs">
+                    入れたばかりで番組表が空のときは、これを押すと<strong
+                        >空いているチューナーを全部使って</strong
+                    >集めます (<strong>録画は蹴りません</strong>)。普段は denpa
+                    が薄い局から少しずつ集めるので、押す必要はありません。
+                </div>
                 {#if coverage.length === 0}
                     <p class="text-base-content/60 text-sm" data-testid="channel-empty">
                         まだ1つもありません。チャンネルスキャンを実行してください。
