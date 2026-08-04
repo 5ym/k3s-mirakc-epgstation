@@ -242,6 +242,18 @@ TSは追記で開いていて、次の起動で `recoverOrphanedRecordings` が�
    Pod の中からも `127.0.0.1:3000` が拒否される状態でした。止まれの合図は
    `takeOverSignals` でこちらが受け取り、先に入っていた後始末は外します。
    閉じるのは本当に止まる直前 (`process.exit`) だけです。
+
+   **引き取りは1回では足りません。** あちらが登録するのは `build/index.js` の
+   いちばん最後で、こちらはその手前 (`hooks.server.ts` はアプリの読み込みで走る)
+   なので、**最初の引き取りでは外すものがまだ無い**。そのまま置くと両方が
+   登録された状態になり、プロセスは生きたまま**ポートだけ閉じます** — 実機で
+   `/proc/net/tcp` に listen が1つも無く、Traefik が「no available server」を
+   返しているのに、番組表は集まり続けている状態を確認しました。
+   `setImmediate` でもう一度引き取り直します。
+
+   **2度目の合図でも落ちないようにします。** `once` で受けていた頃は、1度目で
+   自分の後始末が外れて**誰も聞いていない**状態になり、デプロイがもう一度走ると
+   Node の既定どおり録画の途中でも終わっていました。
 2. **Kubernetes は `deletionTimestamp` が付いた Pod を Service から外す。**
    EndpointSlice には住所が残りますが `ready:false` / `terminating:true` になり、
    kube-proxy が回さなくなります。Service に `publishNotReadyAddresses: true` を

@@ -178,7 +178,30 @@ export function stop(): void {
  * 待っている途中で SIGKILL され、居座った意味が無くなる。
  */
 function installShutdownHooks(): void {
-    takeOverSignals((signal) => void drain(signal));
+    const take = () => takeOverSignals((signal) => void drain(signal));
+    take();
+    /*
+     * **もう一度、あとから引き取り直す。**
+     *
+     * adapter-node が後始末を登録するのは `build/index.js` の**いちばん最後**で、
+     * こちらはその手前 (`hooks.server.ts` はアプリの読み込みで走る) なので、
+     * **最初の引き取りでは外すものがまだ無い**。そのまま置くと両方が登録された
+     * 状態になり、SIGTERM で
+     *
+     * - こちら … 録画が終わるまで待つ
+     * - あちら … `httpServer.close()` で listen を閉じる
+     *
+     * が同時に走る。プロセスは生きたまま**ポートだけ閉じる**ので、録画は
+     * 続いているのに画面がどこからも開けない (実機で確認: プロセスは動いて
+     * 番組表も集めているのに `/proc/net/tcp` に listen が1つも無く、
+     * Traefik は「no available server」)。
+     *
+     * `setImmediate` なら index.js の残りが走り終えたあとになる。
+     */
+    setImmediate(() => {
+        const taken = take();
+        if (taken > 0) console.log(`[boot] 止まれの合図を引き取りました (${taken} 件)`);
+    });
 }
 
 /**
@@ -192,16 +215,25 @@ function installShutdownHooks(): void {
  * 落とすのはこちらの `drain` の最後で `process.exit` するときだけにする。
  * 開いている応答は切れるが、これは今までと同じ (以前も待たずに exit していた)。
  *
- * 読み込み順が変わって**まだ誰も入れていなかった**ときは、外すものが無いだけで
- * 何も壊れない。そのときは今までどおり SIGTERM で listen が閉じる
- * (画面が開けない状態に戻るだけで、録画は守られる)。
+ * **外れたかどうかは数で分かる。** 0 なら相手がまだ登録していないので、
+ * 呼ぶ側があとでもう一度引き取る (`installShutdownHooks`)。
+ *
+ * **2度目の合図でも落ちないようにする。** `once` にしていた頃は、1度目で
+ * 自分の後始末が外れ、2度目は**誰も聞いていない**状態になっていた。そこへ
+ * デプロイがもう一度走ると、Node の既定どおりその場で終わる — 録画の途中でも。
  */
 export function takeOverSignals(onSignal: (signal: NodeJS.Signals) => void): number {
     let taken = 0;
+    let draining = false;
     for (const signal of ['SIGTERM', 'SIGINT'] as const) {
         taken += process.listenerCount(signal);
         process.removeAllListeners(signal);
-        process.once(signal, () => onSignal(signal));
+        process.on(signal, () => {
+            // もう畳んでいる最中。2度目からは受け取るだけで何もしない
+            if (draining) return;
+            draining = true;
+            onSignal(signal);
+        });
     }
     return taken;
 }
