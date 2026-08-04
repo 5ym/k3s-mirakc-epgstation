@@ -33,6 +33,32 @@ const DIGITAL_TV = 1;
  */
 export const CURRENT_SERVICES = 'updated_at >= (SELECT MAX(updated_at) FROM services)';
 
+/**
+ * 番組表に出す局。**名前の付いた番組が1つも無い局は出さない。**
+ *
+ * 出したくないものが2種類ある。どちらも「枠はあるが放送していない」。
+ *
+ * - **終わったチャンネル。** BS103 (旧 NHK BSプレミアム) は 2024年3月で放送を
+ *   終えたが、SDT には枠が残っている (局名も消されて「-」)。番組は1つも来ない
+ * - **相乗り中のサブチャンネル。** NHK総合2 や Eテレ2/3 は、マルチ編成をして
+ *   いないときは本チャンネルと同じ絵を流していて、EIT には**名前の無い番組**が
+ *   並ぶ。番組表がその局だけ「(番組情報なし)」で埋まる
+ *
+ * **局の行も、スキャンの結果も消さない。** マルチ編成が始まればその日の番組表に
+ * 名前が付いて出てくるし、放送が再開されれば勝手に戻る。
+ *
+ * **1局も残らないときは全部出す。** 入れたばかりで番組表がまだ空のときに
+ * 列ごと消えると、何も映らない画面から先へ進めない
+ */
+export function airing<S extends { id: number }, P extends { service_id: number; name: string }>(
+    services: S[],
+    programs: P[],
+): S[] {
+    const named = new Set(programs.filter((program) => program.name !== '').map((p) => p.service_id));
+    const shown = services.filter((service) => named.has(service.id));
+    return shown.length === 0 ? services : shown;
+}
+
 export function syncServices(channels: AgentChannel[]): number {
     const stmt = database().prepare(`
         INSERT INTO services (id, service_id, network_id, name, type, service_type, channel,

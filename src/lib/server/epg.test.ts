@@ -48,7 +48,7 @@ const server = Bun.serve({
 config.agentUrl = `http://127.0.0.1:${server.port}`;
 
 const { database } = await import('./db');
-const { syncServicesOnly } = await import('./epg');
+const { airing, syncServicesOnly } = await import('./epg');
 
 describe('syncServicesOnly', () => {
     test('番組表を待たずに局だけ取り込む', async () => {
@@ -132,5 +132,44 @@ describe('消えた局の片付け', () => {
         expect(db().query('SELECT state FROM reservations WHERE id = 1').get()).toEqual({
             state: 'scheduled',
         });
+    });
+});
+
+/**
+ * 枠はあるが放送していない局を、番組表から外す。
+ *
+ * - 終わったチャンネル (BS103 は 2024年3月で放送終了。SDT に枠だけ残る)
+ * - 相乗り中のサブチャンネル (NHK総合2 は、マルチ編成でない間ずっと名前が無い)
+ */
+describe('番組表に出す局', () => {
+    const service = (id: number) => ({ id });
+    const program = (serviceId: number, name: string) => ({ service_id: serviceId, name });
+
+    test('名前の付いた番組が1つも無い局は出さない', () => {
+        const services = [service(1), service(2), service(3)];
+        const programs = [
+            program(1, 'ニュース'),
+            // 相乗り中のサブチャンネル。名前の無い番組だけが並ぶ
+            program(2, ''),
+            program(2, ''),
+            // 3 は終わったチャンネル。番組が1つも来ない
+        ];
+
+        expect(airing(services, programs).map((s) => s.id)).toEqual([1]);
+    });
+
+    test('1つでも名前が付いていれば出す', () => {
+        // マルチ編成の日だけサブチャンネルにも名前が付く
+        const services = [service(1), service(2)];
+        const programs = [program(2, ''), program(2, '大相撲')];
+
+        expect(airing(services, programs).map((s) => s.id)).toEqual([2]);
+    });
+
+    test('1局も残らないときは全部出す', () => {
+        // 入れたばかりで番組表が空のとき。列ごと消えると先へ進めない
+        const services = [service(1), service(2)];
+
+        expect(airing(services, []).map((s) => s.id)).toEqual([1, 2]);
     });
 });

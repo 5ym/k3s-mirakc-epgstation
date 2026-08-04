@@ -2,7 +2,7 @@ import { fail } from '@sveltejs/kit';
 import { detectPlatform } from '$lib/play';
 import { enabled as authEnabled } from '$lib/server/auth';
 import { queryAll, queryOne } from '$lib/server/db';
-import { CURRENT_SERVICES } from '$lib/server/epg';
+import { airing, CURRENT_SERVICES } from '$lib/server/epg';
 import { cancel, reserve } from '$lib/server/reservations';
 import { RESERVATION_STATE } from '$lib/server/schema';
 import { settings } from '$lib/server/settings';
@@ -90,7 +90,8 @@ export async function load({ url, request }) {
         start,
         hours: WINDOW_HOURS,
         programs,
-        services,
+        // 放送していない局は出さない (終わったチャンネル・相乗り中のサブチャンネル)
+        services: airing(services, programs),
         counts: queryOne<{ programs: number; services: number }>(
             'SELECT (SELECT COUNT(*) FROM programs) AS programs, (SELECT COUNT(*) FROM services) AS services',
         )!,
