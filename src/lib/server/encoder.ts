@@ -918,7 +918,13 @@ async function runJob(jobId: number): Promise<void> {
      * 作れなければ黙って諦める (字幕トラックが1本減るだけ)
      */
     setPhase(jobId, 'encode', '字幕を絵にしています');
-    const pgs = await buildPgs(source, encodeOptions.canvasSize, SUBTITLE_FONTS, signal);
+    const pgs = await buildPgs(
+        source,
+        encodeOptions.canvasSize,
+        SUBTITLE_FONTS,
+        measured.formatStart,
+        signal,
+    );
     if (pgs !== null) {
         encodeOptions.pgsFile = pgs.path;
         database()

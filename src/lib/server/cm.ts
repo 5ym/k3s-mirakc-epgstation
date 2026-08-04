@@ -311,6 +311,7 @@ export async function probeVideo(input: string): Promise<{
     width: number;
     height: number;
     videoStart: number;
+    formatStart: number;
     sar: number;
 }> {
     const read = async (args: string[]): Promise<string> => {
@@ -328,6 +329,7 @@ export async function probeVideo(input: string): Promise<{
     let width = NaN;
     let height = NaN;
     let videoStart = 0;
+    let formatStart = NaN;
     let sar = 1;
     try {
         // `nk=1` (鍵を出さない) にはしない。鍵で引くために必ず `key=value` で受ける
@@ -335,7 +337,7 @@ export async function probeVideo(input: string): Promise<{
             await read(['-show_entries', 'format=duration,start_time', '-of', 'default=nw=1']),
         );
         duration = Number(format.get('duration'));
-        const formatStart = Number(format.get('start_time'));
+        formatStart = Number(format.get('start_time'));
 
         const stream = fields(
             await read([
@@ -373,6 +375,17 @@ export async function probeVideo(input: string): Promise<{
          * ずらすのに使う (encoder.buildArgs の `-output_ts_offset`)
          */
         videoStart,
+        /**
+         * **入れ物そのものの始まり (PTS)。** 頭からの秒数ではなく放送の時刻で、
+         * この録画では 6115.51 だった。
+         *
+         * ffmpeg は入力の時刻からこれを引いて 0 から数え直す。**同じ TS を
+         * 別々に ffmpeg へ通すときは、双方が同じものを引いていないと噛み合わない** —
+         * 字幕を絵にするとき (`subtitle.ts`) がまさにそれで、あちらは
+         * 字幕1枚目を 0 とみなしていたため、出来上がりで字幕だけ 10 秒早く出ていた。
+         * 引く数をこちらから渡して揃える
+         */
+        formatStart: Number.isFinite(formatStart) ? formatStart : NaN,
         /**
          * 画素の横長さ。1440x1080 の地上波HDは 4:3 で、これを掛けると 1920 になる。
          * 読めなければ 1 (正方形) とみなす

@@ -54,19 +54,33 @@ export function size(bytes: number): string {
     return gb >= 1 ? `${gb.toFixed(1)} GB` : `${(bytes / 1024 ** 2).toFixed(0)} MB`;
 }
 
+/**
+ * 進み具合。**小数第1位まで出す。**
+ *
+ * 整数だけだと、1時間かかるエンコードでは同じ数字が30秒以上動かない。
+ * 動いていないのか止まったのか画面から判らなかったので、1桁足してある
+ */
 export function percent(value: number): string {
-    return `${Math.round(value * 100)}%`;
+    const clamped = Math.min(Math.max(value, 0), 1);
+    return `${(clamped * 100).toFixed(1)}%`;
 }
 
 /**
- * 残り時間の見込み。分より細かくは出さない。
- * 秒まで出すと数字が落ち着かず、かえって読みにくい。
+ * 残り時間の見込み。**秒まで出す。**
+ *
+ * 分どまりだと終わりぎわの数分が「あと1分」で固まってしまい、
+ * 見終わるまで待てばいいのか席を立っていいのか判らなかった。
+ * 秒の桁は多少ふらつくが、動いていることそのものが情報になる
  */
 export function eta(ms: number | null): string {
     if (ms === null || !Number.isFinite(ms) || ms <= 0) return '';
-    const min = Math.round(ms / 60000);
-    if (min < 1) return 'あと1分未満';
-    return `あと${durationMs(min * 60000)}`;
+    const total = Math.round(ms / 1000);
+    const sec = total % 60;
+    const min = Math.floor(total / 60) % 60;
+    const hour = Math.floor(total / 3600);
+    if (hour > 0) return `あと${hour}時間${pad(min)}分${pad(sec)}秒`;
+    if (min > 0) return `あと${min}分${pad(sec)}秒`;
+    return `あと${sec}秒`;
 }
 
 /**

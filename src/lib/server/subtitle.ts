@@ -34,22 +34,26 @@ export interface PgsResult {
 }
 
 /**
- * 字幕を絵で取り出して `.sup` を書く。字幕が無ければ null。
+ * 字幕を取り出す ffmpeg の引数。
  *
- * 失敗しても録画とエンコードは止めない。**入る字幕はこれ1本だけ**なので、
- * null になった録画には字幕トラックが付かない。
+ * **時刻をそのまま (`-copyts`) 受け取る。** 付けないと ffmpeg は
+ * **字幕1枚目を 0 秒**として数え直す。フィルタに入れるのが字幕1本だけなので、
+ * 数え直す基準になる映像がこちら側に無いため。
+ *
+ * 一方エンコードは同じ TS を映像ごと通すので、**入れ物の始まり**を 0 とする。
+ * 基準が食い違ったまま出来上がりへ詰めると、**字幕1枚目が出るまでの間**が
+ * まるごと前へ寄る — 実機で、本編が始まる 10.4 秒前から字幕が出ていた
+ * (最初の字幕は録画開始の 10.39 秒後。ズレはちょうどその値だった)。
+ *
+ * `-copyts` を付ければ放送の時刻がそのまま出るので、引く数はこちらで決められる。
  */
-export async function buildPgs(
-    input: string,
-    canvasSize: string | undefined,
-    fonts: string,
-    signal?: AbortSignal,
-): Promise<PgsResult | null> {
-    const output = `${input}.sup`;
-    const args = [
+export function pgsArgs(input: string, canvasSize: string | undefined, fonts: string): string[] {
+    return [
         '-hide_banner',
         '-nostats',
         '-y',
+        // 時刻を数え直させない。何を引くかは呼ぶ側が決める (rebase)
+        '-copyts',
         '-sub_type',
         'bitmap',
         ...(canvasSize === undefined ? [] : ['-canvas_size', canvasSize]),
@@ -75,6 +79,40 @@ export async function buildPgs(
         'rgba',
         'pipe:1',
     ];
+}
+
+/**
+ * 放送の時刻を、出来上がりの 0 秒から数えた時刻に直す。
+ *
+ * 引くのは**入れ物の始まり** (`probeVideo` の formatStart)。エンコードのほうも
+ * ffmpeg が同じものを引くので、これで両者が同じ物差しに乗る。
+ *
+ * 読めなかったとき (NaN) は引かない。**そのときだけ以前と同じ**で、
+ * 字幕は入るがズレる可能性がある — 何も入らないよりはましなため。
+ * 頭より前の字幕は 0 に詰める (PGS の時刻は負を持てない)
+ */
+export function rebase(pts: number, startAt: number): number {
+    if (!Number.isFinite(startAt)) return pts;
+    return Math.max(0, pts - startAt);
+}
+
+/**
+ * 字幕を絵で取り出して `.sup` を書く。字幕が無ければ null。
+ *
+ * 失敗しても録画とエンコードは止めない。**入る字幕はこれ1本だけ**なので、
+ * null になった録画には字幕トラックが付かない。
+ *
+ * `startAt` は入れ物の始まり (PTS)。出来上がりと噛み合わせるために引く (rebase)。
+ */
+export async function buildPgs(
+    input: string,
+    canvasSize: string | undefined,
+    fonts: string,
+    startAt: number,
+    signal?: AbortSignal,
+): Promise<PgsResult | null> {
+    const output = `${input}.sup`;
+    const args = pgsArgs(input, canvasSize, fonts);
 
     let proc: Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
     try {
@@ -97,7 +135,7 @@ export async function buildPgs(
             const size = line.match(SIZE);
             if (time === null || size === null) continue;
             stamps.push({
-                at: Number(time[1]),
+                at: rebase(Number(time[1]), startAt),
                 width: Number(size[1]),
                 height: Number(size[2]),
             });
