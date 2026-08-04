@@ -311,7 +311,7 @@ export async function detectWithJls(
          */
         const keep = parseTrimRanges(avs, fps);
         if (keep.length === 0) {
-            return byLogoAlone(work.frames, fps, duration, `${work.cut} に Trim が含まれていませんでした`);
+            return byLogoAlone(work.frames, fps, duration, 'join_logo_scp が区切りを返さなかった');
         }
 
         const cm = invertRanges(keep, duration);
@@ -321,7 +321,7 @@ export async function detectWithJls(
          * 推測するので、推測に失敗するとこうなる
          */
         if (cm.length === 0) {
-            return byLogoAlone(work.frames, fps, duration, '本編とCMに分けられませんでした');
+            return byLogoAlone(work.frames, fps, duration, 'join_logo_scp が本編とCMに分けられなかった');
         }
         // 番組の半分以上がCMになったら、その結果は捨てて無音検出に落とす (tooMuchCm)
         if (tooMuchCm(cm, duration)) {
@@ -356,23 +356,32 @@ function byLogoAlone(
     frames: string,
     fps: number,
     duration: number,
-    reason: string,
+    /** 落ちてきた理由。「〜なかった」と言い切りで渡す (下で文をつなげるため) */
+    cause: string,
 ): { cm: Range[]; note: string } {
     let text: string;
     try {
         text = readFileSync(frames, 'utf8');
     } catch {
-        return { cm: [], note: reason };
+        return { cm: [], note: `${cause}うえ、ロゴの出ているコマの一覧も読めませんでした` };
     }
 
     const lit = parseLogoFrames(text, fps);
-    if (lit.length === 0) return { cm: [], note: `${reason} (ロゴの写っているコマもありません)` };
+    if (lit.length === 0) {
+        return { cm: [], note: `${cause}うえ、ロゴの写っているコマもありませんでした` };
+    }
 
     const cm = invertRanges(lit, duration);
-    if (cm.length === 0 || tooMuchCm(cm, duration)) {
-        return { cm: [], note: `${reason} (ロゴだけで分け直しても ${cmRatio(cm, duration)}%)` };
+    if (cm.length === 0) {
+        return { cm: [], note: `${cause}うえ、ロゴは最初から最後まで写っていました` };
     }
-    return { cm, note: `ロゴの在り処だけで分けました (${reason})` };
+    if (tooMuchCm(cm, duration)) {
+        return {
+            cm: [],
+            note: `${cause}ので、ロゴの在り処だけで分け直しましたが、${cmRatio(cm, duration)}% がCMになりました`,
+        };
+    }
+    return { cm, note: `${cause}ので、ロゴの在り処だけで分けました` };
 }
 
 /**
