@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { AgentTuner } from './tuner';
 
 /**
  * CM検出のロゴを、録画より先に覚えておくところ。
@@ -19,7 +20,7 @@ const work = mkdtempSync(join(tmpdir(), 'denpa-learn-'));
 const { config } = await import('./config');
 config.jlsLogoDir = join(work, 'jls');
 
-const { learned, pending, stations } = await import('./logo-learn');
+const { learned, openable, pending, ridingFirst, stations } = await import('./logo-learn');
 
 function service(id: number, name: string, networkId = 32391) {
     return {
@@ -105,5 +106,69 @@ describe('同じ絵を映している局を束ねる', () => {
         const rows = [service(40, 'サンテレビ', 32391), service(41, 'サンテレビ', 32400)];
 
         expect(stations(rows).map((row) => row.id)).toEqual([40, 41]);
+    });
+});
+
+/*
+ * **開いている相手が居れば只で乗れる。**
+ *
+ * エージェントは同じ物理チャンネルの読み手を相乗りさせるので、録画中の
+ * チャンネルならチューナーは増えない。空きだけを見ていた頃は、**只で
+ * 覚えられる局を見送って**いた。
+ */
+describe('掴みに行けるか', () => {
+    const tuner = (
+        types: ('GR' | 'BS' | 'CS')[],
+        channel: { type: 'GR' | 'BS' | 'CS'; channel: string } | null,
+    ): AgentTuner =>
+        ({
+            index: 0,
+            name: 'adapter',
+            types,
+            disabled: false,
+            device: null,
+            lnb: null,
+            command: null,
+            channel,
+            users: [],
+            pid: null,
+            error: null,
+        }) satisfies AgentTuner;
+
+    const target = (type: 'GR' | 'BS' | 'CS', channel: string) => ({ type, channel });
+
+    test('全部塞がっていても、そのチャンネルが開いていれば行く', () => {
+        const tuners = [tuner(['GR'], { type: 'GR', channel: 'T21' })];
+
+        expect(openable(tuners, target('GR', 'T21'))).toBe(true);
+    });
+
+    test('全部塞がっていて、別のチャンネルなら行かない', () => {
+        const tuners = [tuner(['GR'], { type: 'GR', channel: 'T21' })];
+
+        expect(openable(tuners, target('GR', 'T27'))).toBe(false);
+    });
+
+    test('空いているチューナーがあれば行く', () => {
+        const tuners = [tuner(['GR'], { type: 'GR', channel: 'T21' }), tuner(['GR'], null)];
+
+        expect(openable(tuners, target('GR', 'T27'))).toBe(true);
+    });
+
+    test('空きはあっても種別が違えば行かない。衛星の空きは地上波の役に立たない', () => {
+        const tuners = [tuner(['BS', 'CS'], null)];
+
+        expect(openable(tuners, target('GR', 'T27'))).toBe(false);
+    });
+
+    /*
+     * 1局に5分かかるので、順番を間違えると只で覚えられたはずの録画中の局が
+     * 終わってしまう
+     */
+    test('只で乗れるものを先に回す', () => {
+        const tuners = [tuner(['GR'], { type: 'GR', channel: 'T27' }), tuner(['GR'], null)];
+        const targets = [target('GR', 'T21'), target('GR', 'T27'), target('GR', 'T25')];
+
+        expect(ridingFirst(tuners, targets).map((t) => t.channel)).toEqual(['T27', 'T21', 'T25']);
     });
 });

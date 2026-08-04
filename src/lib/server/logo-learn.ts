@@ -8,7 +8,7 @@ import { queryAll } from './db';
 import { CURRENT_SERVICES } from './epg';
 import { logoRepo } from './logo-data';
 import { chunks } from './stream';
-import { getTuners, openChannelStream } from './tuner';
+import { type AgentTuner, getTuners, openChannelStream } from './tuner';
 
 /**
  * CM検出のロゴを**録画より先に**覚えておく。
@@ -269,36 +269,80 @@ function logoArea(id: number): string[] {
     return typeof area === 'string' && /^\d+,\d+,\d+,\d+$/.test(area) ? ['-logo-area', area] : [];
 }
 
+/** 掴んでいる相手の居るチャンネル */
+function openChannels(tuners: AgentTuner[]): Set<string> {
+    const open = new Set<string>();
+    for (const tuner of tuners) {
+        if (tuner.channel !== null) open.add(`${tuner.channel.type}:${tuner.channel.channel}`);
+    }
+    return open;
+}
+
+/** その種別に、誰も掴んでいないチューナーがあるか */
+function hasFree(tuners: AgentTuner[], type: ChannelType): boolean {
+    return tuners.some((tuner) => !tuner.disabled && tuner.types.includes(type) && tuner.channel === null);
+}
+
 /**
- * 定期の見回り。**空いているチューナーがあるときだけ、1局ずつ。**
+ * いま掴みに行けるか。**開いている相手が居れば只。**
  *
- * ロゴ集め (`logo.ts`) と違って相乗りできない — あちらは開いている TS を
- * 読むだけだが、こちらは**同じ局を5分続けて**読む必要がある。そのぶん
- * 遠慮して、空きが無ければ何もしない。
+ * エージェントは同じ物理チャンネルの読み手を相乗りさせるので、録画でも
+ * 番組表集めでも、その局のチャンネルが既に開いていれば**チューナーは増えません**。
+ * 空きが無いときに何もしていなかった頃は、**録画中のチャンネルなら只で
+ * 覚えられるのに見送って**いました。
+ */
+export function openable(tuners: AgentTuner[], target: Pick<Target, 'type' | 'channel'>): boolean {
+    return openChannels(tuners).has(`${target.type}:${target.channel}`) || hasFree(tuners, target.type);
+}
+
+/**
+ * 只で覚えられるものを先に回す。
+ *
+ * 1局に5分かかるので、順番を間違えると**只で覚えられたはずの録画中の局**が
+ * 終わってしまう。開いているチャンネルのものを前に出すだけで、並びは崩さない。
+ */
+export function ridingFirst<T extends Pick<Target, 'type' | 'channel'>>(
+    tuners: AgentTuner[],
+    targets: T[],
+): T[] {
+    const open = openChannels(tuners);
+    const riding = targets.filter((target) => open.has(`${target.type}:${target.channel}`));
+    return [...riding, ...targets.filter((target) => !riding.includes(target))];
+}
+
+/**
+ * 定期の見回り。**1局ずつ、遠慮して。**
+ *
+ * 掴みに行くのは「そのチャンネルが既に開いている」(只で乗れる) か
+ * 「空いているチューナーがある」ときだけ。ロゴ集め (`logo.ts`) と違って
+ * **同じ局を5分続けて**読む必要はありますが、続けて読むぶんも同じ選局から
+ * 出てくるので、開いている相手が居れば追加のチューナーは要りません。
  */
 export async function sweep(signal?: AbortSignal): Promise<number> {
     const targets = missing();
     if (targets.length === 0) return 0;
 
+    let tuners = await tunerList();
+    if (tuners === null) return 0;
+
     let learnedCount = 0;
-    for (const target of targets) {
-        if (signal?.aborted) break;
-        if (!(await hasFree(target.type))) break;
+    for (const target of ridingFirst(tuners, targets)) {
+        if (signal?.aborted || tuners === null) break;
+        // 只で乗れないうえ空きも無い局は飛ばす。他に乗れる局があるかもしれない
+        if (!openable(tuners, target)) continue;
         if (await learn(target, signal)) learnedCount++;
+        // 5分掴んでいた間に、空きも開いているチャンネルも変わっている
+        tuners = await tunerList();
     }
     return learnedCount;
 }
 
-/** その種別に、誰も掴んでいないチューナーがあるか */
-async function hasFree(type: ChannelType): Promise<boolean> {
+/** エージェントに聞けなければ null。開きに行かない */
+async function tunerList(): Promise<AgentTuner[] | null> {
     try {
-        const tuners = await getTuners();
-        return tuners.some(
-            (tuner) => !tuner.disabled && tuner.types.includes(type) && tuner.channel === null,
-        );
+        return await getTuners();
     } catch {
-        // エージェントに聞けないなら開きに行かない
-        return false;
+        return null;
     }
 }
 
