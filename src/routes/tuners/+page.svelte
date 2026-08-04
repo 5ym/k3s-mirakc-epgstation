@@ -1,5 +1,6 @@
 <script lang="ts">
     import { submitting } from '$lib/actions';
+    import LogoArea from '$lib/components/LogoArea.svelte';
     import Toasts, { type Notice } from '$lib/components/Toasts.svelte';
     import { held, liveUpdates } from '$lib/live-updates.svelte';
 
@@ -11,6 +12,8 @@
     // 番組表を集めている最中の様子も 'tuners' で流れてくる
     liveUpdates(['scan', 'services', 'logos', 'tuners', 'programs']);
     const scan = $derived(data.scan);
+    /** まだ覚えていない局だけ並べる。覚えている局に用は無い */
+    const unlearned = $derived(data.cmLogos.filter((service) => !service.learned));
 
     const TYPE_LABEL: Record<string, string> = { GR: '地上波', BS: 'BS', CS: 'CS' };
     /** チューナーが受けられる種別。設定の表で並べる順 */
@@ -422,6 +425,51 @@
                                         {data.logoSweep.message}
                                     </div>
                                 {/if}
+                            </dd>
+                        {/if}
+                    </div>
+                    <!--
+                        CM検出のロゴ。**番組表に出す局ロゴとは別物** (logo-learn.ts)。
+                        こちらは「画面のどこにロゴが出ているか」を logoframe に覚えさせたもの。
+
+                        置き場所を録画の詳細からここへ移した。**録画ごとの話ではなく
+                        局ごとの話**で、教えたら以降その局の全部に効く
+                    -->
+                    <div class="flex flex-wrap items-center gap-2">
+                        <dt class="w-28 text-sm font-medium">CM検出のロゴ</dt>
+                        <dd class="badge badge-ghost" data-testid="cm-logo-count">
+                            {data.cmLogoStats.have} / {data.cmLogoStats.total} 局
+                        </dd>
+                        <dd class="text-base-content/60 w-full text-xs">
+                            録画より先に、空いているチューナーで数分ぶん掴んで覚えます。覚えられなかった局は、
+                            下から位置を教えてください (薄いロゴや動くロゴは自動では見つかりません)。
+                        </dd>
+                        {#if unlearned.length > 0}
+                            <dd class="w-full space-y-2" data-testid="cm-logo-missing">
+                                {#each unlearned as service (service.id)}
+                                    <details class="rounded border-base-300 border p-2">
+                                        <summary class="cursor-pointer text-sm">
+                                            {service.name}
+                                            {#if service.logo_area !== null}
+                                                <span class="text-base-content/60 text-xs">
+                                                    — 教えた範囲 {service.logo_area}
+                                                </span>
+                                            {/if}
+                                        </summary>
+                                        {#if service.recording_id === null}
+                                            <p class="text-base-content/60 mt-2 text-xs">
+                                                位置を教えるにはこの局の録画が1本要ります (コマを出すため)。
+                                            </p>
+                                        {:else}
+                                            <LogoArea
+                                                recordingId={service.recording_id}
+                                                serviceId={service.id}
+                                                serviceName={service.name}
+                                                area={service.logo_area}
+                                            />
+                                        {/if}
+                                    </details>
+                                {/each}
                             </dd>
                         {/if}
                     </div>

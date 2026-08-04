@@ -1,6 +1,5 @@
 <script lang="ts">
     import { submitting } from '$lib/actions';
-    import LogoArea from '$lib/components/LogoArea.svelte';
     import ProgramDetail from '$lib/components/ProgramDetail.svelte';
     import Toasts, { type Notice } from '$lib/components/Toasts.svelte';
     import { liveUpdates } from '$lib/live-updates.svelte';
@@ -82,24 +81,6 @@
      */
     let detailCmNote = $state<string | null>(null);
     /** ロゴを当てられなかった録画。詳細で位置を教えてもらう */
-    let detailLogo = $state<{
-        recordingId: number;
-        serviceId: number;
-        serviceName: string;
-        area: string | null;
-    } | null>(null);
-
-    /**
-     * 詳細に出すロゴの設定は**その場で引き直す**。
-     *
-     * 開いたときの写しを持っていた頃は、「自動に戻す」を押しても画面には
-     * 消したはずの範囲が出たままだった (保存はできている)。
-     */
-    const detailArea = $derived(
-        detailLogo === null
-            ? null
-            : (data.recordings.find((rec) => rec.service_id === detailLogo?.serviceId)?.logo_area ?? null),
-    );
 
     /** 続けて別の行を押したとき、遅れて届いた前の結果で上書きされないようにする */
     let opened = 0;
@@ -123,12 +104,10 @@
         programId: number | null,
         row: Row,
         notes: { title: string; text: string }[] = [],
-        logo: typeof detailLogo = null,
         cmNote: string | null = null,
     ): Promise<void> {
         const token = ++opened;
         detailNotes = notes;
-        detailLogo = logo;
         detailCmNote = cmNoteWorthShowing(cmNote) ? cmNote : null;
         detail = {
             ...row,
@@ -204,17 +183,6 @@
         return rec.state !== 'failed';
     }
 
-    /** ロゴでCMを判定できなかった録画だけ、詳細に位置の指定を出す */
-    function logoOf(rec: (typeof data.recordings)[number]): typeof detailLogo {
-        if (!logoUnusable(rec.cm_note) || rec.deleted_at !== null) return null;
-        return {
-            recordingId: rec.id,
-            serviceId: rec.service_id,
-            serviceName: rec.service_name,
-            area: rec.logo_area,
-        };
-    }
-
     /**
      * 録画の詳細。
      *
@@ -237,7 +205,7 @@
         if (rec.encode_error) {
             notes.push({ title: 'エンコードに失敗しました', text: rec.encode_error });
         }
-        void openDetail(rec.program_id, rec, notes, logoOf(rec), rec.cm_note);
+        void openDetail(rec.program_id, rec, notes, rec.cm_note);
     }
 </script>
 
@@ -501,8 +469,8 @@
                                         <!--
                                             ロゴでの判定が使えなかったので、無音だけでCMを判定している。
                                             精度が落ちているのを黙っていると「なぜか切れていない」に
-                                            なるので出す。位置を教える口は詳細の中にある
-                                            (行を押すと再生に行くようになったため)。
+                                            なるので出す。**位置を教える口はチューナー画面にある** —
+                                            録画ごとではなく局ごとの話で、教えれば以降の全部に効く。
 
                                             **見つけられなかったときだけではない。** ロゴには合致した
                                             のに結果が使い物にならなかったとき (番組の 100% がCM判定など)
@@ -511,7 +479,7 @@
                                         <div class="text-warning mt-0.5 text-sm" data-testid="logo-missing">
                                             ロゴでのCM判定に失敗 (無音のみで判定)
                                             <span class="text-base-content/60"
-                                                >— 「詳細」から位置を教えられます</span
+                                                >— チューナー画面から位置を教えられます</span
                                             >
                                         </div>
                                     {/if}
@@ -661,20 +629,10 @@
 </div>
 
 {#if detail}
-    <ProgramDetail program={detail} notes={detailNotes} cmNote={detailCmNote} onclose={() => (detail = null)}>
-        {#snippet extra()}
-            <!--
-                ロゴを当てられなかった録画だけ。囲ってもらった位置は局ごとに覚えて、
-                次にその局を録ったときから効く
-            -->
-            {#if detailLogo}
-                <LogoArea
-                    recordingId={detailLogo.recordingId}
-                    serviceId={detailLogo.serviceId}
-                    serviceName={detailLogo.serviceName}
-                    area={detailArea}
-                />
-            {/if}
-        {/snippet}
-    </ProgramDetail>
+    <ProgramDetail
+        program={detail}
+        notes={detailNotes}
+        cmNote={detailCmNote}
+        onclose={() => (detail = null)}
+    />
 {/if}

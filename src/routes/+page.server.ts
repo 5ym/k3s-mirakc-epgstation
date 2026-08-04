@@ -6,7 +6,6 @@ import { database, queryAll, queryOne } from '$lib/server/db';
 import { cancel as cancelEncode, enqueue, pump } from '$lib/server/encoder';
 import { emit } from '$lib/server/events';
 import { deleteRecordingFiles, reconcile } from '$lib/server/files';
-import { forgetLogoData } from '$lib/server/logo-data';
 import { cancel, restore } from '$lib/server/reservations';
 import { RESERVATION_STATE } from '$lib/server/schema';
 import { settings } from '$lib/server/settings';
@@ -244,39 +243,5 @@ export const actions = {
         if (!Number.isFinite(id)) return fail(400, { message: '予約IDが不正です' });
         await cancel(id);
         return { success: true };
-    },
-
-    /**
-     * 局ロゴの位置を覚える。
-     *
-     * CM検出 (jls) で logoframe が自分で見つけられなかった局だけ、画面から
-     * 囲ってもらう。局ごとの設定なので、次に同じ局を録ったときから効く。
-     *
-     * **覚え込んだロゴも一緒に捨てる。** `-logo-area` はロゴを覚えるときにしか
-     * 効かないので、既に覚えているものが残っていると教え直しても使われない
-     * (合致率が落ちるまで作り直さない)
-     */
-    logoArea: async ({ request }) => {
-        const form = await request.formData();
-        const serviceId = Number(form.get('serviceId'));
-        const area = String(form.get('area') ?? '').trim();
-        if (!Number.isFinite(serviceId)) return fail(400, { message: '局IDが不正です' });
-        // logoframe に渡す形。数字4つ以外は受けない
-        if (!/^\d+,\d+,\d+,\d+$/.test(area)) {
-            return fail(400, { message: 'ロゴの範囲を囲ってください' });
-        }
-        database().prepare('UPDATE services SET logo_area = ? WHERE id = ?').run(area, serviceId);
-        forgetLogoData(serviceId);
-        return { success: true, message: `ロゴの位置を覚えました (${area})。次の録画から覚え直します` };
-    },
-
-    logoAreaClear: async ({ request }) => {
-        const form = await request.formData();
-        const serviceId = Number(form.get('serviceId'));
-        if (!Number.isFinite(serviceId)) return fail(400, { message: '局IDが不正です' });
-        database().prepare('UPDATE services SET logo_area = NULL WHERE id = ?').run(serviceId);
-        // 教えた枠で覚えたものが残っていると、自動に戻しても効かない
-        forgetLogoData(serviceId);
-        return { success: true, message: 'ロゴの位置を自動に戻しました' };
     },
 };

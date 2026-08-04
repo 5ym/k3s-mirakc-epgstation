@@ -1,7 +1,9 @@
 import { fail } from '@sveltejs/kit';
-import { queryAll, queryOne } from '$lib/server/db';
+import { database, queryAll, queryOne } from '$lib/server/db';
 import { collectState } from '$lib/server/epg-collect';
 import { stats as logoStats, sweepNow, sweepState } from '$lib/server/logo';
+import { forgetLogoData } from '$lib/server/logo-data';
+import { learned, stats as learnStats } from '$lib/server/logo-learn';
 import { refresh, start, stop } from '$lib/server/scan';
 import { cardStatus } from '$lib/server/scramble';
 import {
@@ -14,6 +16,18 @@ import {
     tunersDetected,
 } from '$lib/server/tuner';
 import type { ChannelType, Service } from '$lib/types';
+
+/** 局1つぶんの、CM検出ロゴの覚え具合 */
+export interface CmLogo {
+    id: number;
+    name: string;
+    /** 画面から教えた範囲 ("x,y,w,h")。教えていなければ null */
+    logo_area: string | null;
+    /** 位置を教えるときにコマを出す録画。1本も無ければ null */
+    recording_id: number | null;
+    /** logoframe が既に覚えているか */
+    learned: boolean;
+}
 
 const TYPES: ChannelType[] = ['GR', 'BS', 'CS'];
 
@@ -113,10 +127,71 @@ export async function load() {
          * 押しても何も起きていないように見える
          */
         logoSweep: sweepState(),
+        /*
+         * CM検出のロゴ。**番組表に出す局ロゴとは別物** (logo-learn.ts)。
+         *
+         * 覚えられなかった局はここで位置を教える。**録画の詳細ではなく局の話**
+         * なので、局を並べているこの画面に置く
+         */
+        cmLogos: cmLogoState(),
+        cmLogoStats: learnStats(),
     };
 }
 
+/** 局ごとの、CM検出ロゴの覚え具合。教えるときのコマは直近の録画から出す */
+function cmLogoState(): CmLogo[] {
+    const services = queryAll<{
+        id: number;
+        name: string;
+        logo_area: string | null;
+        recording_id: number | null;
+    }>(`
+        SELECT s.id, s.name, s.logo_area,
+               (SELECT r.id FROM recordings r
+                 WHERE r.service_id = s.service_id AND r.deleted_at IS NULL
+                 ORDER BY r.id DESC LIMIT 1) AS recording_id
+          FROM services s
+         WHERE s.service_type = 1
+         ORDER BY s.remote_control_key IS NULL, s.remote_control_key, s.id
+    `);
+    return services.map((service) => ({ ...service, learned: learned(service.id) }));
+}
+
 export const actions = {
+    /**
+     * 局ロゴの位置を覚える。
+     *
+     * CM検出 (jls) で logoframe が自分で見つけられなかった局だけ、画面から
+     * 囲ってもらう。局ごとの設定なので、次にその局を掴んだときから効く。
+     *
+     * **覚え込んだロゴも一緒に捨てる。** `-logo-area` はロゴを覚えるときにしか
+     * 効かないので、既に覚えているものが残っていると教え直しても使われない
+     * (合致率が落ちるまで作り直さない)
+     */
+    logoArea: async ({ request }) => {
+        const form = await request.formData();
+        const serviceId = Number(form.get('serviceId'));
+        const area = String(form.get('area') ?? '').trim();
+        if (!Number.isFinite(serviceId)) return fail(400, { message: '局IDが不正です' });
+        // logoframe に渡す形。数字4つ以外は受けない
+        if (!/^\d+,\d+,\d+,\d+$/.test(area)) {
+            return fail(400, { message: 'ロゴの範囲を囲ってください' });
+        }
+        database().prepare('UPDATE services SET logo_area = ? WHERE id = ?').run(area, serviceId);
+        forgetLogoData(serviceId);
+        return { success: true, message: `ロゴの位置を覚えました (${area})。次に掴んだときに覚え直します` };
+    },
+
+    logoAreaClear: async ({ request }) => {
+        const form = await request.formData();
+        const serviceId = Number(form.get('serviceId'));
+        if (!Number.isFinite(serviceId)) return fail(400, { message: '局IDが不正です' });
+        database().prepare('UPDATE services SET logo_area = NULL WHERE id = ?').run(serviceId);
+        // 教えた枠で覚えたものが残っていると、自動に戻しても効かない
+        forgetLogoData(serviceId);
+        return { success: true, message: 'ロゴの位置を自動に戻しました' };
+    },
+
     scan: async ({ request }) => {
         const form = await request.formData();
         const types = form

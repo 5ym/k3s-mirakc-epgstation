@@ -79,6 +79,14 @@ export const config = {
     /** CMの扱いの初期値。実カットは事故ると本編が消えるのでチャプターのみ */
     cmCutDefault: 'chapter' as CmMode,
 
+    /**
+     * CM検出のロゴを覚えに行く間隔。**録画より先に覚えておくため** (logo-learn.ts)。
+     *
+     * 覚えるのは局ごとに1回きりなので、頻繁に見回る意味はない。空いている
+     * チューナーがあるときだけ動く
+     */
+    logoLearnInterval: 30 * MIN,
+
     /** chapter_exe / logoframe / join_logo_scp の置き場。イメージに入っている */
     jlsBin: '/opt/jls/bin',
     /** join_logo_scp の判定規則。join_logo_scp_trial に付いてくるもの */
