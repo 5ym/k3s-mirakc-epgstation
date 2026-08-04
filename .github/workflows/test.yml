@@ -130,8 +130,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # ブラウザは 150MB ほどあり、毎回落とすと1分近く持っていかれる。
-      # 中身は Playwright のバージョンでしか変わらないので、それを鍵にする
+      # ブラウザは 270MB ほどあり、毎回落とすと1分近く持っていかれる。
+      # 中身は Playwright のバージョンでしか変わらないので、それを鍵にする。
+      # **割った先どうしで使い回せている** (実測で 269MB を7秒で復元)
       - name: Read Playwright version
         id: playwright
         run: echo "version=$(bun pm ls | grep -oP '@playwright/test@\K[^\s]+' | head -1)" >> "$GITHUB_OUTPUT"
@@ -143,20 +144,23 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
 
-      # --with-deps は OS のライブラリを入れるところで、キャッシュに乗らない。
-      # ブラウザが残っていても毎回要る (入っていれば数秒で終わる)。
+      # **`--with-deps` は使わない。** apt を叩くところで、キャッシュに乗らないので
+      # 毎回走る。そして**ここだけが詰まる** — 9分24秒 掛かった回があり、上限を
+      # 4分に切ったら今度はそこで打ち切られた (ブラウザ自体はキャッシュから
+      # 7秒で戻っていて、落としてすらいない)。
       #
-      # **上限を切っておく。** 普段は 16〜22 秒で終わるが、apt が詰まって
-      # **9分24秒** 掛かったことがある (そのぶんだけ全体が延び、最後は
-      # 打ち切られた)。ここで落としてやり直すほうが早い
+      # 何を入れているのか数えたら、**ライブラリは1つも要らなかった**。
+      # ubuntu-latest には chromium の依存 (libnss3, libgbm1, libasound2t64…) が
+      # 全部入っていて、新しく入るのは**フォント9つだけ**
+      # (fonts-ipafont-gothic, xfonts-* など)。E2E は DOM の文字を見るだけで
+      # 絵は比べていないので、字が豆腐でも結果は変わらない。
+      #
+      # ランナーの中身が変わってライブラリが欠けたら、ブラウザが起動できずに
+      # 落ちる。そのときは足りないものだけを apt で入れる (総当たりに戻さない)
       - name: Install Playwright browser
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         timeout-minutes: 4
-        run: |
-          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
-            bunx playwright install-deps chromium
-          else
-            bunx playwright install --with-deps chromium
-          fi
+        run: bunx playwright install chromium
 
       # アプリを1度だけ組んでから、ワーカーの数だけ立てる。
       # 偽エージェント・偽通知先もワーカーごとに1式ずつ (tests/stack.ts)
