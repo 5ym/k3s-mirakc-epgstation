@@ -128,7 +128,19 @@ function videoArgs(
             encoder: ['libx264', '-preset', 'medium', '-crf', '22'],
         };
     }
-    return { filter: [...steps, 'format=yuv420p10le'].join(','), encoder: ['libsvtav1'] };
+    /*
+     * **preset と crf は書いておく。** 値はどちらも SVT-AV1 2.3.0 の既定そのもので、
+     * 今までと同じものが出る。
+     *
+     * 書かずに既定へ任せていたが、**その既定は版で変わる。** 4.2.0 では preset が
+     * 10 から 8 になっていて、上げるだけで実測 **28秒 → 37秒 (+32%)・
+     * 大きさ +27%** になった (下の実測)。焼く速さと大きさは denpa が決めることで、
+     * 上流の都合で黙って変わっていいものではない
+     */
+    return {
+        filter: [...steps, 'format=yuv420p10le'].join(','),
+        encoder: ['libsvtav1', '-preset', '10', '-crf', '35'],
+    };
 }
 
 const DUAL_MONO = 2;

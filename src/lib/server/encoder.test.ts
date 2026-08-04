@@ -24,6 +24,17 @@ describe('録画エンコードの引数', () => {
         expect(args.at(-1)).toBe('/out.mkv');
     });
 
+    /*
+     * **上流の既定に任せない。** SVT-AV1 の既定 preset は版で変わる (2.3.0 は 10、
+     * 4.2.0 は 8)。渡していなかった頃のまま入れ替えると、実測で時間 +32%・
+     * 大きさ +27% になった。値そのものは 2.3.0 の既定と同じ
+     */
+    test('AV1 の preset と crf は書いてある', () => {
+        const args = buildArgs('/in.m2ts', '/out.mkv', 1, null);
+        expect(argValue(args, '-preset')).toBe('10');
+        expect(argValue(args, '-crf')).toBe('35');
+    });
+
     test('なめらかにすると1フィールドごとに1コマ出す', () => {
         const args = buildArgs('/in.m2ts', '/out.mkv', 1, null, 'av1', { smoothMotion: true });
         expect(argValue(args, '-vf')).toBe('bwdif,format=yuv420p10le');
