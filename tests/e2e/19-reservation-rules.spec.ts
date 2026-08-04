@@ -73,6 +73,35 @@ test.describe('ルールで立った予約', () => {
         );
     });
 
+    /*
+     * **実機で踏んだところ。** 消すのを `scheduled`/`conflict` に絞っていた頃は、
+     * 取り消し済みのぶんがルールとの紐付けだけ外されて残っていた。それが後から
+     * `scheduled` に戻ると、消したはずのルールの予約が「ルール: (削除済み)」として
+     * 一覧に並ぶ (実機で 45 件)。まだ1コマも録っていないものは状態を問わず消す
+     */
+    test('ルールを消すと、取り消し済みのぶんも残らない', async ({ page }) => {
+        await goto(page, '/');
+        const row = page
+            .getByTestId('reservation-row')
+            .filter({ hasText: 'テストアニメ' })
+            .filter({ has: page.getByTestId('cancel-button') })
+            .last();
+        await expect(row).toBeVisible();
+        const id = await row.getAttribute('data-reservation-id');
+        await row.getByTestId('cancel-button').click();
+
+        // 取り消し済みとしては残っている
+        await goto(page, '/?all=1');
+        await expect(page.locator(`[data-reservation-id="${id}"]`)).toBeVisible();
+
+        await goto(page, '/rules');
+        await page.getByTestId('rule-row').first().getByTestId('rule-delete').click();
+        await expect(page.getByTestId('rule-row')).toHaveCount(0);
+
+        await goto(page, '/?all=1');
+        await expect(page.locator(`[data-reservation-id="${id}"]`)).toHaveCount(0);
+    });
+
     test('ルール名からそのルールの編集に飛べる', async ({ page }) => {
         await goto(page, '/');
         const row = page

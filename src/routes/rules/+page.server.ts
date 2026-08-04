@@ -479,16 +479,21 @@ export const actions = {
         const form = await request.formData();
         const id = Number(form.get('id'));
         if (!Number.isFinite(id)) return fail(400, { message: 'ルールIDが不正です' });
-        // まだ始まっていない予約は行ごと消す。残すと、ルールを消したのに録画だけ続く。
-        //
-        // 「取り消し」にはしない。applyRules は予約行が既にあると INSERT OR IGNORE で
-        // 飛ばすので(手で取り消したものをルールが復活させないため)、取り消しで残すと
-        // 同じルールを作り直しても二度と予約が立たなくなる
+        /*
+         * まだ1コマも録っていない予約は行ごと消す。残すと、ルールを消したのに
+         * 録画だけ続く。
+         *
+         * 「取り消し」にはしない。applyRules は予約行が既にあると INSERT OR IGNORE で
+         * 飛ばすので(手で取り消したものをルールが復活させないため)、取り消しで残すと
+         * 同じルールを作り直しても二度と予約が立たなくなる。
+         *
+         * **状態では選ばない。** `scheduled`/`conflict` だけ消していた頃は、
+         * 取り消し済みのぶんがルールとの紐付けを外されただけで残っていた。
+         * それが後から `scheduled` に戻ると、**消したはずのルールの予約が
+         * 「ルール: (削除済み)」として一覧に並ぶ**。実機で 45 件そうなった
+         */
         const canceled = database()
-            .prepare(
-                `DELETE FROM reservations
-                 WHERE rule_id = ? AND state IN ('scheduled', 'conflict') AND started_at IS NULL`,
-            )
+            .prepare('DELETE FROM reservations WHERE rule_id = ? AND started_at IS NULL')
             .run(id);
         // 録画中・録画済みのぶんは履歴として残すので、ルールとの紐付けだけ外す
         database().prepare('UPDATE reservations SET rule_id = NULL WHERE rule_id = ?').run(id);
