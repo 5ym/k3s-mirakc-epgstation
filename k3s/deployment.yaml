@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: tuner-agent
-          image: ghcr.io/danything/denpa-agent-dotnet:latest
+          image: ghcr.io/danything/denpa-agent-dotnet:sha-58759c91afc9
           imagePullPolicy: IfNotPresent
           securityContext:
             privileged: true
@@ -86,7 +86,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: prepull
-          image: ghcr.io/danything/denpa:sha-4cbc3debad59
+          image: ghcr.io/danything/denpa:sha-675de2396d40
           imagePullPolicy: IfNotPresent
           command: ['/bin/true']
 ---
@@ -114,7 +114,7 @@ spec:
       terminationGracePeriodSeconds: 21900
       containers:
         - name: denpa
-          image: ghcr.io/danything/denpa:sha-4cbc3debad59
+          image: ghcr.io/danything/denpa:sha-675de2396d40
           imagePullPolicy: IfNotPresent
           env:
             - name: TZ
