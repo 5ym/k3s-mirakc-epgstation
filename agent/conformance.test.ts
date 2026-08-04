@@ -8,23 +8,25 @@
  * .NET に書き直したら、`AGENT_CMD` を差し替えて同じものを通す — それが
  * 「今までと同じように動く」の定義になる ([roadmap.md](../docs/roadmap.md))。
  *
- *     AGENT_CMD='./agent/publish/denpa-agent' bun test agent/conformance.test.ts
+ *     bun run test:conformance
+ *
+ * **`bun run test:unit` には入っていません。** あちらは焼いた実行ファイルが
+ * 要らないもの (`src` の下) だけで、こちらは先に `dotnet publish` が要ります。
+ * 混ぜていた頃は、焼く前の CI がここで ENOENT を出して落ちていました。
  *
  * チューナーの代わりは `tests/fake/tune.ts`。エージェントから見れば
  * 「起こすと TS を流し続ける子プロセス」でしかないので、recisdb と区別がつかない。
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { SYNC } from '../src/lib/ts/psi';
 import { channels } from '../tests/fake/broadcast';
 import type { ChannelEntry } from './channels';
 
-/** 既定は焼いたもの。`dotnet publish` してから走らせる (CI もそうしている) */
-const AGENT_CMD = (
-    process.env.AGENT_CMD ?? 'agent/Denpa.Agent/bin/Release/net10.0/linux-x64/publish/denpa-agent'
-).split(' ');
+/** 既定は焼いたもの。`bun run test:conformance` なら焼くところからやる */
+const AGENT_CMD = (process.env.AGENT_CMD ?? 'agent/publish/denpa-agent').split(' ');
 const PORT = Number(process.env.AGENT_TEST_PORT ?? 40881);
 const BASE = `http://127.0.0.1:${PORT}`;
 const ROOT = resolve(import.meta.dir, '..');
@@ -136,6 +138,17 @@ async function drain(reader: ReadableStreamDefaultReader): Promise<{ bytes: numb
 }
 
 beforeAll(async () => {
+    /*
+     * 焼いていないだけなら、そうと言う。素の ENOENT は spawn の行しか出さず、
+     * 「何を焼けばいいのか」がどこにも書かれていない
+     */
+    if (AGENT_CMD[0].includes('/') && !existsSync(resolve(ROOT, AGENT_CMD[0]))) {
+        throw new Error(
+            `エージェントが ${AGENT_CMD[0]} にありません。` +
+                '`bun run test:conformance` で焼いてから走らせてください',
+        );
+    }
+
     work = mkdtempSync(join(tmpdir(), 'denpa-agent-'));
     mkdirSync(paths().recorded, { recursive: true });
     writeFileSync(paths().tuners, TUNERS);

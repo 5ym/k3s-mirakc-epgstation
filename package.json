@@ -8,7 +8,8 @@
         "start": "bun ./build/index.js",
         "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
         "test": "bun run lint && bun run check && bun run test:unit && playwright test",
-        "test:unit": "bun test src agent",
+        "test:unit": "bun test src",
+        "test:conformance": "dotnet publish agent/Denpa.Agent/Denpa.Agent.csproj -c Release -r linux-x64 -o agent/publish && AGENT_CMD=\"$PWD/agent/publish/denpa-agent\" bun test agent/conformance.test.ts",
         "test:e2e": "playwright test",
         "lint": "biome check . && prettier --check \"src/**/*.svelte\"",
         "format": "biome check --write . && prettier --write \"src/**/*.svelte\""

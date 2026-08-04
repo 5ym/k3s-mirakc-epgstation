@@ -54,7 +54,8 @@ jobs:
       - name: Type check
         run: bun run check
 
-      # denpa 本体と、チューナーエージェント (agent/) の両方
+      # denpa 本体だけ。エージェントは .NET なので下の2つで見る
+      # (`agent/conformance.test.ts` は焼いた実行ファイルが要るので、ここには入れない)
       - name: Unit tests
         run: bun run test:unit
 
@@ -67,13 +68,12 @@ jobs:
       - name: Unit tests (.NET agent)
         run: dotnet test agent/Denpa.Agent.Tests/Denpa.Agent.Tests.csproj
 
-      # エージェントの口に直接当てるテスト。**本物を起こして**、偽の選局
-      # コマンドで流す (bun 版が居た頃は、同じものを2つの実装に通していた)
-      - name: Build .NET agent
-        run: dotnet publish agent/Denpa.Agent/Denpa.Agent.csproj -c Release -r linux-x64 -o agent/publish
-
+      # エージェントの口に直接当てるテスト。**本物を焼いて起こして**、偽の選局
+      # コマンドで流す (bun 版が居た頃は、同じものを2つの実装に通していた)。
+      # 焼くところまで含めて1つの script にしてある — 手元で走らせるときに
+      # 焼き忘れると、消えた既定の置き場を叩いて ENOENT で落ちるだけになる
       - name: Conformance
-        run: AGENT_CMD="$PWD/agent/publish/denpa-agent" bun test agent/conformance.test.ts
+        run: bun run test:conformance
 
       # ブラウザは 150MB ほどあり、毎回落とすと1分近く持っていかれる。
       # 中身は Playwright のバージョンでしか変わらないので、それを鍵にする
