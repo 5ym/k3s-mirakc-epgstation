@@ -1,8 +1,9 @@
-import { mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { invertRanges, MAX_CM_RATIO, type Range } from './cm';
 import { config } from './config';
 import { logoRepo } from './logo-data';
+import { settings } from './settings';
 import { text } from './stream';
 
 /**
@@ -36,6 +37,50 @@ export function parseTrimRanges(avs: string, fps: number): Range[] {
         ranges.push({ start: from / fps, end: (to + 1) / fps });
     }
     return ranges;
+}
+
+/**
+ * logoframe が出す「ロゴの写っているコマ」の一覧を、秒の区間に直す。
+ *
+ * ```
+ *    284 S 0 BTM    284    284      ← ここからロゴが出る
+ *   3280 E 0 TOP   3280   3280      ← ここで消える
+ * ```
+ *
+ * S と E が交互に並ぶ。**join_logo_scp が区切れなかったときの受け皿。**
+ * あちらは無音・シーンチェンジと突き合わせて番組の構成を推測するので、
+ * 推測に失敗すると何も返ってこない。ロゴの在り処そのものは logoframe が
+ * 出しているので、それだけでも本編とCMには分けられる (実機の TOKYO MX で
+ * 20% がCMという妥当な答えになった)。
+ */
+export function parseLogoFrames(text: string, fps: number): Range[] {
+    const ranges: Range[] = [];
+    let start: number | null = null;
+    for (const line of text.split('\n')) {
+        const match = /^\s*(\d+)\s+([SE])\b/.exec(line);
+        if (match === null) continue;
+        const frame = Number(match[1]);
+        if (match[2] === 'S') {
+            start = frame;
+        } else if (start !== null) {
+            ranges.push({ start: start / fps, end: (frame + 1) / fps });
+            start = null;
+        }
+    }
+    return ranges;
+}
+
+/**
+ * 判定の規則。**ロゴをどれだけ当てにするかだけ差し替える。**
+ *
+ * join_logo_scp は `-incmd` に渡した規則ファイルで動く。中の `logo_level` が
+ * 「番組の構成を推測するときにロゴ情報をどれだけ優先するか」(1:使わない
+ * 〜 8:最優先) で、**ここが実質の閾値**。ファイルごと差し替えるのではなく、
+ * 付いてくる標準の規則からこの1行だけ書き換える — 他の設定まで抱えると、
+ * 元が更新されたときに追従できなくなる
+ */
+export function withLogoLevel(rule: string, level: number): string {
+    return rule.replace(/^(\s*Default\s+logo_level\s+)\d+/m, `$1${level}`);
 }
 
 /** CM判定が占める割合 (%) */
@@ -116,7 +161,21 @@ function workFiles(input: string) {
         cut: `${base}.cut.avs`,
         /** join_logo_scp が出すシーン一覧。使わない */
         scpout: `${base}.jlscp.txt`,
+        /** 設定を差し込んだ判定の規則 (`withLogoLevel`) */
+        rule: `${base}.jl.txt`,
     };
+}
+
+/**
+ * 判定の規則を、設定を差し込んで置く。読めなければ付いてくるものをそのまま使う。
+ */
+function ruleFile(path: string, level: number): string {
+    try {
+        writeFileSync(path, withLogoLevel(readFileSync(config.jlsRule, 'utf8'), level));
+        return path;
+    } catch {
+        return config.jlsRule;
+    }
 }
 
 export interface JlsOptions {
@@ -219,7 +278,7 @@ export async function detectWithJls(
                 '-inscp',
                 work.scenes,
                 '-incmd',
-                config.jlsRule,
+                ruleFile(work.rule, settings().logoLevel),
                 '-o',
                 work.cut,
                 '-oscp',
@@ -252,26 +311,17 @@ export async function detectWithJls(
          */
         const keep = parseTrimRanges(avs, fps);
         if (keep.length === 0) {
-            return {
-                cm: [],
-                note: `${work.cut} に Trim が含まれていませんでした`,
-            };
+            return byLogoAlone(work.frames, fps, duration, `${work.cut} に Trim が含まれていませんでした`);
         }
 
         const cm = invertRanges(keep, duration);
         /*
-         * **区切りが1つも出なかった。** 残す区間が丸ごと1本になっている状態で、
-         * logoframe が「最初から最後までロゴが写っている」と言っている。
-         * 覚えたロゴが緩すぎて CM 中にも当たっていることが多い。
-         *
-         * ここに文言を持たせずに落としていた頃は、画面には
-         * 「jls は使えず: join_logo_scp」と出ていた — うまくいったときの印が
-         * そのまま失敗の理由に流れ込んでいて、読んでも何も分からなかった。
-         * しかも「ロゴを取れていない」ようにしか読めない (実機で、ロゴは
-         * 正しく覚えられている局だった)
+         * **区切りが1つも出なかった。** 残す区間が丸ごと1本になっている状態。
+         * join_logo_scp は無音・シーンチェンジとロゴを突き合わせて番組の構成を
+         * 推測するので、推測に失敗するとこうなる
          */
         if (cm.length === 0) {
-            return { cm: [], note: '最初から最後までロゴが写っていて、CMを見つけられませんでした' };
+            return byLogoAlone(work.frames, fps, duration, '本編とCMに分けられませんでした');
         }
         // 番組の半分以上がCMになったら、その結果は捨てて無音検出に落とす (tooMuchCm)
         if (tooMuchCm(cm, duration)) {
@@ -285,6 +335,44 @@ export async function detectWithJls(
         // 中身は使い終わっている。録画の隣に置いているので残すと生TSの置き場を圧迫する
         cleanup(input);
     }
+}
+
+/**
+ * join_logo_scp が区切れなかったときの受け皿。**ロゴの在り処だけで分ける。**
+ *
+ * あちらが返さなくても、`logoframe` は「どのコマにロゴが出ているか」を別に
+ * 出している。日本の地上波・BSはCMの間だけロゴを消すので、その在り処を裏返せば
+ * それだけでCMになる。番組の構成 (提供・予告・エンドカード) までは読めないので
+ * join_logo_scp ほど細かくはないが、**無音検出に落ちるよりは確か**。
+ *
+ * 実機の TOKYO MX の録画がこれだった。logoframe は 79.74% の合致率で
+ * 5区間を正しく出していたのに join_logo_scp が何も返さず、無音検出に落ちて
+ * 本編を60秒ぶん取り違えていた。ロゴだけで分け直すと 20% がCMという妥当な答えになる。
+ *
+ * ここでも多すぎれば捨てる (`tooMuchCm`) ので、ロゴがロゴでなかったときは
+ * これまでどおり無音検出へ落ちる。
+ */
+function byLogoAlone(
+    frames: string,
+    fps: number,
+    duration: number,
+    reason: string,
+): { cm: Range[]; note: string } {
+    let text: string;
+    try {
+        text = readFileSync(frames, 'utf8');
+    } catch {
+        return { cm: [], note: reason };
+    }
+
+    const lit = parseLogoFrames(text, fps);
+    if (lit.length === 0) return { cm: [], note: `${reason} (ロゴの写っているコマもありません)` };
+
+    const cm = invertRanges(lit, duration);
+    if (cm.length === 0 || tooMuchCm(cm, duration)) {
+        return { cm: [], note: `${reason} (ロゴだけで分け直しても ${cmRatio(cm, duration)}%)` };
+    }
+    return { cm, note: `ロゴの在り処だけで分けました (${reason})` };
 }
 
 /**

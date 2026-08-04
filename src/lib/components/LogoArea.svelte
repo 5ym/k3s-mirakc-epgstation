@@ -316,8 +316,25 @@
                     を考えさせるだけで、答えは結局その隣の絵にしか無かった
                 -->
                 <div class="text-base-content/60 mt-0.5">
-                    濃さを明るさにした白黒です (いちばん濃いところが白)。位置を教えると覚え直します。
+                    濃さを明るさにした白黒です (いちばん濃いところが白)。
                 </div>
+                <!--
+                    **絵になっていないものは捨てられるようにする。**
+
+                    自動探索が拾うのは「画面の隅にずっと同じ縁があること」だけなので、
+                    ロゴではないもの (字幕の下地、常時出ている枠) を覚えることがある。
+                    実機の NHK総合 は文字の判読できない染みを覚えていた。
+
+                    捨てるだけでいい。**位置を教える必要はない** — 空いている
+                    チューナーで定期的に覚え直すので、次の見回りで入り直る
+                    (`logo-learn.sweep`)。教えるのは、それでも駄目な局のためのもの
+                -->
+                <form method="POST" action="?/logoForget" use:submitting class="mt-1">
+                    <input type="hidden" name="serviceId" value={serviceId} />
+                    <button class="btn btn-xs btn-ghost" data-testid="logo-forget">
+                        この絵は違う (捨てて覚え直す)
+                    </button>
+                </form>
             </div>
         </div>
     {/if}

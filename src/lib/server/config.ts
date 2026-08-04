@@ -123,6 +123,15 @@ export const config = {
      * 番組で無用な作り直しを招く
      */
     jlsLogoMatch: 10,
+    /**
+     * join_logo_scp が番組の構成を推測するとき、**ロゴをどれだけ当てにするか**
+     * (JL の `logo_level`。1:使わない 〜 8:最優先)。設定画面で変えられる。
+     *
+     * 付いてくる規則の既定のまま。実機では、logoframe が 79.74% の合致率で
+     * 正しく5区間を出しているのに join_logo_scp が何も返さない録画があり、
+     * 上げるとそこが拾える (ロゴを覚え違えている局では逆に下げる)
+     */
+    jlsLogoLevel: num('JLS_LOGO_LEVEL', 6),
     /** jls が返す Trim はフレーム番号なので、秒に直すためのfps。ffprobeで取れなければこれを使う */
     cmJlsFallbackFps: 30000 / 1001,
     /** 検出に掛ける上限時間(ms)。超えたら諦めてCM無しとして扱う */

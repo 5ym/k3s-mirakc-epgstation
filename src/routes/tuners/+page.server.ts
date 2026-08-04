@@ -228,6 +228,25 @@ export const actions = {
         return { success: true, message: `ロゴの位置を覚えました (${area})。次に掴んだときに覚え直します` };
     },
 
+    /**
+     * 覚えたロゴを捨てる。**位置は教えないまま。**
+     *
+     * 自動探索が拾うのは「画面の隅にずっと同じ縁があること」だけなので、
+     * ロゴではないもの (字幕の下地、常時出ている枠) を覚えることがある。
+     * 実機の NHK総合 は文字の判読できない染みを覚えていた。
+     *
+     * 捨てれば、空いているチューナーで回っている見回りが次に覚え直す
+     * (`logo-learn.sweep`)。それでも駄目な局だけ、下で位置を教える
+     */
+    logoForget: async ({ request }) => {
+        const form = await request.formData();
+        const serviceId = Number(form.get('serviceId'));
+        if (!Number.isFinite(serviceId)) return fail(400, { message: '局IDが不正です' });
+        // 同じ絵を映しているサブチャンネルの枠にも配ってある (`logo-learn.share`)
+        for (const id of [serviceId, ...siblings(serviceId)]) forgetLogoData(id);
+        return { success: true, message: '覚えたロゴを捨てました。空いているチューナーで覚え直します' };
+    },
+
     logoAreaClear: async ({ request }) => {
         const form = await request.formData();
         const serviceId = Number(form.get('serviceId'));

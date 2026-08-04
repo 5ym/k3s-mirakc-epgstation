@@ -33,11 +33,26 @@ export interface Settings {
      * silence : 無音とCM尺だけ。速いが本編の「間」を拾うことがある
      */
     cmDetector: 'jls' | 'silence';
+    /**
+     * **ロゴをどれだけ当てにするか** (1〜8、既定 6)。
+     *
+     * join_logo_scp は無音・シーンチェンジと「ロゴが出ているか」を突き合わせて
+     * 番組の構成を推測する。その推測でロゴ情報をどれだけ優先するかがこれ
+     * (JL の `logo_level`)。ロゴが正しいのにCMを取り違えるなら上げる、
+     * ロゴを覚え違えているようなら下げる。1 でロゴを使わなくなる
+     */
+    logoLevel: number;
     /** ベーシック認証。両方入っているときだけ有効 */
     basicAuthUser: string;
     basicAuthPassword: string;
     /** 認証をかける範囲。files … 配信とWebDAVだけ / all … 画面も含めて全部 */
     basicAuthScope: 'files' | 'all';
+}
+
+/** JL の logo_level。範囲の外は既定に倒す (規則ファイルに書き込む値なので) */
+function logoLevel(value: string | undefined): number {
+    const level = Number(value);
+    return Number.isInteger(level) && level >= 1 && level <= 8 ? level : config.jlsLogoLevel;
 }
 
 function stored(key: string): string | undefined {
@@ -65,6 +80,7 @@ export function settings(): Settings {
         keepOriginal: flag('keepOriginal', false),
         freeOnly: flag('freeOnly', true),
         cmDetector: stored('cmDetector') === 'silence' ? 'silence' : 'jls',
+        logoLevel: logoLevel(stored('logoLevel')),
         basicAuthUser: stored('basicAuthUser') ?? config.basicAuthUser,
         basicAuthPassword: stored('basicAuthPassword') ?? config.basicAuthPassword,
         basicAuthScope: scope === 'all' ? 'all' : 'files',

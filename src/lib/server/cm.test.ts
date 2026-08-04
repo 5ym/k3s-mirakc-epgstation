@@ -12,7 +12,7 @@ import {
     parseSilences,
     widenKeep,
 } from './cm';
-import { cmRatio, parseTrimRanges, tooMuchCm } from './cm-jls';
+import { cmRatio, parseLogoFrames, parseTrimRanges, tooMuchCm, withLogoLevel } from './cm-jls';
 
 describe('parseSilences', () => {
     test('silencedetect のログから無音区間と尺を取る', () => {
@@ -278,5 +278,55 @@ describe('ロゴの位置を教える口を出すか', () => {
         expect(logoUnusable('join_logo_scp')).toBe(false);
         expect(logoUnusable('無音 8 箇所')).toBe(false);
         expect(logoUnusable(null)).toBe(false);
+    });
+});
+
+/*
+ * join_logo_scp が本編とCMに分けられなかったときの受け皿。logoframe は
+ * 「どのコマにロゴが出ているか」を別に出しているので、その在り処を裏返せば
+ * それだけでCMになる。実機の TOKYO MX の録画がこれで、無音検出に落ちて
+ * 本編を60秒ぶん取り違えていた
+ */
+describe('ロゴの写っているコマ', () => {
+    // 実機の logoframe が出したもの (末尾の列は使わない)
+    const output = [
+        '   284 S 0 BTM    284    284',
+        '  3280 E 0 TOP   3280   3280',
+        '  5079 S 0 BTM   5079   5079',
+        ' 24978 E 0 ALL  24978  24978',
+    ].join('\n');
+
+    test('S と E の対を区間にする', () => {
+        expect(parseLogoFrames(output, 30)).toEqual([
+            { start: 284 / 30, end: 3281 / 30 },
+            { start: 5079 / 30, end: 24979 / 30 },
+        ]);
+    });
+
+    test('相手のいない S は捨てる。まだロゴが出たままで終わった録画', () => {
+        expect(parseLogoFrames('  100 S 0 BTM  100  100', 30)).toEqual([]);
+    });
+
+    test('読めない中身なら何も返さない', () => {
+        expect(parseLogoFrames('checking 54682/54682 ended.', 30)).toEqual([]);
+    });
+});
+
+describe('判定の規則に設定を差し込む', () => {
+    const rule = [
+        '#----- ロゴ情報の優先度 ---',
+        'Default logo_level    6     # 構成推測時のロゴ使用',
+        'Default logo_revise   23    # ロゴ使用関連の構成変更',
+    ].join('\n');
+
+    test('logo_level だけ書き換える', () => {
+        const out = withLogoLevel(rule, 8);
+        expect(out).toContain('Default logo_level    8     # 構成推測時のロゴ使用');
+        // 隣の設定には触らない
+        expect(out).toContain('Default logo_revise   23');
+    });
+
+    test('その行が無い規則はそのまま', () => {
+        expect(withLogoLevel('Default autocm_code   6', 8)).toBe('Default autocm_code   6');
     });
 });

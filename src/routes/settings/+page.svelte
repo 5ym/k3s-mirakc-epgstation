@@ -161,6 +161,46 @@
                         </span>
                     </label>
                     <!--
+                        **ロゴをどれだけ当てにするか** (JL の logo_level)。
+                        ロゴが出ているコマは logoframe が別に拾っていて、それを
+                        無音・シーンチェンジと突き合わせて番組の構成を推測するのが
+                        join_logo_scp。その推測でロゴをどれだけ優先するかがここ。
+
+                        数字 (1〜8) をそのまま出しても「6 は高いのか」を考えさせる
+                        だけなので、言葉で選ばせる
+                    -->
+                    <label class="flex flex-col gap-1">
+                        <span class="text-sm font-medium">ロゴの当てにしかた</span>
+                        <select
+                            name="logoLevel"
+                            class="select select-bordered w-full"
+                            data-testid="global-logo-level"
+                            disabled={recording.cmDetector !== 'jls'}
+                        >
+                            <option value="8" selected={recording.logoLevel >= 8}>
+                                ロゴを最優先する
+                            </option>
+                            <option
+                                value="6"
+                                selected={recording.logoLevel < 8 && recording.logoLevel >= 5}
+                            >
+                                ふつう (おすすめ)
+                            </option>
+                            <option
+                                value="3"
+                                selected={recording.logoLevel < 5 && recording.logoLevel >= 2}
+                            >
+                                ロゴは参考程度
+                            </option>
+                            <option value="1" selected={recording.logoLevel <= 1}>
+                                ロゴを使わない
+                            </option>
+                        </select>
+                        <span class="text-base-content/60 text-xs">
+                            ロゴは合っているのにCMを取り違えるなら上げ、覚えたロゴが怪しいなら下げます
+                        </span>
+                    </label>
+                    <!--
                         コマ数は選ばせない。放送は毎秒60フィールドなので実写は60コマで
                         撮られたとおりになるが、国内アニメは元が24コマ前後で、コマを起こしても
                         同じ絵が並ぶだけで時間とサイズが倍になる。番組のジャンル (中分類まで)
