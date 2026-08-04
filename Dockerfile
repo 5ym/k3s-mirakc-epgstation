@@ -42,7 +42,7 @@ ENV CURL="curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors --connect-time
 ENV DEV="curl ca-certificates build-essential cmake pkg-config nasm zlib1g-dev libfreetype6-dev libopus-dev libsvtav1enc-dev libx264-dev libdav1d-dev libfontconfig-dev"
 
 # renovate: datasource=github-tags depName=FFmpeg/FFmpeg extractVersion=^n(?<version>.*)$
-ENV FFMPEG_VERSION=8.1
+ENV FFMPEG_VERSION=9.0
 # renovate: datasource=github-tags depName=xqq/libaribcaption
 ARG LIBARIBCAPTION_VERSION=v1.1.2
 # renovate: datasource=git-refs depName=https://github.com/5ym/arib-font branch=main
