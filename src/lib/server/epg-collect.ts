@@ -105,11 +105,39 @@ interface Work {
 }
 
 /**
+ * その物理チャンネルの番組表がどこまで先まで埋まっているか。
+ *
+ * 乗っている局のうち**いちばん薄いもの**に合わせる。1本開けば乗っている局が
+ * 全部まとめて埋まるので、1局でも薄ければ行く値打ちがある。
+ *
+ * **番組表に出てこない局は数えない。** 数えていた頃は、その局を「0 まで
+ * 埋まっている = いちばん薄い」と読んで、**毎周回そのチャンネルを選び直して
+ * いた**。実機で番組表の取得が止まらなかったのはこれ:
+ *
+ * - **データ放送・ワンセグ。** エージェントは TS に居る全部の局を返すが、
+ *   denpa は映像の入っていない局を落とす (`epg.syncServices`)。地上波は
+ *   ほぼ全局がこれを積んでいるので、**地上波が丸ごと毎回対象になっていた**
+ * - **放送を終えた枠と、受信できない局。** BS103 や、実機に残っている CS 24 局
+ *
+ * 知らない局を外した結果 1局も残らないチャンネルは 0 (=まっさら) のままにする。
+ * 入れたばかりのときはこれで正しく、あとは `epgChannelRetry` が空回りを止める。
+ */
+export function reachOf(reach: Map<number, number>, channel: AgentChannel): number {
+    const reaches = channel.services
+        .map((service) => reach.get(serviceKey(channel.networkId, service.serviceId)))
+        .filter((until) => until !== undefined);
+    return reaches.length === 0 ? 0 : Math.min(...reaches);
+}
+
+/**
  * この周回で回すチャンネルを選ぶ。
  *
  * 集め直すのは「しばらく行っていない」か「番組表が薄い」チャンネル。
  * **薄いほうから先に**行く — スキャンの直後や初回起動では全部が空なので、
  * ここが効いて画面に番組が出るまでが早くなる。
+ *
+ * ただし**行った直後は行き直さない** (`epgChannelRetry`)。開いても EIT が
+ * 来ない局は永久に薄いままなので、これが無いと周回のたびに選ばれ続ける。
  */
 export function pickChannels(
     channels: AgentChannel[],
@@ -124,6 +152,7 @@ export function pickChannels(
     }));
 
     return work
+        .filter((item) => at - item.last >= config.epgChannelRetry)
         .filter(
             (item) => item.reach - at < config.epgMinCoverage || at - item.last >= config.epgChannelInterval,
         )
@@ -140,6 +169,11 @@ async function collectChannel(channel: AgentChannel): Promise<number> {
 
     const label = key(channel);
     update({ active: [...state.active, label] });
+    /**
+     * 開けたか。**掴めなかった回は「行った」ことにしない** — 録画に譲って
+     * 開けなかっただけの局まで `epgChannelRetry` で休ませると、番組表が古くなる
+     */
+    let opened = false;
     try {
         const stream = await openChannelStream(
             channel.type,
@@ -149,6 +183,7 @@ async function collectChannel(channel: AgentChannel): Promise<number> {
             // 押されている間は、開くたびに強いほうで掴む
             boosted ? config.priority.epgNow : config.priority.epg,
         );
+        opened = true;
         for await (const chunk of chunks(stream)) {
             if (reader.feed(chunk) && reader.complete) break;
         }
@@ -164,11 +199,14 @@ async function collectChannel(channel: AgentChannel): Promise<number> {
         update({ active: state.active.filter((name) => name !== label) });
     }
 
+    /*
+     * **1件も取れなくても「行った」と覚える。** 番組の行から数え直すだけだった頃は、
+     * EIT が来ない局の `last` が永久に 0 のままで、周回のたびに選ばれ続けていた
+     */
+    if (opened) collected.set(label, Date.now());
     const events = reader.all();
     if (events.length === 0) return 0;
-    const saved = savePrograms(events);
-    collected.set(label, Date.now());
-    return saved;
+    return savePrograms(events);
 }
 
 /**
@@ -223,13 +261,7 @@ async function run(): Promise<number> {
 
     const reach = coverage();
     const at = Date.now();
-    const reachOf = (channel: AgentChannel) => {
-        const reaches = channel.services.map(
-            (service) => reach.get(serviceKey(channel.networkId, service.serviceId)) ?? 0,
-        );
-        // 乗っている局のうち、いちばん薄いものに合わせる
-        return reaches.length === 0 ? 0 : Math.min(...reaches);
-    };
+    const thinnest = (channel: AgentChannel) => reachOf(reach, channel);
 
     /*
      * 押されたときは**選り好みしない。**
@@ -242,8 +274,8 @@ async function run(): Promise<number> {
     const lastOf = (channel: AgentChannel) => last.get(key(channel)) ?? 0;
 
     const targets = boosted
-        ? [...channels].sort((a, b) => reachOf(a) - reachOf(b))
-        : pickChannels(channels, reachOf, lastOf, at);
+        ? [...channels].sort((a, b) => thinnest(a) - thinnest(b))
+        : pickChannels(channels, thinnest, lastOf, at);
     if (targets.length === 0) return 0;
 
     const tuners = (await getTuners().catch(() => [])).filter((tuner) => !tuner.disabled);

@@ -376,12 +376,47 @@ export class EpgReader {
                         this.present.set(event.serviceId, event);
                     }
                     if (event.startAt === null || event.duration === null) continue;
-                    this.events.set(`${event.serviceId}:${event.eventId}`, event);
+                    this.merge(event);
                     added = true;
                 }
             }
         }
         return added;
+    }
+
+    /**
+     * 溜めてあるものと混ぜる。**別の表で来るものを消し合わせない。**
+     *
+     * 番組表は2つの表に分かれて流れてくる。同じ event_id が両方に載っていて、
+     * **それぞれ自分のぶんの記述子しか持っていない**。
+     *
+     * - **基本** (table_id 0x50〜0x57) … 題名と短い説明 (short_event_descriptor)
+     * - **詳細** (0x58〜0x5F) … 「番組内容」「出演者」など (extended_event_descriptor)
+     *
+     * あとから来たもので丸ごと置き換えていた頃は、**詳細のほうが後に届いた番組の
+     * 題名が空になっていた**。実機では番組 23,000 件のうち 11,000 件が名無しで、
+     * うち 2,700 件は「題名は無いのに番組内容だけある」状態 — 詳細に上書きされた
+     * 跡そのもの。番組表には「(番組情報なし)」の列が並んでいた。
+     *
+     * **中身のあるほうを残す。** 書き換え (「[新]」が付く、誤字が直る) は
+     * 空でない値で来るので、これまでどおり新しいほうが勝つ。
+     */
+    private merge(event: EitEvent): void {
+        const id = `${event.serviceId}:${event.eventId}`;
+        const old = this.events.get(id);
+        if (old === undefined) {
+            this.events.set(id, event);
+            return;
+        }
+        this.events.set(id, {
+            ...event,
+            name: event.name === '' ? old.name : event.name,
+            description: event.description === '' ? old.description : event.description,
+            extended: Object.keys(event.extended).length === 0 ? old.extended : event.extended,
+            genres: event.genres.length === 0 ? old.genres : event.genres,
+            audios: event.audios.length === 0 ? old.audios : event.audios,
+            video: event.video ?? old.video,
+        });
     }
 
     /**

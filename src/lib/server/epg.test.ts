@@ -48,7 +48,7 @@ const server = Bun.serve({
 config.agentUrl = `http://127.0.0.1:${server.port}`;
 
 const { database } = await import('./db');
-const { airing, syncServicesOnly } = await import('./epg');
+const { airing, savePrograms, syncServicesOnly } = await import('./epg');
 
 describe('syncServicesOnly', () => {
     test('番組表を待たずに局だけ取り込む', async () => {
@@ -132,6 +132,79 @@ describe('消えた局の片付け', () => {
         expect(db().query('SELECT state FROM reservations WHERE id = 1').get()).toEqual({
             state: 'scheduled',
         });
+    });
+});
+
+/**
+ * 番組の取り込み。
+ *
+ * 番組表は「基本」(題名) と「詳細」(番組内容) の2つの表に分かれて放送されていて、
+ * 読むほうも分けて届く ([ts/eit.ts](../ts/eit.ts) の EpgReader.merge)。
+ * 片方しか読めなかった回に、もう片方を消させない。
+ */
+describe('savePrograms', () => {
+    const db = () => database();
+
+    function event(overrides: Record<string, unknown> = {}) {
+        return {
+            serviceId: 23608,
+            transportStreamId: 32391,
+            originalNetworkId: 32391,
+            eventId: 7,
+            startAt: Date.now(),
+            duration: 1800_000,
+            isFree: true,
+            runningStatus: 0,
+            name: 'テスト番組',
+            description: 'これは説明です',
+            extended: {},
+            genres: [],
+            audios: [],
+            video: null,
+            ...overrides,
+        } as Parameters<typeof savePrograms>[0][number];
+    }
+
+    test('題名の無い回で、入っている題名を消さない', async () => {
+        offered = [channel(23608, 'ＴＯＫＹＯ　ＭＸ')];
+        await syncServicesOnly();
+        db().exec('DELETE FROM programs');
+
+        savePrograms([event()]);
+        // 詳細だけ読めた回。題名も説明も空で来る
+        savePrograms([event({ name: '', description: '', extended: { 番組内容: 'あらすじ' } })]);
+
+        expect(db().query('SELECT name, description, extended FROM programs').all()).toEqual([
+            {
+                name: 'テスト番組',
+                description: 'これは説明です',
+                extended: JSON.stringify({ 番組内容: 'あらすじ' }),
+            },
+        ]);
+    });
+
+    test('題名だけ読めた回で、入っている番組内容を消さない', async () => {
+        offered = [channel(23608, 'ＴＯＫＹＯ　ＭＸ')];
+        await syncServicesOnly();
+        db().exec('DELETE FROM programs');
+
+        savePrograms([event({ name: '', description: '', extended: { 番組内容: 'あらすじ' } })]);
+        savePrograms([event()]);
+
+        expect(db().query('SELECT name, extended FROM programs').all()).toEqual([
+            { name: 'テスト番組', extended: JSON.stringify({ 番組内容: 'あらすじ' }) },
+        ]);
+    });
+
+    test('題名の書き換えはこれまでどおり通る', async () => {
+        offered = [channel(23608, 'ＴＯＫＹＯ　ＭＸ')];
+        await syncServicesOnly();
+        db().exec('DELETE FROM programs');
+
+        savePrograms([event()]);
+        savePrograms([event({ name: '[新]テスト番組' })]);
+
+        expect(db().query('SELECT name FROM programs').all()).toEqual([{ name: '[新]テスト番組' }]);
     });
 });
 

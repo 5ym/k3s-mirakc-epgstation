@@ -170,6 +170,50 @@ describe('EpgReader', () => {
         expect(reader.all()[0].name).toBe('差し替え後');
     });
 
+    /*
+     * **実機で踏んだところ。** 番組表は2つの表に分かれて流れてくる。
+     *
+     * - 基本 (0x50〜0x57) … 題名と短い説明
+     * - 詳細 (0x58〜0x5F) … 「番組内容」「出演者」など
+     *
+     * 同じ event_id が両方に載っていて、それぞれ自分のぶんしか持っていない。
+     * 丸ごと上書きしていた頃は、あとに届いたほうで相手のぶんが消えていた。
+     * 実機では番組 23,000 件のうち 11,000 件が名無しになり、番組表に
+     * 「(番組情報なし)」の列が並んだ
+     */
+    test('詳細だけの表があとから来ても題名を消さない', () => {
+        const reader = new EpgReader();
+        reader.feed(packets(section([event()])));
+        reader.feed(
+            packets(
+                section([event({ name: '', description: '', extended: { 番組内容: 'あらすじ' } })], {
+                    tableId: 0x58,
+                }),
+            ),
+        );
+
+        const [program] = reader.all();
+        expect(program.name).toBe('テスト番組');
+        expect(program.description).toBe('これは説明です');
+        expect(program.extended).toEqual({ 番組内容: 'あらすじ' });
+    });
+
+    test('基本の表があとから来ても番組内容を消さない', () => {
+        const reader = new EpgReader();
+        reader.feed(
+            packets(
+                section([event({ name: '', description: '', extended: { 番組内容: 'あらすじ' } })], {
+                    tableId: 0x58,
+                }),
+            ),
+        );
+        reader.feed(packets(section([event()])));
+
+        const [program] = reader.all();
+        expect(program.name).toBe('テスト番組');
+        expect(program.extended).toEqual({ 番組内容: 'あらすじ' });
+    });
+
     test('開始時刻や尺が未定の番組は溜めない。録画の時刻が決まらない', () => {
         const reader = new EpgReader();
         // 尺だけ未定にする (BCD の全ビット1)

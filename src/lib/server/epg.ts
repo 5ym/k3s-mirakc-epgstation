@@ -222,9 +222,13 @@ export function savePrograms(events: EitEvent[]): number {
             network_id = excluded.network_id,
             start_at = excluded.start_at,
             end_at = excluded.end_at,
-            name = excluded.name,
-            description = excluded.description,
-            extended = excluded.extended,
+            -- 空で塗り潰さない。番組表は「基本」(題名) と「詳細」(番組内容) の
+            -- 2つの表に分かれて流れてきて、片方しか読めなかった回がある
+            -- (ts/eit.ts の EpgReader.merge)。読めたところだけ書く
+            name = CASE WHEN excluded.name = '' THEN programs.name ELSE excluded.name END,
+            description = CASE WHEN excluded.description = ''
+                          THEN programs.description ELSE excluded.description END,
+            extended = COALESCE(excluded.extended, programs.extended),
             genres = excluded.genres,
             genre_detail = excluded.genre_detail,
             is_free = excluded.is_free,
