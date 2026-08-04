@@ -19,10 +19,17 @@ const work = mkdtempSync(join(tmpdir(), 'denpa-learn-'));
 const { config } = await import('./config');
 config.jlsLogoDir = join(work, 'jls');
 
-const { learned, pending } = await import('./logo-learn');
+const { learned, pending, stations } = await import('./logo-learn');
 
-function service(id: number, name: string) {
-    return { id, service_id: id % 100000, name, type: 'GR' as const, channel: 'T13' };
+function service(id: number, name: string, networkId = 32391) {
+    return {
+        id,
+        service_id: id % 100000,
+        network_id: networkId,
+        name,
+        type: 'GR' as const,
+        channel: 'T13',
+    };
 }
 
 /** logoframe が覚えたことにする */
@@ -68,5 +75,35 @@ describe('誰を掴みに行くか', () => {
         const targets = pending([service(21, 'ろ'), service(20, 'い'), service(22, 'は')]);
 
         expect(targets.map((target) => target.id)).toEqual([21, 20, 22]);
+    });
+});
+
+/*
+ * 放送局はサブチャンネルの枠を常時流していて、マルチ編成をしていない間は
+ * 本チャンネルと同じ絵が出ている。SDT の局名も同じなので、実機では
+ * 「TOKYO MX1」が2つ、「フジテレビ」「テレビ朝日」が3つずつ並んでいた
+ */
+describe('同じ絵を映している局を束ねる', () => {
+    test('局名が同じものは1つにする', () => {
+        const rows = [
+            service(3239123608, 'TOKYO MX1'),
+            service(3239123609, 'TOKYO MX1'),
+            service(3239123610, 'TOKYO MX2'),
+        ];
+
+        expect(stations(rows).map((row) => row.id)).toEqual([3239123608, 3239123610]);
+    });
+
+    test('もう覚えている局を代表にする', () => {
+        remember(31);
+        const rows = [service(30, 'テレ東'), service(31, 'テレ東')];
+
+        expect(stations(rows).map((row) => row.id)).toEqual([31]);
+    });
+
+    test('ネットワークが違えば別の局。たまたま同名なだけのことがある', () => {
+        const rows = [service(40, 'サンテレビ', 32391), service(41, 'サンテレビ', 32400)];
+
+        expect(stations(rows).map((row) => row.id)).toEqual([40, 41]);
     });
 });

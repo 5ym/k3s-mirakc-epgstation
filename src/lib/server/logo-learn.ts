@@ -1,4 +1,4 @@
-import { createWriteStream, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { cpSync, createWriteStream, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ServiceFilter } from '../ts/service-filter';
@@ -36,6 +36,7 @@ const FRAME_TIMEOUT = 10 * 60_000;
 interface Target {
     id: number;
     service_id: number;
+    network_id: number;
     name: string;
     type: ChannelType;
     channel: string;
@@ -55,6 +56,47 @@ export function learned(serviceId: number): boolean {
 }
 
 /**
+ * 同じ絵を映している局を1つにまとめる。**局名で束ねる。**
+ *
+ * 放送局はサブチャンネルの枠を常時流していて、マルチ編成をしていない間は
+ * 本チャンネルと同じ絵が出ている。SDT の局名も同じなので、実機では
+ *
+ * ```
+ * TOKYO MX1   23608 / 23609          フジテレビ   1056 / 1057 / 1058
+ * テレビ朝日  1064 / 1065 / 1066     BS-TBS       161 / 162 / 163
+ * ```
+ *
+ * のように並んでいた。**同じ絵なのでロゴは1つ覚えれば足りる。** 束ねずに
+ * 回していた頃は、画面に「TOKYO MX1」が2つ並び、掴むほうも同じ局を
+ * 3回ぶん5分ずつ塞いでいた。
+ *
+ * 代表は**もう覚えている局を優先**する。無ければ先頭 (呼ぶ側の並び順)。
+ *
+ * ネットワークもそろえて見る。局名だけで束ねると、たまたま同名の別系列を
+ * 1つにしてしまう
+ */
+export function stations<T extends { id: number; network_id: number; name: string }>(rows: T[]): T[] {
+    const groups = new Map<string, T>();
+    for (const row of rows) {
+        const key = `${row.network_id}:${row.name}`;
+        const chosen = groups.get(key);
+        if (chosen === undefined || (!learned(chosen.id) && learned(row.id))) groups.set(key, row);
+    }
+    return [...groups.values()];
+}
+
+/** 同じ絵を映している他の局。覚えたロゴを分け合うのに使う */
+export function siblings(serviceId: number): number[] {
+    return queryAll<{ id: number }>(
+        `SELECT other.id FROM services me
+           JOIN services other ON other.network_id = me.network_id AND other.name = me.name
+          WHERE me.id = ? AND other.id != ?`,
+        serviceId,
+        serviceId,
+    ).map((row) => row.id);
+}
+
+/**
  * まだ覚えていない局。
  *
  * **録画に使う局だけ**にする。ワンセグ (service_type 192) や、スキャンで
@@ -62,12 +104,14 @@ export function learned(serviceId: number): boolean {
  */
 export function missing(): Target[] {
     return pending(
-        queryAll<Target>(`
-            SELECT id, service_id, name, type, channel
-            FROM services
-            WHERE ${CURRENT_SERVICES} AND service_type = 1
-            ORDER BY remote_control_key IS NULL, remote_control_key, id
-        `),
+        stations(
+            queryAll<Target>(`
+                SELECT id, service_id, network_id, name, type, channel
+                FROM services
+                WHERE ${CURRENT_SERVICES} AND service_type = 1
+                ORDER BY remote_control_key IS NULL, remote_control_key, id
+            `),
+        ),
     );
 }
 
@@ -188,12 +232,33 @@ async function remember(target: Target, sample: string, signal?: AbortSignal): P
          * **終了コードは当てにしない。** logoframe はロゴを見つけられなくても
          * 0 で終わることがある。覚えたかどうかは `.lgd` があるかで決める
          */
-        return learned(target.id);
+        if (!learned(target.id)) return false;
+        share(target.id);
+        return true;
     } catch {
         // 一式が入っていないイメージもある。CM検出はエンコードのときに覚え直す
         return false;
     } finally {
         rmSync(work, { recursive: true, force: true });
+    }
+}
+
+/**
+ * 覚えたロゴを、同じ絵を映している局にも配る。
+ *
+ * 束ねて1局ぶんしか掴まないので (`stations`)、そのままだとサブチャンネルの枠で
+ * 録れた番組が「ロゴを覚えていない」ことになる。中身は同じなので写せば足りる。
+ */
+export function share(serviceId: number): void {
+    const from = logoRepo(serviceId);
+    for (const id of siblings(serviceId)) {
+        try {
+            // 向こうが自分で覚えているなら、そちらのほうが確か
+            if (learned(id)) continue;
+            cpSync(from, logoRepo(id), { recursive: true });
+        } catch {
+            // 写せなくても、その局はエンコードのときに覚え直せる
+        }
     }
 }
 
@@ -237,10 +302,17 @@ async function hasFree(type: ChannelType): Promise<boolean> {
     }
 }
 
-/** 画面に出す数。覚えている局と、まだの局 */
+/**
+ * 画面に出す数。覚えている局と、まだの局。
+ *
+ * **束ねて数える** (`stations`)。サブチャンネルの枠まで別に数えていた頃は、
+ * 下に並ぶ一覧 (こちらも束ねてある) と数が合わなかった
+ */
 export function stats(): { have: number; total: number } {
-    const services = queryAll<{ id: number }>(
-        `SELECT id FROM services WHERE ${CURRENT_SERVICES} AND service_type = 1`,
+    const services = stations(
+        queryAll<{ id: number; network_id: number; name: string }>(
+            `SELECT id, network_id, name FROM services WHERE ${CURRENT_SERVICES} AND service_type = 1`,
+        ),
     );
     return { have: services.filter((service) => learned(service.id)).length, total: services.length };
 }

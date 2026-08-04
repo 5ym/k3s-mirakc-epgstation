@@ -436,13 +436,18 @@ interface Progress {
 /**
  * `-progress pipe:1` が吐く key=value ブロックを1ブロック分解釈する。
  *
- * **`out_time_us` は当てにならない。** AV1 (libsvtav1) は先読みを溜めてから
- * 出し始めるので、その間ずっと `N/A` が返る。実機の30分番組では最初の数分が
- * まるごと N/A で、割合が 0% のまま動かなかった。
+ * **`out_time_us` は当てにならない。** 分かっているだけで2通りの外し方をする。
  *
- * そこで、時刻が読めない間は **`frame=`** で見る。こちらは最初から increment
- * するので、少なくとも止まって見えることはない。総フレーム数は尺×出力fps
- * (インタレ解除で倍になる) の見積もりなので、時刻が読めたらそちらへ切り替える。
+ * - **`N/A` が続く。** AV1 (libsvtav1) は先読みを溜めてから出し始めるので、
+ *   その間ずっと読めない。実機の30分番組では最初の数分がまるごとこれだった
+ * - **途中で止まる。** ffmpeg が出すのは**いちばん後ろのストリームの時刻**で、
+ *   壊れた副音声が1本混ざっているとそこで止まる。実機の TOKYO MX の録画は
+ *   `Packet corrupt (stream = 3)` のあと **8.576 秒のまま**動かず、
+ *   30分焼き終わっても 0% のままだった (出来上がりは 30分ぶん正しく入っていた)
+ *
+ * そこで **`frame=`** と突き合わせて、**進んでいるほうを採る**。コマ数は
+ * 最初から increment するので、少なくとも止まって見えることはない。総フレーム数は
+ * 尺×出力fps (インタレ解除で倍になる) の見積もりなので、単独では当てにしない。
  */
 export function parseProgressBlock(
     block: Record<string, string>,
@@ -451,27 +456,36 @@ export function parseProgressBlock(
     totalFrames = NaN,
 ): Progress {
     const outTimeUs = parseFloat(block.out_time_us);
-    let percent = prev;
-    if (block.progress === 'end') {
-        percent = 1;
-    } else if (Number.isFinite(outTimeUs) && Number.isFinite(durationSec) && durationSec > 0) {
-        // percent は NaN 汚染を防ぐガードが要る (JSON上 typeof NaN === 'number' で素通りするため)
-        percent = Math.min(1, outTimeUs / 1e6 / durationSec);
-    } else {
-        const frame = parseFloat(block.frame);
-        if (Number.isFinite(frame) && Number.isFinite(totalFrames) && totalFrames > 0) {
-            // 見積もりなので、時刻が読めたときに巻き戻らないよう前の値より下げない
-            percent = Math.max(prev, Math.min(1, frame / totalFrames));
-        }
-    }
+    const frame = parseFloat(block.frame);
+    // percent は NaN 汚染を防ぐガードが要る (JSON上 typeof NaN === 'number' で素通りするため)
+    const measurable = (value: number) => Number.isFinite(value) && value > 0;
+
+    const byTime =
+        Number.isFinite(outTimeUs) && measurable(durationSec)
+            ? Math.min(1, outTimeUs / 1e6 / durationSec)
+            : 0;
+    const byFrame = Number.isFinite(frame) && measurable(totalFrames) ? Math.min(1, frame / totalFrames) : 0;
     /*
-     * 残り時間。ffmpeg が出す speed (実時間比。"0.85x" のような形) で、
+     * **前の値より下げない。** 時刻とコマ数のどちらを採るかが途中で入れ替わるので、
+     * 素直に書くと割合が巻き戻る
+     */
+    const percent = block.progress === 'end' ? 1 : Math.max(prev, byTime, byFrame);
+
+    /*
+     * 残り時間。**割合を出したのと同じ出どころで見積もる** — 時刻が止まっている
+     * のに `speed` (これも時刻から出る) で割ると、5倍速で焼けているものが
+     * 「残り20時間」になる。
+     *
+     * 時刻が読めているときは ffmpeg の speed (実時間比。"0.85x" のような形) で
      * まだ通していない秒数を割る。AV1 だと 0.1x を切ることもあるので、
      * 割合だけ出しても放っておいていいのか判断できない
      */
     const speed = parseFloat(block.speed);
+    const fps = parseFloat(block.fps);
     let etaMs: number | null = null;
-    if (Number.isFinite(speed) && speed > 0 && Number.isFinite(durationSec) && Number.isFinite(outTimeUs)) {
+    if (byFrame > byTime && measurable(fps) && measurable(totalFrames)) {
+        etaMs = Math.round(((totalFrames - frame) / fps) * 1000);
+    } else if (measurable(speed) && Number.isFinite(durationSec) && Number.isFinite(outTimeUs)) {
         const leftSec = durationSec - outTimeUs / 1e6;
         if (leftSec > 0) etaMs = Math.round((leftSec / speed) * 1000);
     }
@@ -975,11 +989,20 @@ async function runJob(jobId: number): Promise<void> {
         // 取れなくても致命的ではない
     }
 
-    // 出来上がりの長さで上書きする。CMを切っていれば元のTSより短い
-    if (Number.isFinite(result.outTimeUs) && result.outTimeUs > 0) {
+    /*
+     * 出来上がりの長さで上書きする。CMを切っていれば元のTSより短い。
+     *
+     * **出来上がったものを測る。** ffmpeg が言ってきた `out_time` を書いていた頃は、
+     * 壊れた副音声が1本混ざっている録画で **8.576 秒**と入っていた
+     * (中身は 30分ぶん正しく入っていた)。理由は進み具合が止まるのと同じ
+     * (`parseProgressBlock`)。測れなかったときだけ、これまでどおり ffmpeg の値に落ちる
+     */
+    const made = (await probeVideo(output)).duration;
+    const length = Number.isFinite(made) ? made * 1000 : result.outTimeUs / 1000;
+    if (Number.isFinite(length) && length > 0) {
         database()
             .prepare('UPDATE recordings SET duration_ms = ? WHERE id = ?')
-            .run(Math.round(result.outTimeUs / 1000), recording.id);
+            .run(Math.round(length), recording.id);
     }
 
     // 番組名・概要・放送日・サムネイルをサイドカーに書く。動画を置いた直後に作る

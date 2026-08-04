@@ -4,7 +4,7 @@ import { CURRENT_SERVICES } from '$lib/server/epg';
 import { collectNow, collectState } from '$lib/server/epg-collect';
 import { stats as logoStats, sweepNow, sweepState } from '$lib/server/logo';
 import { forgetLogoData } from '$lib/server/logo-data';
-import { learned, stats as learnStats } from '$lib/server/logo-learn';
+import { learned, stats as learnStats, siblings, stations } from '$lib/server/logo-learn';
 import { refresh, start, stop } from '$lib/server/scan';
 import { cardStatus } from '$lib/server/scramble';
 import { type AgentTuner, getTuners, putTuners, type TunerConfig, tunersDetected } from '$lib/server/tuner';
@@ -183,11 +183,12 @@ export async function load() {
 function cmLogoState(): CmLogo[] {
     const services = queryAll<{
         id: number;
+        network_id: number;
         name: string;
         logo_area: string | null;
         recording_id: number | null;
     }>(`
-        SELECT s.id, s.name, s.logo_area,
+        SELECT s.id, s.network_id, s.name, s.logo_area,
                (SELECT r.id FROM recordings r
                  WHERE r.service_id = s.id AND r.deleted_at IS NULL
                  ORDER BY r.id DESC LIMIT 1) AS recording_id
@@ -195,7 +196,8 @@ function cmLogoState(): CmLogo[] {
          WHERE s.service_type = 1 AND ${CURRENT_SERVICES}
          ORDER BY s.remote_control_key IS NULL, s.remote_control_key, s.id
     `);
-    return services.map((service) => ({ ...service, learned: learned(service.id) }));
+    // 同じ絵を映しているサブチャンネルの枠は束ねる (実機で「TOKYO MX1」が2つ並んでいた)
+    return stations(services).map((service) => ({ ...service, learned: learned(service.id) }));
 }
 
 export const actions = {
@@ -218,8 +220,11 @@ export const actions = {
         if (!/^\d+,\d+,\d+,\d+$/.test(area)) {
             return fail(400, { message: 'ロゴの範囲を囲ってください' });
         }
-        database().prepare('UPDATE services SET logo_area = ? WHERE id = ?').run(area, serviceId);
-        forgetLogoData(serviceId);
+        // 同じ絵を映しているサブチャンネルの枠にも同じことをする (`logo-learn.stations`)
+        for (const id of [serviceId, ...siblings(serviceId)]) {
+            database().prepare('UPDATE services SET logo_area = ? WHERE id = ?').run(area, id);
+            forgetLogoData(id);
+        }
         return { success: true, message: `ロゴの位置を覚えました (${area})。次に掴んだときに覚え直します` };
     },
 
@@ -227,9 +232,11 @@ export const actions = {
         const form = await request.formData();
         const serviceId = Number(form.get('serviceId'));
         if (!Number.isFinite(serviceId)) return fail(400, { message: '局IDが不正です' });
-        database().prepare('UPDATE services SET logo_area = NULL WHERE id = ?').run(serviceId);
-        // 教えた枠で覚えたものが残っていると、自動に戻しても効かない
-        forgetLogoData(serviceId);
+        for (const id of [serviceId, ...siblings(serviceId)]) {
+            database().prepare('UPDATE services SET logo_area = NULL WHERE id = ?').run(id);
+            // 教えた枠で覚えたものが残っていると、自動に戻しても効かない
+            forgetLogoData(id);
+        }
         return { success: true, message: 'ロゴの位置を自動に戻しました' };
     },
 
