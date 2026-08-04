@@ -152,13 +152,20 @@
             </div>
         {/each}
 
-        {#if actions}
-            {@render actions()}
-        {:else}
-            <div class="modal-action">
+        <!--
+            **枠はこちらで持つ。** 渡す側に任せていた頃は、フォームが行を占める
+            箱なので押すものが縦に積み上がり、左端に寄っていた。
+            `modal-action` は右下に横並びなので、どこから開いても同じ形になる。
+            **閉じるはいちばん右。** 並びの終わりがいつも同じところにあると、
+            見ないでも押せる
+        -->
+        <div class="modal-action">
+            {#if actions}
+                {@render actions()}
+            {:else}
                 <button class="btn" onclick={onclose} data-testid="detail-close">閉じる</button>
-            </div>
-        {/if}
+            {/if}
+        </div>
     </div>
     <button class="modal-backdrop" onclick={onclose} aria-label="閉じる"></button>
 </div>

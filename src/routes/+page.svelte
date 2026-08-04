@@ -633,17 +633,35 @@
             <!--
                 まだエンコードしていないものや、引き継いだ未エンコードの録画は
                 生TSしか無い。配信は library_path ?? ts_path を返すので、
-                どちらかがあれば落とせる
+                どちらかがあれば落とせる。
+                **押したら閉じる** — 落とし始めたあとも詳細が残っていると、
+                押せたのかどうかが分からない
             -->
-            <a class="btn btn-outline" href={downloadUrl(rec.id)} download data-testid="download-link">
+            <a
+                class="btn btn-outline"
+                href={downloadUrl(rec.id)}
+                download
+                onclick={() => (detail = null)}
+                data-testid="download-link"
+            >
                 ダウンロード
             </a>
             {#if rec.job_id === null && encodeSource(rec) !== null}
                 <!--
                     録り直しの元になるのは生TS。エンコード済みを元にしても
-                    画質は戻らないので、生TSがあるときだけ出す
+                    画質は戻らないので、生TSがあるときだけ出す。
+
+                    **閉じるのは投げ終わってから。** 先に閉じると、断られたときの
+                    知らせ (Toasts) が出る前に画面が変わってしまう
                 -->
-                <form method="POST" action="?/reencode" use:submitting>
+                <form
+                    method="POST"
+                    action="?/reencode"
+                    use:submitting={() => async (options) => {
+                        await options.update();
+                        detail = null;
+                    }}
+                >
                     <input type="hidden" name="id" value={rec.id} />
                     <button class="btn btn-outline" data-testid="reencode-button">再エンコード</button>
                 </form>
