@@ -10,7 +10,7 @@ using Microsoft.AspNetCore.Http.Features;
  *
  * - B-CASカード … pcscd 経由でしか読めず、その pcscd はこのコンテナにしか居ない
  * - チューナーデバイス … `/dev/dvb/*` が見えているのはこちらだけ
- * - 選局そのもの … `recisdb` を起こして標準出力を読む
+ * - 選局そのもの … デバイスを掴んで ioctl で選局する (Tuning.cs)
  *
  * **中身は読まない。** NIT も SDT も EIT も解かず、TS をそのまま流す。
  * 読むのは denpa (`src/lib/ts`) で、局を選り分けるのも番組表を組み立てるのも、
@@ -25,25 +25,22 @@ var port = int.TryParse(Environment.GetEnvironmentVariable("AGENT_PORT"), out va
     ? configured
     : 25252;
 var recorded = Path.GetFullPath(Environment.GetEnvironmentVariable("RECORDED_DIR") ?? "/denpa-recorded");
-var recisdb = Environment.GetEnvironmentVariable("RECISDB") ?? "recisdb";
 
 var config = Config.FromEnvironment();
 var events = new Events();
 var (tuners, detected) = config.ResolveTuners();
 
 /*
- * 掴んだまま選局するかどうか。**既定は今までどおり `recisdb` を起こす。**
+ * 選局は自分でやる。**`recisdb` は要らなくなった。**
  *
- * ioctl で選局して B25 も自分で解く道は書けていて実機でも通っているが、
- * 実際の録画で通していないものを既定にはしない (docs/roadmap.md)。
- * 入れ替えるのは TUNE=native の1つだけ。戻すのも同じ。
+ * CARD_URL は「手元にカードが無い拠点」だけ。指定しなければ自分に刺さって
+ * いるカードを読む (CardShare.cs)。
  */
 var tune = new TuneOptions(
-    Environment.GetEnvironmentVariable("TUNE") == "native",
     Environment.GetEnvironmentVariable("CARD_URL"),
     name => config.StreamIds()(name));
 
-var pool = new TunerPool(tuners, config.Recisdb, () => events.Emit("tuners"), tune) { Detected = detected };
+var pool = new TunerPool(tuners, () => events.Emit("tuners"), tune) { Detected = detected };
 
 var builder = WebApplication.CreateSlimBuilder(args);
 builder.WebHost.ConfigureKestrel(options =>
@@ -227,8 +224,9 @@ app.MapGet("/denpa/card", async (HttpContext http) => await Respond.Write(http, 
 app.MapPost("/denpa/decode", async (HttpContext http) =>
 {
     var body = await Respond.Read(http);
-    var result = await Scramble.Decode(
-        recisdb, recorded, body?["input"]?.GetValue<string>(), body?["output"]?.GetValue<string>());
+    var result = Scramble.Decode(
+        recorded, body?["input"]?.GetValue<string>(), body?["output"]?.GetValue<string>(),
+        Environment.GetEnvironmentVariable("CARD_URL"));
     await Respond.Write(http, result, result["ok"]!.GetValue<bool>() ? 200 : 500);
 });
 

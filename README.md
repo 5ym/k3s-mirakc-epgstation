@@ -13,7 +13,7 @@
 
 ## 用意するもの
 
-- **チューナー** — recisdb が扱えるもの (chardev / DVB)。ドライバはホスト側に入れておく
+- **チューナー** — Linux DVB (PT2/PT3、PX-S1UD など)。ドライバはホスト側に入れておく
 - **B-CASカード** と PC/SC 対応のリーダー
 - **Docker** か **Kubernetes**
 

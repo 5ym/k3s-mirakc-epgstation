@@ -5,6 +5,16 @@ using System.Threading.Channels;
 namespace Denpa.Agent;
 
 /// <summary>
+/// 選局の仕方。
+/// </summary>
+/// <param name="CardUrl">鍵を配ってくれる相手。手元にカードが無い拠点だけ (CardShare.cs)</param>
+/// <param name="StreamIds">チャンネル名から TSID を引く。衛星の選局に要る</param>
+public sealed record TuneOptions(string? CardUrl, Func<string, int?> StreamIds)
+{
+    public static TuneOptions None => new(null, _ => null);
+}
+
+/// <summary>
 /// チューナーの取り合い。**エージェントの本体はここ。**
 ///
 /// <para>
@@ -19,30 +29,15 @@ namespace Denpa.Agent;
 /// </list>
 ///
 /// <para>
-/// 選局そのものは <c>recisdb</c> を起こして標準出力を読む。**まだ開けっ放しには
-/// しない** — 掴んだままチャンネルを変えるには ioctl を直に叩く必要があり、
-/// それは次の段階 (docs/roadmap.md)。
+/// 選局は**自分で掴む**。ioctl で選局して B25 も自分で解き、掴んだまま
+/// チャンネルだけ変える (Tuning.cs / AribB25.cs)。外のコマンドを起こすのは
+/// 設定に <c>command</c> が書いてあるときだけで、**<c>recisdb</c> は要らない**。
 /// </para>
 /// </summary>
-/// <summary>
-/// 選局の仕方。
-/// </summary>
-/// <param name="Native">
-/// **掴んだまま選局するか。** ioctl で選局して B25 も自分で解く。既定は false で、
-/// これまでどおり <c>recisdb</c> を起こす — 実機の録画で通していないものを
-/// 既定にはしない (docs/roadmap.md)
-/// </param>
-/// <param name="CardUrl">鍵を配ってくれる相手。手元にカードが無い拠点だけ (CardShare.cs)</param>
-/// <param name="StreamIds">チャンネル名から TSID を引く。衛星の選局に要る</param>
-public sealed record TuneOptions(bool Native, string? CardUrl, Func<string, int?> StreamIds)
-{
-    public static TuneOptions Off => new(false, null, _ => null);
-}
-
 public sealed class TunerPool(
-    IReadOnlyList<TunerSpec> specs, string recisdb, Action onChange, TuneOptions? tune = null)
+    IReadOnlyList<TunerSpec> specs, Action onChange, TuneOptions? tune = null)
 {
-    private readonly TuneOptions _tune = tune ?? TuneOptions.Off;
+    private readonly TuneOptions _tune = tune ?? TuneOptions.None;
 
     /// <summary>誰も読まなくなってから選局を畳むまでの間</summary>
     public static readonly TimeSpan Linger = TimeSpan.FromSeconds(5);
@@ -112,10 +107,12 @@ public sealed class TunerPool(
             _leases[index] = lease;
 
             /*
-             * **選局コマンドが書いてあれば、そちらが勝つ。** 直に書いた逃げ道を
-             * 潰さないため (偽の選局コマンドで試すのもこの道を通る)。
+             * **既定は自分で掴む。** 外のコマンドを起こすのは、設定に
+             * `command` が書いてあるときだけ (変わった機材と、試すときの逃げ道。
+             * 偽の選局コマンドで走る適合テストもこの道を通る)。
              */
-            if (_tune.Native && string.IsNullOrEmpty(spec.Command) && !string.IsNullOrEmpty(spec.Device))
+            var command = spec.Resolve();
+            if (command is null)
             {
                 try
                 {
@@ -129,7 +126,7 @@ public sealed class TunerPool(
             }
             else
             {
-                lease.Start(Render(spec.Resolve(recisdb), channel, type), () => OnExit(index, lease));
+                lease.Start(Render(command, channel, type), () => OnExit(index, lease));
             }
             return Join(lease, priority, use);
         }
@@ -382,7 +379,7 @@ internal sealed class Lease(int tuner, string type, string channel)
     ///
     /// <para>
     /// **`setsid` を噛ませる。** `sh -c` に渡すのがパイプラインだと、sh を殺しても
-    /// recisdb が生き残ってチューナーを掴んだままになり、次のチャンネルが
+    /// 選局コマンドが生き残ってチューナーを掴んだままになり、次のチャンネルが
     /// 「デバイスが使用中」で失敗し続ける。新しいプロセスグループに入れておいて、
     /// 止めるときはグループごと落とす。
     /// </para>
@@ -391,7 +388,7 @@ internal sealed class Lease(int tuner, string type, string channel)
     private AribB25? _b25;
 
     /// <summary>
-    /// **掴んだまま選局する側。** <c>recisdb</c> を起こさずに ioctl で選局し、
+    /// **掴んだまま選局する側。** 外のコマンドを起こさずに ioctl で選局し、
     /// B25 も自分で解く (Tuning.cs / AribB25.cs)。
     ///
     /// <para>

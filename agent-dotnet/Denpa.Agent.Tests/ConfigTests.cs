@@ -20,22 +20,12 @@ public class TunerSpecTests
     }
 
     [Fact]
-    public void デバイスと種別から選局コマンドを組み立てる()
+    public void 既定では外のコマンドを起こさない()
     {
+        // 選局は自分でやる (ioctl)。`recisdb` はもう要らない
         var spec = new TunerSpec("adapter0", ["GR"], false, "/dev/dvb/adapter0/frontend0");
 
-        Assert.Equal(
-            "recisdb tune --device /dev/dvb/adapter0/frontend0 --channel {{channel}} -",
-            spec.Resolve("recisdb"));
-    }
-
-    [Fact]
-    public void LNBを足せる()
-    {
-        // 衛星のアンテナに給電が要る構成。自由な文字列にせず、項目として持つ
-        var spec = new TunerSpec("bs0", ["BS", "CS"], false, "/dev/dvb/adapter0/frontend0", "15v");
-
-        Assert.Contains("--lnb 15v", spec.Resolve("recisdb"));
+        Assert.Null(spec.Resolve());
     }
 
     [Fact]
@@ -44,7 +34,7 @@ public class TunerSpecTests
         // 逃げ道。**画面からは触らせない** (ファイルに直に書いたときだけ効く)
         var spec = new TunerSpec("x", ["GR"], false, "/dev/null", null, "myTuner --ch {{channel}}");
 
-        Assert.Equal("myTuner --ch {{channel}}", spec.Resolve("recisdb"));
+        Assert.Equal("myTuner --ch {{channel}}", spec.Resolve());
     }
 
     [Fact]

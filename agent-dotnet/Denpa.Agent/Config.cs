@@ -14,8 +14,8 @@ namespace Denpa.Agent;
 ///
 /// <para>
 /// <c>Command</c> は逃げ道で、**ファイルに直に書いたときだけ**効く。画面からは
-/// 触らせず、入っていれば読めるように出すだけ。掴んだまま選局するようになれば
-/// コマンド自体が要らなくなるので、ここは短い付き合いになる。
+/// 触らせず、入っていれば読めるように出すだけ。**既定では誰も使わない** —
+/// 選局は自分で掴んでやるようになった (Tuning.cs)。
 /// </para>
 /// </summary>
 public sealed record TunerSpec(
@@ -26,13 +26,16 @@ public sealed record TunerSpec(
     string? Lnb = null,
     string? Command = null)
 {
-    /// <summary>選局に使う実際のコマンド</summary>
-    public string Resolve(string recisdb)
-    {
-        if (!string.IsNullOrEmpty(Command)) return Command;
-        var lnb = string.IsNullOrEmpty(Lnb) ? "" : $" --lnb {Lnb}";
-        return $"{recisdb} tune --device {Device} --channel {{{{channel}}}}{lnb} -";
-    }
+    /// <summary>
+    /// 選局を外のコマンドに任せるか。**書いてあるときだけ。**
+    ///
+    /// <para>
+    /// 既定は自分で掴む (ioctl で選局して B25 も自分で解く。Tuning.cs)。
+    /// ここに書いてあるときだけ、そのコマンドを起こして標準出力を読む。
+    /// 変わった機材や、試すときの逃げ道。
+    /// </para>
+    /// </summary>
+    public string? Resolve() => string.IsNullOrEmpty(Command) ? null : Command;
 
     public JsonObject ToJson()
     {
@@ -96,16 +99,14 @@ public sealed record TunerSpec(
 /// にする — アンテナに何が映るかも、何本刺さっているかも、機材ごとの話だから。
 /// </para>
 /// </summary>
-public sealed class Config(string tunersFile, string channelsFile, string recisdb = "recisdb")
+public sealed class Config(string tunersFile, string channelsFile)
 {
     public string TunersFile { get; } = tunersFile;
     public string ChannelsFile { get; } = channelsFile;
-    public string Recisdb { get; } = recisdb;
 
     public static Config FromEnvironment() => new(
         Environment.GetEnvironmentVariable("TUNERS_FILE") ?? "/app-config/tuners.json",
-        Environment.GetEnvironmentVariable("CHANNELS_FILE") ?? "/app-config/channels.json",
-        Environment.GetEnvironmentVariable("RECISDB") ?? "recisdb");
+        Environment.GetEnvironmentVariable("CHANNELS_FILE") ?? "/app-config/channels.json");
 
     private static JsonArray ReadArray(string path, string? key)
     {

@@ -95,7 +95,7 @@ sh mac/verify.sh
 
 ## イメージ
 
-`Dockerfile` が denpa 本体、`agent/` がチューナー側 (recisdb + スキャン用の
+`Dockerfile` が denpa 本体、`agent/` がチューナー側 (スキャン用の
 エージェント) です。CI が両方を焼いて `k3s/` のタグを書き戻します。
 
 ## もっと詳しく

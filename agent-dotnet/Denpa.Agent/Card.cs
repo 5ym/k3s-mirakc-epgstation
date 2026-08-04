@@ -128,7 +128,15 @@ public static class Scramble
         return full.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal) ? full : null;
     }
 
-    public static async Task<JsonObject> Decode(string recisdb, string recorded, string? input, string? output)
+    /// <summary>
+    /// 掛かったまま録れてしまったものを、後から解く。
+    ///
+    /// <para>
+    /// **自分で解く。** 前は <c>recisdb decode</c> を起こしていたが、解く口を
+    /// 持つようになったので外に出す理由が無くなった (AribB25.cs)。
+    /// </para>
+    /// </summary>
+    public static JsonObject Decode(string recorded, string? input, string? output, string? cardUrl)
     {
         var source = Inside(recorded, input);
         var target = Inside(recorded, output);
@@ -145,10 +153,19 @@ public static class Scramble
             };
         }
 
-        var (code, log) = await Shell.Run(recisdb, ["decode", "-i", source, target]);
-        if (code != 0)
+        try
         {
-            return new JsonObject { ["ok"] = false, ["error"] = $"recisdb が {code} で終了しました\n{log}" };
+            using var b25 = AribB25.Open(cardUrl);
+            using var reading = File.OpenRead(source);
+            using var writing = File.Create(target);
+            var buffer = new byte[188 * 1024];
+            int read;
+            while ((read = reading.Read(buffer)) > 0) writing.Write(b25.Decode(buffer.AsSpan(0, read)));
+            writing.Write(b25.Flush());
+        }
+        catch (Exception error)
+        {
+            return new JsonObject { ["ok"] = false, ["error"] = error.Message };
         }
         return new JsonObject { ["ok"] = true, ["error"] = "" };
     }
