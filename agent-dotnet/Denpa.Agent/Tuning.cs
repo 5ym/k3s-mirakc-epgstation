@@ -35,8 +35,9 @@ public interface ITuneDevice : IDisposable
 }
 
 /// <summary>libc の口。ioctl を直に叩くところだけ</summary>
-internal static partial class Sys
+internal static unsafe partial class Sys
 {
+    public const int NonBlocking = 0x800;
     public const int ReadOnly = 0;
     public const int ReadWrite = 2;
 
@@ -48,6 +49,12 @@ internal static partial class Sys
 
     [LibraryImport("libc", EntryPoint = "ioctl", SetLastError = true)]
     public static partial int IoctlValue(int fd, nuint request, nint value);
+
+    [LibraryImport("libc", EntryPoint = "read", SetLastError = true)]
+    public static partial nint ReadFd(int fd, byte* buffer, nuint count);
+
+    [LibraryImport("libc", EntryPoint = "poll", SetLastError = true)]
+    public static partial int Poll(byte* fds, nuint count, int timeout);
 
     /// <summary>開けなければ errno を添えて投げる。デバイスが無い・使用中の区別が要る</summary>
     public static SafeFileHandle Must(string path, int flags)
@@ -63,6 +70,71 @@ internal static partial class Sys
         {
             throw new IOException($"{what} に失敗しました ({Marshal.GetLastPInvokeErrorMessage()})");
         }
+    }
+}
+
+/// <summary>
+/// デバイスからの読み口。**待っている最中でも畳める。**
+///
+/// <para>
+/// 素直に開いて読むと、<c>read</c> で待っている間は誰にも止められない。
+/// TS が来なくなったチューナーを掴んだまま、畳もうとしても畳めない、という
+/// 止まり方をする。<c>poll</c> で待って**時々起きる**ようにしてある。
+/// </para>
+/// </summary>
+internal sealed unsafe class DeviceStream(SafeFileHandle handle) : Stream
+{
+    /// <summary>この間隔で起きて、畳めと言われていないか見る</summary>
+    private const int WakeMs = 200;
+
+    private const short PollIn = 1;
+
+    private volatile bool _closed;
+
+    public void Stop() => _closed = true;
+
+    public override int Read(byte[] buffer, int offset, int count)
+    {
+        var fd = (int)handle.DangerousGetHandle();
+        // struct pollfd { int fd; short events; short revents; }
+        var descriptor = stackalloc byte[8];
+        while (!_closed)
+        {
+            *(int*)descriptor = fd;
+            *(short*)(descriptor + 4) = PollIn;
+            *(short*)(descriptor + 6) = 0;
+
+            var ready = Sys.Poll(descriptor, 1, WakeMs);
+            if (ready < 0) return 0;
+            if (ready == 0) continue;
+
+            fixed (byte* target = &buffer[offset])
+            {
+                var read = Sys.ReadFd(fd, target, (nuint)count);
+                if (read > 0) return (int)read;
+                // EAGAIN。まだ来ていないだけなので待ち直す
+                if (read < 0 && Marshal.GetLastPInvokeError() == 11) continue;
+                return 0;
+            }
+        }
+        return 0;
+    }
+
+    public override bool CanRead => true;
+    public override bool CanSeek => false;
+    public override bool CanWrite => false;
+    public override long Length => throw new NotSupportedException();
+    public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+    public override void Flush() { }
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+    public override void SetLength(long value) => throw new NotSupportedException();
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+    protected override void Dispose(bool disposing)
+    {
+        _closed = true;
+        handle.Dispose();
+        base.Dispose(disposing);
     }
 }
 
@@ -119,7 +191,7 @@ public sealed class DvbTuner : ITuneDevice
 
     private readonly SafeFileHandle _frontend;
     private readonly SafeFileHandle _demux;
-    private readonly FileStream _dvr;
+    private readonly DeviceStream _dvr;
     private readonly int? _voltage;
     private bool _streaming;
 
@@ -132,7 +204,7 @@ public sealed class DvbTuner : ITuneDevice
         try
         {
             _demux = Sys.Must($"{adapter}/demux{number}", Sys.ReadWrite);
-            _dvr = new FileStream(Sys.Must($"{adapter}/dvr{number}", Sys.ReadOnly), FileAccess.Read, 188 * 1024);
+            _dvr = new DeviceStream(Sys.Must($"{adapter}/dvr{number}", Sys.ReadOnly | Sys.NonBlocking));
         }
         catch
         {
@@ -323,14 +395,14 @@ public sealed class Px4Tuner : ITuneDevice
     private const uint PtxDisableLnb = 0x8d06;       // _IO(0x8d, 0x06)
 
     private readonly SafeFileHandle _device;
-    private readonly FileStream _stream;
+    private readonly DeviceStream _stream;
     private readonly int? _voltage;
     private bool _streaming;
 
     public Px4Tuner(string device, string? lnb)
     {
         _device = Sys.Must(device, Sys.ReadOnly);
-        _stream = new FileStream(Sys.Must(device, Sys.ReadOnly), FileAccess.Read, 188 * 1024);
+        _stream = new DeviceStream(Sys.Must(device, Sys.ReadOnly | Sys.NonBlocking));
         // 1 = 11V, 2 = 15V (DVB の SEC_VOLTAGE とは別の数え方)
         _voltage = lnb switch { "15v" => 2, "11v" => 1, _ => null };
     }

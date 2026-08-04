@@ -24,8 +24,26 @@ namespace Denpa.Agent;
 /// それは次の段階 (docs/roadmap.md)。
 /// </para>
 /// </summary>
-public sealed class TunerPool(IReadOnlyList<TunerSpec> specs, string recisdb, Action onChange)
+/// <summary>
+/// 選局の仕方。
+/// </summary>
+/// <param name="Native">
+/// **掴んだまま選局するか。** ioctl で選局して B25 も自分で解く。既定は false で、
+/// これまでどおり <c>recisdb</c> を起こす — 実機の録画で通していないものを
+/// 既定にはしない (docs/roadmap.md)
+/// </param>
+/// <param name="CardUrl">鍵を配ってくれる相手。手元にカードが無い拠点だけ (CardShare.cs)</param>
+/// <param name="StreamIds">チャンネル名から TSID を引く。衛星の選局に要る</param>
+public sealed record TuneOptions(bool Native, string? CardUrl, Func<string, int?> StreamIds)
 {
+    public static TuneOptions Off => new(false, null, _ => null);
+}
+
+public sealed class TunerPool(
+    IReadOnlyList<TunerSpec> specs, string recisdb, Action onChange, TuneOptions? tune = null)
+{
+    private readonly TuneOptions _tune = tune ?? TuneOptions.Off;
+
     /// <summary>誰も読まなくなってから選局を畳むまでの間</summary>
     public static readonly TimeSpan Linger = TimeSpan.FromSeconds(5);
 
@@ -92,7 +110,27 @@ public sealed class TunerPool(IReadOnlyList<TunerSpec> specs, string recisdb, Ac
             var spec = Tuners[index];
             var lease = new Lease(index, type, channel);
             _leases[index] = lease;
-            lease.Start(Render(spec.Resolve(recisdb), channel, type), () => OnExit(index, lease));
+
+            /*
+             * **選局コマンドが書いてあれば、そちらが勝つ。** 直に書いた逃げ道を
+             * 潰さないため (偽の選局コマンドで試すのもこの道を通る)。
+             */
+            if (_tune.Native && string.IsNullOrEmpty(spec.Command) && !string.IsNullOrEmpty(spec.Device))
+            {
+                try
+                {
+                    lease.StartNative(spec, _tune, () => OnExit(index, lease));
+                }
+                catch (Exception error)
+                {
+                    _leases.Remove(index);
+                    throw new IOException($"{spec.Name}: {error.Message}");
+                }
+            }
+            else
+            {
+                lease.Start(Render(spec.Resolve(recisdb), channel, type), () => OnExit(index, lease));
+            }
             return Join(lease, priority, use);
         }
     }
@@ -349,6 +387,79 @@ internal sealed class Lease(int tuner, string type, string channel)
     /// 止めるときはグループごと落とす。
     /// </para>
     /// </summary>
+    private ITuneDevice? _device;
+    private AribB25? _b25;
+
+    /// <summary>
+    /// **掴んだまま選局する側。** <c>recisdb</c> を起こさずに ioctl で選局し、
+    /// B25 も自分で解く (Tuning.cs / AribB25.cs)。
+    ///
+    /// <para>
+    /// 外から見た振る舞いはプロセス版と同じにしてある。**流れが途切れたら
+    /// 失敗として畳む** — 黙って終わると空のファイルが残る。
+    /// </para>
+    /// </summary>
+    public void StartNative(TunerSpec spec, TuneOptions options, Action onExit)
+    {
+        var tuning = ChannelTable.Parse(Channel)
+            ?? throw new IOException($"{Channel} は選局表にありません");
+        var device = spec.Device
+            ?? throw new IOException($"{spec.Name} にデバイスが書かれていません");
+
+        ITuneDevice tuner = device.Contains("/dvb/", StringComparison.Ordinal)
+            ? new DvbTuner(device, spec.Lnb)
+            : new Px4Tuner(device, spec.Lnb);
+        _device = tuner;
+
+        try
+        {
+            tuner.Tune(tuning, ChannelTable.StreamId(Channel, tuning, options.StreamIds));
+            // カードが開けなくても選局は続ける。**掛かったままでも録るほうがまし**で、
+            // 電波は二度と戻ってこない (解けていないことは denpa 側が見て分かる)
+            try
+            {
+                _b25 = AribB25.Open(options.CardUrl);
+            }
+            catch (Exception error)
+            {
+                Error = $"解けません: {error.Message}";
+                Log.Write($"[{spec.Name}] {Error}");
+            }
+        }
+        catch
+        {
+            tuner.Dispose();
+            _device = null;
+            throw;
+        }
+
+        _ = Task.Run(() =>
+        {
+            var buffer = new byte[188 * 1024];
+            try
+            {
+                for (; ; )
+                {
+                    var read = tuner.Output.Read(buffer, 0, buffer.Length);
+                    if (read <= 0) break;
+
+                    var chunk = _b25 is null ? buffer[..read] : _b25.Decode(buffer.AsSpan(0, read)).ToArray();
+                    if (chunk.Length == 0) continue;
+
+                    lock (Sinks)
+                    {
+                        foreach (var sink in Sinks.ToList()) sink.Push(chunk);
+                    }
+                }
+            }
+            catch (Exception error)
+            {
+                Error = error.Message;
+            }
+            onExit();
+        });
+    }
+
     public void Start(string command, Action onExit)
     {
         var start = new ProcessStartInfo("setsid")
@@ -423,6 +534,14 @@ internal sealed class Lease(int tuner, string type, string channel)
 
     public void Kill()
     {
+        // 掴んだままのほう。閉じれば読み手の待ちも解ける (DeviceStream)
+        var device = _device;
+        _device = null;
+        device?.Dispose();
+        var b25 = _b25;
+        _b25 = null;
+        b25?.Dispose();
+
         var child = _child;
         _child = null;
         if (child is null || child.HasExited) return;

@@ -30,7 +30,20 @@ var recisdb = Environment.GetEnvironmentVariable("RECISDB") ?? "recisdb";
 var config = Config.FromEnvironment();
 var events = new Events();
 var (tuners, detected) = config.ResolveTuners();
-var pool = new TunerPool(tuners, config.Recisdb, () => events.Emit("tuners")) { Detected = detected };
+
+/*
+ * 掴んだまま選局するかどうか。**既定は今までどおり `recisdb` を起こす。**
+ *
+ * ioctl で選局して B25 も自分で解く道は書けていて実機でも通っているが、
+ * 実際の録画で通していないものを既定にはしない (docs/roadmap.md)。
+ * 入れ替えるのは TUNE=native の1つだけ。戻すのも同じ。
+ */
+var tune = new TuneOptions(
+    Environment.GetEnvironmentVariable("TUNE") == "native",
+    Environment.GetEnvironmentVariable("CARD_URL"),
+    name => config.StreamIds()(name));
+
+var pool = new TunerPool(tuners, config.Recisdb, () => events.Emit("tuners"), tune) { Detected = detected };
 
 var builder = WebApplication.CreateSlimBuilder(args);
 builder.WebHost.ConfigureKestrel(options =>

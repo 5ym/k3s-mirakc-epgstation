@@ -19,6 +19,8 @@
         <Compile Include="../Denpa.Agent/DeviceProbe.cs" />
         <Compile Include="../Denpa.Agent/ChannelTable.cs" />
         <Compile Include="../Denpa.Agent/Tuning.cs" />
+        <Compile Include="../Denpa.Agent/AribB25.cs" />
+        <Compile Include="../Denpa.Agent/CardShare.cs" />
     </ItemGroup>
 
     <ItemGroup>
