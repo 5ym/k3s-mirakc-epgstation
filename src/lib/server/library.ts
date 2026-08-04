@@ -12,6 +12,8 @@ export interface LibraryNameInput {
     series: string;
     subtitle: string;
     start_at: number;
+    /** いま置いてある場所。焼き直しのとき、自分自身を「衝突」と読まないために要る */
+    library_path?: string | null;
 }
 
 /**
@@ -36,11 +38,25 @@ function libraryRelPath(rec: LibraryNameInput, ext: string): string {
     return join(series, `Season ${d.getFullYear()}`, `${base}${ext}`);
 }
 
-/** 絶対パス版。既存ファイルと衝突したら録画IDを足して避ける */
+/**
+ * 絶対パス版。**別の録画のファイルと衝突したら**録画IDを足して避ける。
+ *
+ * **自分がいま置いてあるファイルは衝突ではない。** 見ずに `existsSync` だけで
+ * 決めていた頃は、焼き直すたびに名前が入れ替わっていた:
+ *
+ * ```text
+ * 1回目  番組 - 2026-08-03 - 2230.mkv       (空いているので素の名前)
+ * 2回目  番組 - 2026-08-03 - 2230 [39].mkv  (1回目のものを「衝突」と読む)
+ * 3回目  番組 - 2026-08-03 - 2230.mkv       (2回目が別名なので素の名前が空く)
+ * ```
+ *
+ * 置き換えたあとに古いほうを消すので中身は無事だが、**焼き直すたびに
+ * ファイル名が変わる**ので、プレイヤー側の見え方が毎回崩れる。
+ */
 export function libraryPath(rec: LibraryNameInput, ext: string): string {
     const rel = libraryRelPath(rec, ext);
     const abs = join(config.libraryDir, rel);
-    if (!existsSync(abs)) return abs;
+    if (!existsSync(abs) || abs === rec.library_path) return abs;
     return join(config.libraryDir, libraryRelPath(rec, ` [${rec.id}]${ext}`));
 }
 

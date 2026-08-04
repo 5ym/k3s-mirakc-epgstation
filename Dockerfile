@@ -40,15 +40,21 @@ SHELL ["/bin/bash", "-c"]
 ENV CURL="curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 20"
 
 ENV DEV="curl ca-certificates build-essential cmake pkg-config nasm zlib1g-dev libfreetype6-dev libopus-dev libsvtav1enc-dev libx264-dev libdav1d-dev libfontconfig-dev"
+
+# renovate: datasource=github-tags depName=FFmpeg/FFmpeg extractVersion=^n(?<version>.*)$
 ENV FFMPEG_VERSION=8.1
+# renovate: datasource=github-tags depName=xqq/libaribcaption
+ARG LIBARIBCAPTION_VERSION=v1.1.2
+# renovate: datasource=git-refs depName=https://github.com/5ym/arib-font branch=main
+ARG ARIB_FONT_SHA=a9c834099818c59ba9c3721a2b1a860f6c0af61a
 
 RUN apt-get update && \
     apt-get -y --no-install-recommends install $DEV && \
     mkdir -p /usr/share/fonts/truetype/rounded-mplus-arib && \
-    $CURL https://raw.githubusercontent.com/5ym/arib-font/main/rounded-mplus-1m-arib.ttf \
+    $CURL https://raw.githubusercontent.com/5ym/arib-font/${ARIB_FONT_SHA}/rounded-mplus-1m-arib.ttf \
       -o /usr/share/fonts/truetype/rounded-mplus-arib/rounded-mplus-1m-arib.ttf && \
     mkdir /tmp/arib && cd /tmp/arib && \
-    $CURL https://github.com/xqq/libaribcaption/archive/refs/heads/master.tar.gz | tar -xz --strip-components=1 && \
+    $CURL https://github.com/xqq/libaribcaption/archive/refs/tags/${LIBARIBCAPTION_VERSION}.tar.gz | tar -xz --strip-components=1 && \
     mkdir build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build . -j$(nproc) && cmake --install . && \
     mkdir /tmp/ffmpeg_sources && cd /tmp/ffmpeg_sources && \
     $CURL https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.bz2 | tar -xj --strip-components=1 && \
@@ -93,17 +99,35 @@ RUN apt-get update && \
 # ---------------------------------------------------------------------------
 FROM docker.io/library/debian:trixie-slim AS jls
 ENV DEBIAN_FRONTEND=noninteractive
+ENV CURL="curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 20"
 RUN apt-get update && \
     apt-get -y --no-install-recommends install \
-      git ca-certificates build-essential pkg-config \
+      curl ca-certificates build-essential pkg-config \
       libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev && \
     rm -rf /var/lib/apt/lists/*
 
+# **どれも版で固定する。** master を追っていた頃は、同じコミットから焼いても
+# 中身が違いえた。この3つは実際に毎週書き換わっているので、次のデプロイで
+# CM検出の中身が黙って変わる。Renovate が新しいコミットを見つけて PR を出す
+# ので、上げるのは意識してやる (renovate.json の customManagers)。
 WORKDIR /src
-RUN git clone --depth 1 https://github.com/tobitti0/dtvindex.git && \
-    git clone --depth 1 https://github.com/tobitti0/chapter_exe.git && \
-    git clone --depth 1 https://github.com/tobitti0/logoframe.git && \
-    git clone --depth 1 https://github.com/yobibi/join_logo_scp.git
+# renovate: datasource=git-refs depName=https://github.com/tobitti0/dtvindex branch=master
+ARG DTVINDEX_SHA=196272d2e1b8d8aa0d960b4245a8f3a419debfae
+# renovate: datasource=git-refs depName=https://github.com/tobitti0/chapter_exe branch=master
+ARG CHAPTER_EXE_SHA=a32c8f06c3207f8d144b6be37110c63221d7e79a
+# renovate: datasource=git-refs depName=https://github.com/tobitti0/logoframe branch=master
+ARG LOGOFRAME_SHA=8185bafc281e86d847d8084de53c7ae42acfb532
+# renovate: datasource=github-tags depName=yobibi/join_logo_scp extractVersion=^v(?<version>.*)$
+ARG JOIN_LOGO_SCP_VERSION=5.1.1
+RUN mkdir -p dtvindex chapter_exe logoframe join_logo_scp && \
+    $CURL https://github.com/tobitti0/dtvindex/archive/${DTVINDEX_SHA}.tar.gz \
+      | tar -xz --strip-components=1 -C dtvindex && \
+    $CURL https://github.com/tobitti0/chapter_exe/archive/${CHAPTER_EXE_SHA}.tar.gz \
+      | tar -xz --strip-components=1 -C chapter_exe && \
+    $CURL https://github.com/tobitti0/logoframe/archive/${LOGOFRAME_SHA}.tar.gz \
+      | tar -xz --strip-components=1 -C logoframe && \
+    $CURL https://github.com/yobibi/join_logo_scp/archive/refs/tags/v${JOIN_LOGO_SCP_VERSION}.tar.gz \
+      | tar -xz --strip-components=1 -C join_logo_scp
 
 RUN make -C dtvindex build/libdtvindex.a && \
     make -C chapter_exe/src WITH_AVISYNTH=no DTVINDEX_DIR=/src/dtvindex && \

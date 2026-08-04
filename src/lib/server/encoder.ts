@@ -928,6 +928,30 @@ async function runJob(jobId: number): Promise<void> {
      * 分からなくなる (生TSを残すかどうかは前から設定を見ていて、ここだけ
      * 食い違っていた)。予約にもルールにも持たせない、が揃った形
      */
+    /*
+     * **焼き直す前に、いま置いてあるものを消す。**
+     *
+     * 出来上がるまで別名 (`.encoding`) に書くので、消さないと同じ番組の mkv が
+     * 焼いている間ずっと2本ぶん場所を取る。**画面に出ている大きさより実際の
+     * 使用量が多い**のは、外から見て分からない。
+     *
+     * **消しても焼き直せる。** 元は生TS (`encodeSource`) で、これとは別のファイル。
+     * 引き換えに、失敗したり途中でやめたりするとその間は再生できるものが
+     * 無くなるが、生TSは残っているのでもう一度押せば戻る。
+     *
+     * **DBの `library_path` も一緒に空ける。** 残したままだと実体との照合が
+     * 「保存先から消えていました」と読んで、**録画ごと削除済みに倒す**
+     * (そのとき生TSまで消える)。空けておけば照合の対象から外れ、
+     * 画面でも「まだ保存先に無い」と正しく出る
+     */
+    if (recording.library_path !== null) {
+        removeIfExists(recording.library_path);
+        database()
+            .prepare('UPDATE recordings SET library_path = NULL, updated_at = ? WHERE id = ?')
+            .run(now(), recording.id);
+        emit('recordings');
+    }
+
     let result = await runFfmpeg(
         job,
         source,

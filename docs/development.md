@@ -106,6 +106,24 @@ CI が両方を焼いて `k3s/` のタグを書き戻します。
 エージェントの口に当てる適合テストは `agent/conformance.test.ts`。
 **本物を起こして**、偽の選局コマンド (`tests/fake/tune.ts`) で流します。
 
+### 外から持ってくるものは版で固定する
+
+ffmpeg・libaribcaption・CM検出の一式・ARIB のフォント・libaribb25 は、どれも
+`ARG` / `ENV` に版 (タグかコミット) を書いてから取ってきます。**`master` を
+追っていた頃は、同じコミットから焼いても中身が違いえました** — 実際「実機に何が
+入っているか」を知るのに Pod へ入るしかない状態でした。CM検出の3つ (`logoframe`・
+`chapter_exe`・`dtvindex`) は毎週書き換わっているので、放っておくと次のデプロイで
+判定の中身が黙って変わります。
+
+上げるのは Renovate 任せです。素では見つけられないので、`# renovate:` の注釈と
+`renovate.json` の `customManagers` で教えてあります。タグのあるものはタグで、
+無いものは**枝の先頭のコミット** (`git-refs`) で追いかけます。注釈と実際の行が
+噛み合っているかは、こう確かめられます。
+
+```sh
+bunx --package renovate renovate-config-validator   # 設定そのもの
+```
+
 ## もっと詳しく
 
 - [architecture.md](architecture.md) — **なぜこの形なのか**

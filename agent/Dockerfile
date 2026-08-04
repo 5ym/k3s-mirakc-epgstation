@@ -25,6 +25,7 @@ FROM docker.io/library/debian:trixie-slim
 # libaribb25       … B25 の復号。`recisdb` が中で使っていたものと同じ実装
 # pcscd/pcsc-tools … B-CASカードを読む。denpa 側からは触れない
 # util-linux       … setsid。設定に選局コマンドを書いたときだけ使う逃げ道
+# renovate: datasource=github-releases depName=tsukumijima/libaribb25 extractVersion=^v(?<version>.*)$
 ARG ARIBB25_VERSION=0.2.10
 RUN apt-get update && \
     apt-get -y --no-install-recommends install curl ca-certificates procps util-linux \

@@ -3,6 +3,29 @@
   "extends": [
     "github>5ym/renovate-config"
   ],
+  "customManagers": [
+    {
+      "description": "Dockerfile の `# renovate:` 付き ARG/ENV。tarball で取ってくる外部のものは Renovate が自力で見つけられないので、注釈で教える",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/(^|/)Dockerfile$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>[a-z-]+?) depName=(?<depName>\\S+?)(?: extractVersion=(?<extractVersion>\\S+?))?(?: versioning=(?<versioning>\\S+?))?\\s+(?:ENV|ARG) \\w+=(?<currentValue>\\S+)"
+      ]
+    },
+    {
+      "description": "タグの無いものは枝の先頭のコミットで固定する。枝が動いたら Renovate が新しいコミットで PR を出す",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/(^|/)Dockerfile$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=git-refs depName=(?<depName>\\S+) branch=(?<currentValue>\\S+)\\s+ARG \\w+=(?<currentDigest>[0-9a-f]{40})"
+      ],
+      "datasourceTemplate": "git-refs"
+    }
+  ],
   "packageRules": [
     {
       "description": "svelte-check が TypeScript 7 (tsgo) に未対応で、上げると型チェックが丸ごと落ちる。対応が入るまで5系に留める",
@@ -10,6 +33,16 @@
         "typescript"
       ],
       "allowedVersions": "<6"
+    },
+    {
+      "description": "CM検出の一式は毎週書き換わっている。まとめて1本の PR にして、上げるときは実機で確かめる",
+      "matchDepNames": [
+        "https://github.com/tobitti0/dtvindex",
+        "https://github.com/tobitti0/chapter_exe",
+        "https://github.com/tobitti0/logoframe",
+        "yobibi/join_logo_scp"
+      ],
+      "groupName": "CM検出 (join_logo_scp 一式)"
     }
   ]
 }
