@@ -173,9 +173,10 @@ k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書い�
 | --- | --- |
 | `tests/e2e/` | Playwright。番号順に、予約 → 録画 → ルール → 引き継ぎ → 放送の延長。**ファイル単位で並ぶ**ので、長いものは割ってある |
 | `tests/stack.ts` | ワーカーごとに denpa と偽エージェントを1式立てる (これでファイル単位に並べられる) |
-| `tests/fake/` | 偽エージェント・偽の通知先・偽ffmpeg。**偽エージェントは素のTSを流す** (EIT も SDT も組み立てる) |
+| `tests/fake/` | 偽エージェント・偽の選局コマンド・偽の通知先・偽ffmpeg。**電波は `broadcast.ts` が組み立てる** (EIT も SDT も NIT も。同じものを偽エージェントと偽選局コマンドの両方が流す) |
 | `src/**/*.test.ts` | 純粋関数の境界条件 (bun test) |
 | `agent/*.test.ts` | チューナー側 (取り合い、スキャン) |
+| `agent/conformance.test.ts` | **本物のエージェントを起こして HTTP の口に当てる。** チューナーの代わりは偽の選局コマンド。`AGENT_CMD` を差し替えれば、書き直したエージェントにも同じものを通せる |
 | `windows/verify.ps1` `mac/verify.sh` | `denpa://` の登録役 |
 
 回し方と方針は [development.md](development.md) に置いてある。

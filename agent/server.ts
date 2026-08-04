@@ -333,8 +333,20 @@ export function serve(port = PORT): Bun.Server {
 
 if (import.meta.main) {
     if ((await run(['pgrep', '-x', 'pcscd'], 10_000)).code !== 0) {
-        Bun.spawn(['pcscd', '--foreground', '--disable-polkit'], { stdout: 'ignore', stderr: 'ignore' });
-        log('pcscd を起動しました');
+        /*
+         * **起こせなくても止まらない。** カードが読めなくても番組表もロゴも
+         * 集まるし、掛かったままでも録っておくほうが録らないよりまし。
+         * ここで落ちると「カードリーダーが無いから1本も録れない」になる
+         */
+        try {
+            Bun.spawn(['pcscd', '--foreground', '--disable-polkit'], {
+                stdout: 'ignore',
+                stderr: 'ignore',
+            });
+            log('pcscd を起動しました');
+        } catch (error) {
+            log(`pcscd を起こせません (カードが要る録画は解除に失敗します): ${error}`);
+        }
     }
 
     for (const signal of ['SIGTERM', 'SIGINT'] as const) {
