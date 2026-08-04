@@ -25,8 +25,18 @@ concurrency:
 env:
   TZ: Asia/Tokyo
 
+# **3つに割って同時に流します。**
+#
+# 1本に並べていた頃は 4分37秒 で、そのうち 181秒 が E2E でした。他は全部
+# 合わせても1分ありません。待っているのは**いちばん遅い1つ**だけでよいので、
+# 中身の関係ない3つを別のランナーに出しています。
+#
+# E2E はさらに3つに割ります。ランナーは4コアなので、1台では4ワーカーが上限。
+# 3台なら12ワーカーぶん並びます (中身は待ち時間が大半なので、割った分だけ効く。
+# docs/development.md「並べて流す」)。
 jobs:
-  test:
+  # リント・型・単体。**いちばん早く赤くなるところ**なので、先に見えるように分ける
+  check:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -54,10 +64,29 @@ jobs:
       - name: Type check
         run: bun run check
 
-      # denpa 本体だけ。エージェントは .NET なので下の2つで見る
+      # denpa 本体だけ。エージェントは .NET なので下の agent ジョブで見る
       # (`agent/conformance.test.ts` は焼いた実行ファイルが要るので、ここには入れない)
       - name: Unit tests
         run: bun run test:unit
+
+  # チューナーエージェント (.NET)。設定の読み書き・選局表と、口への適合テスト
+  agent:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Read bun version from Dockerfile
+        id: bun
+        run: echo "version=$(grep -oP 'oven/bun:\K[^-\s]+' Dockerfile | head -1)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ steps.bun.outputs.version }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v6
@@ -74,6 +103,30 @@ jobs:
       # 焼き忘れると、消えた既定の置き場を叩いて ENOENT で落ちるだけになる
       - name: Conformance
         run: bun run test:conformance
+
+  # 予約から録画・エンコード・保存先への配置まで、偽の放送で通しで流す
+  e2e:
+    runs-on: ubuntu-latest
+    strategy:
+      # 1つ落ちても残りは最後まで流す。落ち方を全部まとめて見たい
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Read bun version from Dockerfile
+        id: bun
+        run: echo "version=$(grep -oP 'oven/bun:\K[^-\s]+' Dockerfile | head -1)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ steps.bun.outputs.version }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
 
       # ブラウザは 150MB ほどあり、毎回落とすと1分近く持っていかれる。
       # 中身は Playwright のバージョンでしか変わらないので、それを鍵にする
@@ -101,12 +154,13 @@ jobs:
       # アプリを1度だけ組んでから、ワーカーの数だけ立てる。
       # 偽エージェント・偽通知先もワーカーごとに1式ずつ (tests/stack.ts)
       - name: E2E tests
-        run: bun run test:e2e
+        run: bunx playwright test --shard=${{ matrix.shard }}/3
 
       - name: Upload Playwright report
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-report
+          # 割った先ごとに名前を変える。同じ名前だと後から上げたほうで断られる
+          name: playwright-report-${{ matrix.shard }}
           path: playwright-report
           retention-days: 7
