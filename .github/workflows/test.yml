@@ -107,6 +107,8 @@ jobs:
   # 予約から録画・エンコード・保存先への配置まで、偽の放送で通しで流す
   e2e:
     runs-on: ubuntu-latest
+    # 中身は3分もかからない。ここに引っかかるのは待ちぼうけしているとき
+    timeout-minutes: 12
     strategy:
       # 1つ落ちても残りは最後まで流す。落ち方を全部まとめて見たい
       fail-fast: false
@@ -142,8 +144,13 @@ jobs:
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
 
       # --with-deps は OS のライブラリを入れるところで、キャッシュに乗らない。
-      # ブラウザが残っていても毎回要る (入っていれば数秒で終わる)
+      # ブラウザが残っていても毎回要る (入っていれば数秒で終わる)。
+      #
+      # **上限を切っておく。** 普段は 16〜22 秒で終わるが、apt が詰まって
+      # **9分24秒** 掛かったことがある (そのぶんだけ全体が延び、最後は
+      # 打ち切られた)。ここで落としてやり直すほうが早い
       - name: Install Playwright browser
+        timeout-minutes: 4
         run: |
           if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
             bunx playwright install-deps chromium
