@@ -76,8 +76,13 @@ const FILE_PATHS = [/^\/api\/recordings\/\d+\/file$/, /^\/dav(\/|$)/];
  *   再起動を繰り返す** (掛ける範囲を選べるのをやめたときに実際に踏んだ —
  *   E2E のスタックが起動待ちで固まった)。出しているのは
  *   「生きているか・局が何件か・録画が何本か」だけ
+ * - **`/manifest.webmanifest`。** ブラウザは**資格情報を付けずに**取りに行く
+ *   ので (`<link rel="manifest">` に `crossorigin` を書かない限り)、守ると
+ *   ホーム画面に置けなくなる。static に置いてあった頃は adapter-node が
+ *   hooks より手前で返していて、そもそも掛かっていなかった。出しているのは
+ *   アプリの名前とアイコンの場所だけ
  */
-const OPEN_PATHS = [/^\/login(\/|$)/, /^\/logout$/, /^\/api\/health$/];
+const OPEN_PATHS = [/^\/login(\/|$)/, /^\/logout$/, /^\/api\/health$/, /^\/manifest\.webmanifest$/];
 
 export function isFilePath(pathname: string): boolean {
     return FILE_PATHS.some((pattern) => pattern.test(pathname));

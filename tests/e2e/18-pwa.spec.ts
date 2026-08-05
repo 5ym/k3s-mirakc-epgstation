@@ -13,6 +13,7 @@ test.describe('PWA', () => {
 
         const res = await request.get('/manifest.webmanifest');
         expect(res.ok()).toBeTruthy();
+        expect(res.headers()['content-type']).toContain('application/manifest+json');
         const manifest = await res.json();
         expect(manifest.name).toBe('denpa');
         // ホーム画面から開いたときにブラウザのUIを出さない

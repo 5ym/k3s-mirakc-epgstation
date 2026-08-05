@@ -155,29 +155,19 @@
             </details>
 
             <!--
-                誰で入っているか。**ログインして入っているときだけ**出す。
+                **名前は出さない。** 誰で入っているかを出しても、できることは
+                変わらない (人ごとの権限も個人設定も無い)。出すのは切る道だけ。
 
-                素通し (LAN) と、前段の forward-auth に任せている構成では denpa は
-                誰か知らないので、ここには何も出さない。かつて「ログイン」を置いて
-                いたが、押しても**できることが1つも増えない** (人ごとの権限も
-                個人設定も無い) ので外した
+                ログインして入っているときだけ。素通し (LAN) では denpa は
+                誰か知らないし、切るものも持っていない
             -->
             {#if data.user}
-                <details class="dropdown dropdown-end" data-testid="user-menu">
-                    <summary class="btn btn-ghost btn-sm" title={data.user.name || 'ログイン中'}>
-                        <span class="max-w-24 truncate">{data.user.name || 'ログイン中'}</span>
-                    </summary>
-                    <ul class="menu dropdown-content rounded-box bg-base-100 z-50 mt-2 w-40 shadow">
-                        <li>
-                            <!-- 控えを消すので GET では出させない (先読みで勝手に切れる) -->
-                            <form method="POST" action="/logout">
-                                <button type="submit" class="w-full text-left" data-testid="logout">
-                                    ログアウト
-                                </button>
-                            </form>
-                        </li>
-                    </ul>
-                </details>
+                <!-- 控えを消すので GET では出させない (先読みで勝手に切れる) -->
+                <form method="POST" action="/logout">
+                    <button type="submit" class="btn btn-ghost btn-sm" data-testid="logout">
+                        ログアウト
+                    </button>
+                </form>
             {/if}
         </nav>
 

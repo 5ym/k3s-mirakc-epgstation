@@ -39,17 +39,27 @@ describe('素通しにする口', () => {
     });
 
     /*
-     * **生死確認。** Kubernetes の livenessProbe と compose の healthcheck が叩く。
-     * 守ると Pod が再起動を繰り返す — 掛ける範囲を選べるのをやめたときに実際に踏んだ
+     * **生死確認。** Kubernetes の livenessProbe が叩く。守ると Pod が
+     * 再起動を繰り返す — 掛ける範囲を選べるのをやめたときに実際に踏んだ
      */
     test('生死確認', () => {
         expect(isOpenPath('/api/health')).toBe(true);
+    });
+
+    /*
+     * **マニフェスト。** ブラウザは資格情報を付けずに取りに行くので、守ると
+     * ホーム画面に置けなくなる。static に置いてあった頃は adapter-node が
+     * hooks より手前で返していて、そもそも掛かっていなかった
+     */
+    test('PWA のマニフェスト', () => {
+        expect(isOpenPath('/manifest.webmanifest')).toBe(true);
     });
 
     test('似た名前は素通しにしない', () => {
         expect(isOpenPath('/loginx')).toBe(false);
         expect(isOpenPath('/logoutx')).toBe(false);
         expect(isOpenPath('/api/healthz')).toBe(false);
+        expect(isOpenPath('/manifest.webmanifest.map')).toBe(false);
         expect(isOpenPath('/')).toBe(false);
     });
 });

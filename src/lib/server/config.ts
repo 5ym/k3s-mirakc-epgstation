@@ -300,6 +300,17 @@ export const config = {
     /** ログインしてからの有効期間。切れたらもう一度 Entra へ行く */
     oidcSessionTtl: num('OIDC_SESSION_TTL', 30 * 24 * 60 * MIN),
 
+    /**
+     * **ホーム画面に置いたときの名前を、来た名前ごとに変える。**
+     * 書き方は `ホスト名=表示名` のカンマ区切り
+     * (`dp.l.doany.io=denpa 宅内`)。載っていない名前で来たら `denpa`。
+     *
+     * 同じ denpa を2つの名前で出していると、両方入れたときに**同じ名前の
+     * アイコンが2つ並ぶ**。どちらが家の中から繋がるほうか分からない
+     * (`manifest.ts`)。
+     */
+    pwaNames: str('PWA_NAMES', ''),
+
     /** 0 にすると EPG 取得・スケジューラ・エンコーダを起動しない (単体テスト用) */
     autostart: bool('DENPA_AUTOSTART', true),
 };

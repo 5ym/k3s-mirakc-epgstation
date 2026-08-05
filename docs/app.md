@@ -149,6 +149,7 @@ k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書い�
 | `OIDC_GROUP` | (空) | このグループに居る人だけ通す。空なら入れた人は全員 |
 | `TRUSTED_NETWORKS` | (空) | CIDR のカンマ区切り。**ここから来たら認証を掛けない** (`ADDRESS_HEADER` も要る) |
 | `OIDC_SESSION_TTL` | `2592000000` | ログインの有効期間(ms)。既定30日 |
+| `PWA_NAMES` | (空) | `ホスト名=表示名` のカンマ区切り。**ホーム画面に置いたときの名前を、来た名前ごとに変える** ([player.md](player.md#ホーム画面に置く)) |
 | `EPGSTATION_RECORDED_DIR` | `/epgstation-recorded` | 引き継ぎ元の録画置き場をマウントした場所 ([migrate.md](migrate.md)) |
 | `EPGSTATION_DB_HOST` / `_PORT` | `db` / `3306` | 引き継ぎ元の MariaDB |
 | `EPGSTATION_DB_USER` / `_PASSWORD` / `_NAME` | `root` / `epgstation` / `epgstation` | 〃 |

@@ -168,6 +168,11 @@ spec:
               value: 10.10.0.0/16
             - name: ADDRESS_HEADER
               value: x-forwarded-for
+            # **ホーム画面に置いたときの名前。来た名前ごとに変える。**
+            # 同じ denpa を2つの名前で出しているので、両方入れると同じ名前の
+            # アイコンが2つ並び、どちらが家の中から繋がるほうか分からない
+            - name: PWA_NAMES
+              value: dp.doany.io=denpa,dp.l.doany.io=denpa 宅内
           ports:
             - containerPort: 3000
           livenessProbe:
