@@ -133,9 +133,6 @@ denpa 側に作るとしたらどうするか、なぜ外のメディアサー�
 共通アドオンは別の(プライベートな) bootstrap リポジトリ側です。適用前に以下が要ります。
 
 - **StorageClass `local-path-retain`** — `reclaimPolicy: Retain` の local-path
-- **`auth` namespace の Traefik Middleware** — `forward-auth` と
-  **`forward-auth-errors` の両方**。後者が無いと、まだログインしていない端末に
-  素の 401 が返って「Unauthorized」としか出ません (ログイン画面へ行けない)
 - **Traefik** — `mydnschallenge` certResolver (Cloudflare DNS-01)、
   `allowCrossNamespace: true`
 - **ArgoCD** — push時に webhook が自動登録される運用。Application 自体はクラスタの

@@ -216,11 +216,18 @@ kubectl create secret generic denpa-oidc -n denpa \
 > 載っていなければ denpa は理由を出して断るので、そこで分かります
 > (「ID トークンに groups がありません」)。
 
-### 前段の forward-auth はどうするか
+### 前段の forward-auth は外しました
 
-**denpa 自身がログインさせるようになったら、`k3s/ingress.yaml` の
-`forward-auth` と `forward-auth-errors` は外せます。** ただし**実機で通してから**に
-してください — 外したあとに OIDC の設定を間違えていると、誰も入れない状態ではなく
-**誰でも入れる状態**になります。
+`k3s/ingress.yaml` から `forward-auth` と `forward-auth-errors` (oauth2-proxy) を
+落としてあります。denpa が自分でログインさせるので、前段に置く理由がなくなりました。
 
-順番としては「denpa 側を設定 → 入れることを確かめる → ingress から外す」です。
+**順番が大事です。** 「denpa 側を設定 → **実機で入れることを確かめる** → ingress から
+外す」。先に外すと、OIDC の設定を間違えていたときに*誰も入れない*ではなく
+**誰でも入れる**状態になります。
+
+外したことで、`dp.doany.io` のルートは1つに戻りました。2つに割れていたのは
+「配信と WebDAV だけ forward-auth を通さない」ためで、その仕分けは
+いま denpa 側 (`auth.ts`) がやっています。
+
+> **oauth2-proxy 自体は残っています。** 同じアプリ登録を他のもの (Mattermost など)
+> も使っているので、`auth` 名前空間には手を触れていません。

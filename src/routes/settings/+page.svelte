@@ -225,8 +225,8 @@
                 <h2 class="card-title">ベーシック認証</h2>
                 <p class="text-base-content/70 text-sm">
                     VLC も Kodi も、画面の前段に置くリダイレクト型の認証を扱えません。
-                    ファイルを取りに来る口だけにベーシック認証をかけられます。
-                    <strong>パスワードが入っているときだけ</strong>有効です。
+                    プレイヤーが録画を取りに来る口は、これで守ります。
+                    <strong>起動時に無ければ作る</strong>ので、常に掛かっています。
                 </p>
                 <form method="POST" action="?/saveAuth" use:submitting class="grid gap-4 sm:grid-cols-3">
                     <div class="flex flex-col gap-1">
@@ -244,7 +244,12 @@
                         </div>
                         <span class="text-base-content/60 text-xs">固定です</span>
                     </div>
-                    <label class="flex flex-col gap-1">
+                    <!--
+                        **2列ぶん取る。** 適用範囲の選択を消したときに3列目が空いて、
+                        ユーザー名の右に何も無い隙間ができていた。24文字が入る欄なので、
+                        広げるほうが読みやすくもなる
+                    -->
+                    <label class="flex flex-col gap-1 sm:col-span-2">
                         <span class="text-sm font-medium">パスワード</span>
                         <!--
                             いま入っているものを出す。Kodi や VLC に登録するときに要るのに

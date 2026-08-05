@@ -1,4 +1,13 @@
-# 外から。OIDC (forward-auth) を通す。
+# 外から。**認証は denpa 自身がやる** (docs/auth.md)。
+#
+# **forward-auth (oauth2-proxy) は外しました。** denpa が OIDC でログインさせ、
+# プレイヤーが来る口だけベーシック認証で守るようになったので、前段に置く理由が
+# 無くなっています。実機で入れることを確かめてから外しました。
+#
+# **ルールも1つで足ります。** 2つに割れていたのは、配信と WebDAV だけ
+# forward-auth を通さないためでした。VLC も Kodi も OIDC のリダイレクトを
+# 扱えないので、そこは今も denpa 側でベーシック認証にしています
+# (どの口をどう守るかは `src/lib/server/auth.ts`)。
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -10,27 +19,8 @@ spec:
   tls:
     certResolver: mydnschallenge
   routes:
-    # 配信と WebDAV は forward-auth を通さない。VLC も Kodi も OIDC の
-    # リダイレクトを扱えないため。代わりに denpa 自身のベーシック認証で守る。
-    # priority は長いマッチほど大きくしないと Host だけのルールに食われる
-    - match: Host(`dp.doany.io`) && (PathPrefix(`/api/recordings`) || PathPrefix(`/dav`))
-      kind: Rule
-      priority: 100
-      services:
-        - name: denpa
-          port: 3000
     - match: Host(`dp.doany.io`)
       kind: Rule
-      priority: 50
-      middlewares:
-        # **2つ要る。** forward-auth だけだと、まだログインしていない端末に
-        # oauth2-proxy の素の 401 がそのまま返り、画面には Unauthorized としか
-        # 出ない (ログイン画面へ行く道が無い)。errors のほうが 401 を 302 に
-        # 書き換えてサインインへ送る。順番も大事で、包む側が先
-        - name: forward-auth-errors
-          namespace: auth
-        - name: forward-auth
-          namespace: auth
       services:
         - name: denpa
           port: 3000
