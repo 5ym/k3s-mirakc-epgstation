@@ -1,9 +1,5 @@
 # 外からも LAN からも、ここ1つ。**認証は denpa 自身がやる** (docs/auth.md)。
 #
-# **forward-auth (oauth2-proxy) は外しました。** denpa が OIDC でログインさせ、
-# プレイヤーが来る口だけベーシック認証で守るようになったので、前段に置く理由が
-# 無くなっています。実機で入れることを確かめてから外しました。
-#
 # **名前は2つあります。**
 #
 # | 名前 | 誰が | |
@@ -15,12 +11,6 @@
 # (`10.10.0.0/16`) から来たら何も聞かず、それ以外にはログインを求めます。
 # **どちらの名前で来たかは見ていません** — LAN から `dp.doany.io` を開いても
 # そのまま通ります。
-#
-# **LAN の名前には `ClientIP` を付けます。** `*.l.doany.io` は LAN 内の DNS が
-# Traefik へ向けてあるだけ (bootstrap 側の AdGuard Home) で**外からは引けません**
-# が、公開IPへ `Host: dp.l.doany.io` と名乗って送ることはできます。名乗るだけで
-# 何かが緩むわけではありませんが、届く先を要る範囲に絞っておきます。
-# 括弧は要りませんが (`&&` のほうが強く結ぶ)、読み違えないように付けてあります。
 #
 # **どちらも https で出します。** 平文だと Chrome が `denpa://` の確認に
 # 「常にこの種類のリンクを開く」のチェックボックスを出さず (このチェックは
@@ -37,7 +27,7 @@ spec:
   tls:
     certResolver: mydnschallenge
   routes:
-    - match: Host(`dp.doany.io`) || (Host(`dp.l.doany.io`) && ClientIP(`10.10.0.0/16`))
+    - match: Host(`dp.doany.io`) || Host(`dp.l.doany.io`)
       kind: Rule
       services:
         - name: denpa
