@@ -1,34 +1,13 @@
 import { fail } from '@sveltejs/kit';
+import { BASIC_AUTH_USER, generatePassword } from '$lib/server/auth';
 import { isCmMode } from '$lib/server/cm';
 import { database, now, queryAll, queryOne } from '$lib/server/db';
 import { isVideoCodec } from '$lib/server/encoder';
 import { available as migrateAvailable, source, start, status } from '$lib/server/migrate';
+import { enabled as oidcEnabled } from '$lib/server/oidc';
 import { saveSettings, settings } from '$lib/server/settings';
 import { send, type Webhook } from '$lib/server/webhook';
 import { EVENTS } from '$lib/webhook-events';
-
-/**
- * ベーシック認証のユーザー名。**画面からは変えられない。**
- *
- * 変えて嬉しいことが何も無い。プレイヤー側にも同じものを入れる必要があるだけで、
- * 忘れると登録済みの端末が全部つながらなくなる。
- */
-const BASIC_AUTH_USER = 'denpa';
-
-/*
- * パスワードに使う文字。
- *
- * 記号は入れない。このパスワードは**再生リンクのURLに埋め込まれる**ので、
- * `:` `@` `/` `#` `?` が入ると URL として割れてしまう。
- * 紛らわしい文字 (0/O、1/l/I) も外す。Kodi の画面で手入力することがある
- */
-const ALPHABET = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-const PASSWORD_LENGTH = 24;
-
-function generatePassword(): string {
-    const bytes = crypto.getRandomValues(new Uint8Array(PASSWORD_LENGTH));
-    return Array.from(bytes, (b) => ALPHABET[b % ALPHABET.length]).join('');
-}
 
 export function load() {
     const current = settings();
@@ -42,12 +21,12 @@ export function load() {
              * Kodi や VLC に登録するときに必要になるが、覚えていないと入れ直すしかなく、
              * 入れ直せば既に登録した端末が全部つながらなくなる。
              *
-             * 隠す意味も薄い。範囲が files なら録画一覧の再生リンクに同じものが
-             * 埋まっている (画面を開ければ見える)。範囲が all ならこの画面自体に
-             * 認証がかかっているので、見えている時点で持っている人
+             * 隠す意味も薄い。**この画面まで来られている時点で持っている人**
+             * (ベーシック認証か OIDC のどちらかを通っている)
              */
             password: current.basicAuthPassword,
-            scope: current.basicAuthScope,
+            /** OIDC があるなら画面はそちらが守っている。説明の書き分けに使う */
+            oidc: oidcEnabled(),
         },
         webhooks: queryAll<Webhook>('SELECT * FROM webhooks ORDER BY id'),
         events: EVENTS,
@@ -61,22 +40,19 @@ export function load() {
 
 export const actions = {
     /**
-     * ベーシック認証。VLC も Kodi もリダイレクト型の認証を扱えないので、
-     * ファイルを取りに来る口だけにかけられるようにしてある。
+     * ベーシック認証。**掛かる範囲は選べない** — 掛けたら全部に掛かる
+     * (OIDC を設定してあるところだけ、画面はそちらに譲る)。
+     *
+     * **空にはできない。** 空にすると録画も WebDAV も誰でも取れる状態になり、
+     * しかもそうなったことが画面から分からない。消したいなら作り直す
      */
     saveAuth: async ({ request }) => {
         const form = await request.formData();
-        const scope = String(form.get('basicAuthScope') ?? 'files');
-        if (scope !== 'files' && scope !== 'all') {
-            return fail(400, { message: '適用範囲の指定が不正です' });
-        }
-        // ユーザー名は denpa 固定 (画面から変えられない)。
-        // 画面にはいま入っているパスワードが出ているので、空にしたのは「消したい」ということ
-        saveSettings({
-            basicAuthUser: BASIC_AUTH_USER,
-            basicAuthPassword: String(form.get('basicAuthPassword') ?? ''),
-            basicAuthScope: scope,
-        });
+        const password = String(form.get('basicAuthPassword') ?? '');
+        if (password === '') return fail(400, { message: 'パスワードは空にできません' });
+
+        // ユーザー名は denpa 固定 (画面から変えられない)
+        saveSettings({ basicAuthUser: BASIC_AUTH_USER, basicAuthPassword: password });
         return { success: true, saved: true };
     },
 
@@ -87,7 +63,14 @@ export const actions = {
      * 「掛けたつもりで掛かっていない」になる。1回の操作で終わらせる。
      */
     newPassword: () => {
-        saveSettings({ basicAuthUser: BASIC_AUTH_USER, basicAuthPassword: generatePassword() });
+        const password = generatePassword();
+        saveSettings({ basicAuthUser: BASIC_AUTH_USER, basicAuthPassword: password });
+        /*
+         * **ログにも出す。** 画面にもベーシック認証が掛かっているので、作り直した
+         * 瞬間から**その端末は入れなくなる** (ブラウザが持っているのは古いほう)。
+         * 新しいものを受け取る道が画面しか無いと、押した本人が締め出される
+         */
+        console.log(`[auth] パスワードを作り直しました: ${BASIC_AUTH_USER} / ${password}`);
         return { success: true, saved: true };
     },
 

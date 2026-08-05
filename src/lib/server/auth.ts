@@ -1,5 +1,5 @@
 import { enabled as oidcEnabled } from './oidc';
-import { settings } from './settings';
+import { saveSettings, settings } from './settings';
 
 /**
  * 誰を通すか。**口によって守り方が違う。**
@@ -13,13 +13,70 @@ import { settings } from './settings';
  * **プレイヤーはリダイレクトを扱えない。** VLC も Kodi も Infuse も、ログイン画面へ
  * 飛ばされたところで何もできず「再生できません」で終わる。だからファイルを取りに
  * 来る口だけは、前段に何を置いていようと素のベーシック認証のまま残してある。
+ *
+ * **適用範囲の設定は持たない。** 以前は「配信と WebDAV だけ / 画面も含めて全部」を
+ * 選べたが、既定 (files) のままだと**画面が誰にでも開く**。前段に別の認証を
+ * 置いている構成でしか成り立たない既定で、しかも掛かっているつもりでいられた。
+ * いまは掛けたら全部に掛かる (OIDC があるところだけ、そちらに譲る)。
  */
+
+/**
+ * ベーシック認証のユーザー名。**変えられない。**
+ *
+ * 変えて嬉しいことが何も無い。プレイヤー側にも同じものを入れる必要があるだけで、
+ * 忘れると登録済みの端末が全部つながらなくなる。
+ */
+export const BASIC_AUTH_USER = 'denpa';
+
+/**
+ * パスワードに使う文字。
+ *
+ * 記号は入れない。このパスワードは**再生リンクのURLに埋め込まれる**ので、
+ * `:` `@` `/` `#` `?` が入ると URL として割れてしまう。
+ * 紛らわしい文字 (0/O、1/l/I) も外す。Kodi の画面で手入力することがある
+ */
+const ALPHABET = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const PASSWORD_LENGTH = 24;
+
+export function generatePassword(): string {
+    const bytes = crypto.getRandomValues(new Uint8Array(PASSWORD_LENGTH));
+    return Array.from(bytes, (b) => ALPHABET[b % ALPHABET.length]).join('');
+}
+
+/**
+ * **起動時に、無ければ作る。**
+ *
+ * 何も設定しないまま立てると、録画も WebDAV も誰でも取れる状態で上がっていた。
+ * 「あとで設定画面から掛ける」は忘れるし、忘れたことに気付く手立てが無い。
+ *
+ * **作ったパスワードはログに1度だけ出す。** 掛かった以上どこかで受け取れないと、
+ * 立てた本人が自分の画面に入れない。以降は設定画面から見る (OIDC を設定して
+ * あれば Entra で入って読める。無ければここのログが唯一の手掛かり)。
+ */
+export function ensureBasicAuth(): boolean {
+    if (enabled()) return false;
+    const password = generatePassword();
+    saveSettings({ basicAuthUser: BASIC_AUTH_USER, basicAuthPassword: password });
+    console.log(
+        `[boot] ベーシック認証を作りました: ${BASIC_AUTH_USER} / ${password}\n` +
+            '       設定画面から見直せます。プレイヤー (VLC / Kodi) にも同じものを入れてください',
+    );
+    return true;
+}
 
 /** ベーシック認証で守る口。**ここは OIDC にしない** */
 const FILE_PATHS = [/^\/api\/recordings\/\d+\/file$/, /^\/dav(\/|$)/];
 
-/** ログインの入口。守ると入れなくなる */
-const OPEN_PATHS = [/^\/login(\/|$)/, /^\/logout$/];
+/**
+ * 素通しにする口。
+ *
+ * - **ログインの入口。** 守ると入れなくなる (ログイン画面へ行くのにログインが要る)
+ * - **`/api/health`。** Kubernetes の `livenessProbe` と compose の healthcheck が
+ *   叩く。守ると**Pod が再起動を繰り返す** (掛ける範囲を選べるのをやめたときに
+ *   実際に踏んだ — E2E のスタックが起動待ちで固まった)。出しているのは
+ *   「生きているか・局が何件か・録画が何本か」だけ
+ */
+const OPEN_PATHS = [/^\/login(\/|$)/, /^\/logout$/, /^\/api\/health$/];
 
 export function isFilePath(pathname: string): boolean {
     return FILE_PATHS.some((pattern) => pattern.test(pathname));
@@ -35,17 +92,17 @@ export function enabled(): boolean {
 }
 
 /**
- * ベーシック認証で守る口か。
+ * ベーシック認証で守る口か。**掛けたら全部に掛かる。**
  *
- * **OIDC を入れると、画面のぶんは OIDC に譲る。** 両方掛けると、ブラウザの
- * 認証ダイアログを閉じないとログイン画面にすら行けない。`BASIC_AUTH_SCOPE=all`
- * を入れたままでもそうする (ファイルの口の扱いは変わらない)。
+ * 唯一の例外が OIDC で、**画面のぶんはそちらに譲る**。両方掛けると、ブラウザの
+ * 認証ダイアログを閉じないとログイン画面にすら行けない。ファイルの口は
+ * どちらにせよベーシック認証のままなので、守りに穴は空かない。
  */
 export function protects(pathname: string): boolean {
     if (!enabled()) return false;
     if (isOpenPath(pathname)) return false;
     if (isFilePath(pathname)) return true;
-    return settings().basicAuthScope === 'all' && !oidcEnabled();
+    return !oidcEnabled();
 }
 
 /** OIDC でログインを求める口か */

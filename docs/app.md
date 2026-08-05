@@ -129,8 +129,7 @@ k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書い�
 | `LIBRARY_DIR` | `/library` | エンコード済みの置き場。ここから配る |
 | `FFMPEG` / `FFPROBE` | `/usr/local/bin/...` | 開発時は偽物に差し替える |
 | `ENCODE_CONCURRENCY` | `1` | 録画エンコードの同時実行数 |
-| `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` | `denpa` / (空) | 初期値。パスワードが入っているときだけ有効 |
-| `BASIC_AUTH_SCOPE` | `files` | 初期値。`files` … 配信と WebDAV だけ / `all` … 画面も含めて全部 |
+| `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` | `denpa` / (空) | 初期値。**空なら起動時に作る** ([auth.md](auth.md))。掛かる範囲は選べない |
 | `START_MARGIN` / `END_MARGIN` | `10000` / `15000` | 録画の前後マージン(ms)。延長には EIT[p/f] で追従する |
 | `SCHEDULER_TICK` | `5000` | 予約チェックの間隔(ms) |
 | `RECONCILE_INTERVAL` | `300000` | 保存先の実体とDBを突き合わせる間隔(ms) |

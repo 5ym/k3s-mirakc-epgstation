@@ -1,5 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { listen } from './agent-events';
+import { ensureBasicAuth } from './auth';
 import { config } from './config';
 import { pump, requeueOrphanedJobs } from './encoder';
 import { sync, syncServicesOnly } from './epg';
@@ -39,6 +40,15 @@ export function start(): void {
 
     mkdirSync(config.recordedDir, { recursive: true });
     mkdirSync(config.libraryDir, { recursive: true });
+
+    /*
+     * **鍵を掛けてから開ける。** 何も設定しないまま立てると、録画も WebDAV も
+     * 誰でも取れる状態で上がっていた。無ければここで作る (作ったら1度だけログに出す)。
+     *
+     * バックグラウンド処理より先にやる — `DENPA_AUTOSTART=0` でも掛かっていないと
+     * 意味が無い
+     */
+    ensureBasicAuth();
 
     const recovered = recoverOrphanedRecordings();
     const orphanedJobs = requeueOrphanedJobs();

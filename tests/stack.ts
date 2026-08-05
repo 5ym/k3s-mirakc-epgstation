@@ -43,6 +43,9 @@ export interface Stack {
     failFile: string;
 }
 
+/** 資格情報を持たずに叩く口。返るのは素の Response */
+export type Anonymous = (path: string, init?: RequestInit) => Promise<Response>;
+
 interface Started {
     proc: ChildProcess;
     /** 立ち上がらなかったときに出す。何も出ないと原因が分からない */
@@ -194,8 +197,7 @@ async function boot(index: number): Promise<{ stack: Stack; shutdown: () => Prom
  * `stack` はワーカーに1つ。`auto` にしてあるので、明示的に受け取らないテストでも
  * 立ち上がった状態で始まる (`baseURL` がこれに乗っているため)。
  */
-// biome-ignore lint/complexity/noBannedTypes: テスト単位で足すものは無い。Playwright の型引数は空で渡す
-export const test = base.extend<{}, { stack: Stack }>({
+export const test = base.extend<{ anonymous: Anonymous }, { stack: Stack }>({
     stack: [
         // biome-ignore lint/correctness/noEmptyPattern: Playwright は分割代入でないと受け付けない
         async ({}, use, workerInfo) => {
@@ -227,6 +229,18 @@ export const test = base.extend<{}, { stack: Stack }>({
         });
         await use(context);
         await context.dispose();
+    },
+
+    /*
+     * **資格情報を持たない口。** 断られることを確かめるためのもの。
+     *
+     * **Playwright の APIRequestContext は使えない。** `newContext` に資格情報を
+     * 渡していなくても認証を通ってしまう — 実測で、素の fetch が 401 を返す同じ口に
+     * 対して 200 が返った (`test.use({ httpCredentials: undefined })` でも同じ)。
+     * 素の fetch なら確実に持たない。
+     */
+    anonymous: async ({ stack }, use) => {
+        await use((path, init) => fetch(`${stack.appUrl}${path}`, { redirect: 'manual', ...init }));
     },
 });
 

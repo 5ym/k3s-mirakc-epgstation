@@ -42,11 +42,12 @@ export interface Settings {
      * ロゴを覚え違えているようなら下げる。1 でロゴを使わなくなる
      */
     logoLevel: number;
-    /** ベーシック認証。両方入っているときだけ有効 */
+    /**
+     * ベーシック認証。両方入っているときだけ有効で、**起動時に無ければ作る**
+     * (`auth.ensureBasicAuth`)。掛かる範囲は選べない — 掛けたら全部に掛かる
+     */
     basicAuthUser: string;
     basicAuthPassword: string;
-    /** 認証をかける範囲。files … 配信とWebDAVだけ / all … 画面も含めて全部 */
-    basicAuthScope: 'files' | 'all';
 }
 
 /** JL の logo_level。範囲の外は既定に倒す (規則ファイルに書き込む値なので) */
@@ -62,7 +63,6 @@ function stored(key: string): string | undefined {
 export function settings(): Settings {
     const codec = stored('codec');
     const cmCut = stored('cmCut');
-    const scope = stored('basicAuthScope') ?? config.basicAuthScope;
     const flag = (key: string, fallback: boolean) => {
         const value = stored(key);
         return value === undefined ? fallback : value === 'true';
@@ -83,7 +83,6 @@ export function settings(): Settings {
         logoLevel: logoLevel(stored('logoLevel')),
         basicAuthUser: stored('basicAuthUser') ?? config.basicAuthUser,
         basicAuthPassword: stored('basicAuthPassword') ?? config.basicAuthPassword,
-        basicAuthScope: scope === 'all' ? 'all' : 'files',
     };
 }
 

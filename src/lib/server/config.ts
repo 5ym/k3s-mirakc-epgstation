@@ -265,23 +265,12 @@ export const config = {
     /**
      * ベーシック認証。ユーザー名とパスワードの両方が入っているときだけ有効になる。
      *
-     * 画面の前段に別の認証(forward-auth など)を置いている場合、プレイヤーや Kodi は
-     * そのリダイレクトを扱えない。そこで「ファイルを取りに来る口だけ」に
-     * ベーシック認証をかけられるようにしてある。
+     * **初期値としてだけ読む。** 起動時に無ければ作るので (`auth.ensureBasicAuth`)、
+     * 何も渡さなくても掛かった状態で上がる。範囲は選べない — 掛けたら全部に掛かり、
+     * OIDC があるところだけそちらに譲る (docs/auth.md)
      */
     basicAuthUser: str('BASIC_AUTH_USER', 'denpa'),
     basicAuthPassword: str('BASIC_AUTH_PASSWORD', ''),
-    /**
-     * 認証をかける範囲の初期値。設定画面で変えられる。
-     * `files` … 録画の配信と WebDAV だけ。画面は素通し
-     * `all`   … 画面も含めて全部
-     *
-     * **ここも環境変数から読む。** 読んでいなかった頃は `BASIC_AUTH_SCOPE=all` を
-     * 渡しても黙って `files` のままで、画面に認証が掛かっているつもりでいられた
-     * (文書には「初期値として使える」と書いてあった)。
-     */
-    basicAuthScope: (str('BASIC_AUTH_SCOPE', 'files') === 'all' ? 'all' : 'files') as 'files' | 'all',
-
     /**
      * **OIDC でのログイン。** 3つ揃ったときだけ有効になり、揃っていなければ
      * 今までどおり (前段の forward-auth 頼み) のまま動く。

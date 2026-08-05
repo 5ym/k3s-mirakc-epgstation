@@ -162,8 +162,8 @@ export function load({ url, request }) {
          * プレイヤーに渡すURLに埋める資格情報。
          * VLC も Infuse もベーシック認証のダイアログを出さないので、URL に入れるしかない。
          *
-         * BASIC_AUTH_SCOPE=files だとこの画面自体は素通しなので、画面を開ければ
-         * パスワードも見える。画面の前段に別の認証を置いている前提の設定。
+         * **この画面まで来られている時点で持っている人**なので、URL の中に
+         * 見えていても増える危険は無い (画面も守られている。docs/auth.md)
          */
         credentials: authEnabled()
             ? { user: settings().basicAuthUser, password: settings().basicAuthPassword }

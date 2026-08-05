@@ -274,7 +274,14 @@
                                 作って保存まで1回で済ませる。考えて入れるものではないし、
                                 入れたものを保存し忘れると、そのつもりで居るのに掛かっていない
                             -->
-                            <button class="btn btn-xs" formaction="?/newPassword" data-testid="auth-generate">
+                            <button
+                                class="btn btn-xs"
+                                formaction="?/newPassword"
+                                title={data.auth.oidc
+                                    ? '作り直すと、登録済みのプレイヤーは入れ直しが要ります'
+                                    : '作り直すと、この画面もいったん入れなくなります (新しいものは起動ログにも出ます)'}
+                                data-testid="auth-generate"
+                            >
                                 作り直して保存
                             </button>
                             <button
@@ -288,27 +295,28 @@
                             </button>
                         </div>
                     </label>
-                    <label class="flex flex-col gap-1">
-                        <span class="text-sm font-medium">適用範囲</span>
-                        <select
-                            name="basicAuthScope"
-                            class="select select-bordered w-full"
-                            data-testid="auth-scope"
-                        >
-                            <option value="files" selected={data.auth.scope === 'files'}>
-                                配信と WebDAV だけ
-                            </option>
-                            <option value="all" selected={data.auth.scope === 'all'}>画面も含めて全部</option>
-                        </select>
-                    </label>
+                    <!--
+                        **適用範囲は選ばせない。** 以前は「配信と WebDAV だけ / 画面も
+                        含めて全部」を選べたが、既定のままだと画面が誰にでも開き、
+                        しかも掛かっているつもりでいられた
+                    -->
                     <div class="sm:col-span-3">
-                        {#if data.auth.scope === 'files' && data.auth.password !== ''}
-                            <div class="alert alert-warning mb-3" data-testid="auth-warning">
-                                この範囲だと録画一覧の画面には認証がかかりません。再生リンクのURLに
-                                パスワードを埋めているので、画面を開ければパスワードも見えます。
-                                画面の前段に別の認証がある前提の設定です。
-                            </div>
-                        {/if}
+                        <div class="alert alert-info mb-3" data-testid="auth-scope-note">
+                            {#if data.auth.oidc}
+                                <span>
+                                    <strong>画面は OIDC で守っています。</strong>
+                                    ベーシック認証が効くのは、プレイヤーが録画を取りに来る口 (<code
+                                        >/api/recordings/…/file</code
+                                    >
+                                    と <code>/dav</code>) です — リダイレクトを扱えないため。
+                                </span>
+                            {:else}
+                                <span>
+                                    <strong>画面も配信も WebDAV も、まとめて守ります。</strong>
+                                    範囲は選べません。画面だけ外すと、再生リンクのURLに埋めた パスワードが誰にでも見えてしまいます。
+                                </span>
+                            {/if}
+                        </div>
                         <button class="btn btn-primary" data-testid="save-auth">保存</button>
                     </div>
                 </form>

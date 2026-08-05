@@ -21,5 +21,12 @@ export default defineConfig({
         // 「端末に合わせる」がダークになる前提でテストする
         colorScheme: 'dark',
         trace: 'retain-on-failure',
+        /*
+         * **画面にもベーシック認証が掛かる。** 掛ける範囲を選べるのをやめて、
+         * 掛けたら全部に掛かるようにしたため (docs/auth.md)。資格情報を持たない
+         * ときの振る舞いを見たいテストは、そのテストで `httpCredentials: undefined`
+         * を指定して外す
+         */
+        httpCredentials: { username: 'denpa', password: 'ひみつ' },
     },
 });
