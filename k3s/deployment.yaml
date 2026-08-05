@@ -135,6 +135,33 @@ spec:
             # コーデック・CMの扱いも設定画面で決める
             - name: ENCODE_CONCURRENCY
               value: '2'
+            # **OIDC でのログイン** (docs/auth.md)。
+            #
+            # 値は oauth2-proxy が使っているアプリ登録と同じものを、denpa 名前空間の
+            # Secret `denpa-oidc` に写してある。**git には置かない** — 秘密が混ざるうえ、
+            # テナントIDとアプリIDも公開リポジトリに残す理由が無い。
+            # 作り直すときは docs/auth.md の手順。
+            - name: OIDC_ISSUER
+              valueFrom:
+                secretKeyRef: { name: denpa-oidc, key: issuer }
+            - name: OIDC_CLIENT_ID
+              valueFrom:
+                secretKeyRef: { name: denpa-oidc, key: client-id }
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: { name: denpa-oidc, key: client-secret }
+            # このグループに居る人だけ入れる (oauth2-proxy の ALLOWED_GROUPS と同じ)
+            - name: OIDC_GROUP
+              valueFrom:
+                secretKeyRef: { name: denpa-oidc, key: group }
+            # **LAN からは今までどおり素通し。** ingress の
+            # `ClientIP(10.10.0.0/16)` と同じ範囲。
+            # `ADDRESS_HEADER` が無いと adapter-node は Traefik の Pod の住所を
+            # 返すので、ここが誰にも当たらない (=全員ログインを求められる)
+            - name: OIDC_BYPASS_CIDR
+              value: 10.10.0.0/16
+            - name: ADDRESS_HEADER
+              value: x-forwarded-for
           ports:
             - containerPort: 3000
           livenessProbe:
