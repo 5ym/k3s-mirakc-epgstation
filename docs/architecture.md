@@ -110,10 +110,9 @@ PreSync フックに置いています (`denpa-prepull`、中身は `/bin/true`)
 
 **denpa はまだ実装していません。**
 
-**mirakc をやめたことで、その場しのぎの道も無くなりました。** それまでは mirakc の
-IPTV 向けの口 (`/api/iptv/playlist` と `/api/iptv/xmltv`) を Kodi の
-PVR IPTV Simple Client に食べさせれば、番組表付きのライブTVになっていました。
-エージェントは局も番組表も知らないので、あの口はどこにもありません。
+**その場しのぎの道もありません。** IPTV 向けのプレイリストと番組表 (Kodi の
+PVR IPTV Simple Client が食べる形) を出せる相手がどこにも居ないためです。
+エージェントは局も番組表も知りません。
 
 **代わりを作るなら denpa 側です。** 局の一覧も番組表も denpa が持っているので、
 M3U8 と XMLTV を出すこと自体は難しくありません (むしろ、ベーシック認証も

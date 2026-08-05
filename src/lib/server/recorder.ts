@@ -179,7 +179,7 @@ async function openWithRetry(
 /**
  * 放送の延長に追い付く。**録画中のTSに乗っている EIT[p/f] を見る。**
  *
- * mirakc に番組情報を聞き直していた頃と違って、**問い合わせる相手が要らない**。
+ * **問い合わせる相手が要らない。**
  * いま録っているチャンネルのTSにそのまま流れてくるので、読むだけで分かる。
  *
  * 縮む方向には追わない。番組表が短くなったからといって録画を早く切ると、
@@ -242,7 +242,7 @@ async function pump(recording: Recording, controller: AbortController): Promise<
     const filter = new ServiceFilter(service.service_id);
     /*
      * 同じ TS から番組表も読む。**延長の追従はここから。**
-     * mirakc に番組情報を聞き直していた頃と違って、問い合わせる相手が要らない
+     * 番組情報を誰かに聞き直す必要は無い
      */
     const epg = new EpgReader();
     const eventId = recording.program_id === null ? null : recording.program_id % 100000;

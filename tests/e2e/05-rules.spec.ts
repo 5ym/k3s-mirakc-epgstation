@@ -26,7 +26,7 @@ test.describe('自動予約ルール', () => {
         await expect(rule).toContainText('テストアニメ');
         await expect(rule).toContainText('有効');
 
-        // 偽mirakcは同じ番組名を周期的に返すので、ルール作成と同時に予約が立つ
+        // 偽エージェントは同じ番組名を周期的に返すので、ルール作成と同時に予約が立つ
         await goto(page, '/');
         const fromRule = page.getByTestId('reservation-row').filter({ hasText: 'テストアニメ' });
         // ルールで立ったものは、どのルールから来たかを番組名の下に出す
@@ -54,7 +54,7 @@ test.describe('自動予約ルール', () => {
 
 test.describe('キーワードを当てる範囲', () => {
     /*
-     * 偽mirakc の番組は、番組名にも概要にも出てこない語を詳細に持たせてある。
+     * 偽エージェントの番組は、番組名にも概要にも出てこない語を詳細に持たせてある。
      * 既定(番組名だけ)では当たらず、詳細まで広げると当たる、という差を見る。
      */
     test('既定は番組名だけで、詳細まで広げると出演者でも当たる', async ({ page, request }) => {
@@ -91,7 +91,7 @@ test.describe('ジャンル指定', () => {
     test('ジャンルだけでもルールを作れる', async ({ page }) => {
         await goto(page, '/rules');
         await page.getByTestId('genre-summary').click();
-        // 偽mirakcの番組は全部「アニメ／特撮」(lv1=7)
+        // 偽エージェントの番組は全部「アニメ／特撮」(lv1=7)
         await page.getByTestId('rule-genres').locator('input[value="7"]').check();
         await page.getByTestId('rule-submit').click();
 
@@ -107,7 +107,7 @@ test.describe('ジャンル指定', () => {
     test('合わないジャンルなら何も録らない', async ({ page }) => {
         await goto(page, '/rules');
         await page.getByTestId('genre-summary').click();
-        // スポーツ(lv1=1)。偽mirakcはアニメしか流さない
+        // スポーツ(lv1=1)。偽エージェントはアニメしか流さない
         await page.getByTestId('rule-genres').locator('input[value="1"]').check();
         await page.getByTestId('rule-submit').click();
         await expect(page.getByTestId('rule-row')).toHaveCount(1);

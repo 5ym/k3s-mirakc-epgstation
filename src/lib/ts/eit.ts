@@ -1,9 +1,9 @@
 /**
  * EIT を読む。番組表の中身そのもの。
  *
- * これまでは mirakc が読んで denpa が HTTP で取り込んでいた。自分で読めるように
- * なると、**チューナーが空いているだけ並列に回せる**し、録画で開いている
- * チャンネルのぶんはただで手に入る ([agent.md](../../../docs/agent.md))。
+ * **denpa が自分で読む。** 番組表を誰かに聞きに行かないので、**チューナーが
+ * 空いているだけ並列に回せる**し、録画で開いているチャンネルのぶんはただで
+ * 手に入る ([agent.md](../../../docs/agent.md))。
  *
  * 扱うのは2種類。
  *
@@ -116,7 +116,7 @@ export function parseBcdDuration(data: Uint8Array, at: number): number | null {
  * 映像の解像度。component_type の上位ニブルで決まる。
  *
  * 480i だけ 0x01〜0x04 と例外で、そこから先は 0xA?=480p, 0xB?=1080i … と並ぶ。
- * mirakc が返していた文字列に合わせてある (画面の `videoLabel` がこれを読む)。
+ * 画面の `videoLabel` がこの文字列をそのまま読む。
  */
 const RESOLUTION: Record<number, string> = {
     0: '480i',

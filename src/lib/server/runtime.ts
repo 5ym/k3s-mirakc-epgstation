@@ -73,7 +73,7 @@ export function start(): void {
     every(config.channelSyncInterval, 'services', syncServicesOnly);
 
     /*
-     * **番組表を自分で集める。** mirakc の `epg.update-schedules` に当たるもの。
+     * **番組表を自分で集める。**
      * チューナーが空いているだけ並列に回し、薄い局から先に行く (epg-collect.ts)。
      * 起動直後に1回走らせるので、初回は数分で番組表が出る
      */

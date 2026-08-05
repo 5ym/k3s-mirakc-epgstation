@@ -127,7 +127,7 @@ CREATE TABLE IF NOT EXISTS webhooks (
 );
 
 CREATE TABLE IF NOT EXISTS services (
-    id INTEGER PRIMARY KEY,           -- mirakc の service id
+    id INTEGER PRIMARY KEY,           -- 局の内部ID (tuner.ts の serviceKey)
     service_id INTEGER NOT NULL,
     network_id INTEGER NOT NULL,
     name TEXT NOT NULL,
@@ -142,7 +142,7 @@ CREATE TABLE IF NOT EXISTS services (
 );
 
 CREATE TABLE IF NOT EXISTS programs (
-    id INTEGER PRIMARY KEY,           -- mirakc の program id
+    id INTEGER PRIMARY KEY,           -- 番組ID (tuner.ts の programKey)
     service_id INTEGER NOT NULL,
     network_id INTEGER NOT NULL,
     event_id INTEGER NOT NULL,
@@ -176,7 +176,7 @@ CREATE TABLE IF NOT EXISTS rules (
     enabled INTEGER NOT NULL DEFAULT 1,
     -- チューナーが足りないとき、どの予約を残すか。大きいほうが残る (conflict.ts)。
     -- **エージェントに渡す「掴む強さ」とは別物** (docs/agent.md)。
-    -- ルールは 1、手動予約は 2。mirakc の頃の 2/3 を引きずっていたが、
+    -- ルールは 1、手動予約は 2。前は 2/3 から始めていたが、
     -- 比べる相手は予約どうしだけなので小さいところから数える
     priority INTEGER NOT NULL DEFAULT 1,
     -- **焼き方は持たない。** エンコードするか・生TSを残すか・CMの扱い・コーデックは

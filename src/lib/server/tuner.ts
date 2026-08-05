@@ -1,13 +1,11 @@
 /**
  * チューナーエージェントへの口。
  *
- * mirakc とのやり取り (`mirakc.ts`) を置き換えたもの。**相手が返すのは素のTSだけ**で、
- * 局も番組も時刻も、意味を持つものは何も返ってこない。読むのは denpa の仕事
- * ([agent.md](../../../docs/agent.md))。
+ * **相手が返すのは素のTSだけ**で、局も番組も時刻も、意味を持つものは何も
+ * 返ってこない。読むのは denpa の仕事 ([agent.md](../../../docs/agent.md))。
  *
- * 掴み方も1つに減った。mirakc には「サービス単位」「番組単位」「チャンネル単位」の
- * 3つの開き方があったが、ここにあるのは**物理チャンネルを丸ごと**だけ。
- * 局を選り分けるのは `ts/service-filter.ts`、番組の切れ目を見るのは `ts/eit.ts`。
+ * **掴み方は1つだけ。** 物理チャンネルを丸ごと開く。局を選り分けるのは
+ * `ts/service-filter.ts`、番組の切れ目を見るのは `ts/eit.ts`。
  */
 
 import type { ChannelType } from '../types';
@@ -54,7 +52,7 @@ export interface TunerConfig {
 }
 
 /**
- * 局の内部ID。**mirakc と同じ作り方**にしてある。
+ * 局の内部ID。`networkId * 100000 + serviceId`。
  *
  * 録画も予約も `services.id` を参照しているので、ここを変えると
  * 過去の録画が辿れなくなる (docs/data.md)。
@@ -63,7 +61,7 @@ export function serviceKey(networkId: number, serviceId: number): number {
     return networkId * 100000 + serviceId;
 }
 
-/** 番組のID。局の内部ID + event_id。これも mirakc と同じ */
+/** 番組のID。局の内部ID + event_id */
 export function programKey(networkId: number, serviceId: number, eventId: number): number {
     return serviceKey(networkId, serviceId) * 100000 + eventId;
 }

@@ -74,11 +74,6 @@ Traefik 側で LAN 内 (10.10.0.0/16) からだけ通し、denpa 側もその網
 
 ## ライブ視聴
 
-**放送中のものをそのまま観るのは、いまはできません。** mirakc をやめたときに、
-その口 (下記) ごと無くなりました。denpa 側に作る話は
-[stream.md](stream.md) にあります。
-
-以前は Kodi の PVR IPTV Simple Client に mirakc の口
-(`/api/iptv/playlist` と `/api/iptv/xmltv`) を入れれば、番組表付きの
-ライブTVになっていました。denpa を通らないので、予約もベーシック認証も
-効きませんでした。設計の話は [architecture.md](architecture.md#ライブ視聴)。
+**放送中のものをそのまま観るのは、いまはできません。** 配る口がまだありません。
+denpa 側に作る話は [stream.md](stream.md) に、なぜ無いのかは
+[architecture.md](architecture.md#ライブ視聴) にあります。

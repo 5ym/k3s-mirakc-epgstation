@@ -432,9 +432,8 @@ async function runScan(targets: [ScannableType, string[]][]): Promise<void> {
         /*
          * 局が入れ替わった。**取り込み直して、番組表を集め直す。**
          *
-         * mirakc の頃は、ここでエージェントが mirakc を入れ直し、あちらが
-         * 自分で局と番組表を取りに行くのを待っていた (1周に1時間以上)。
-         * いまは番組表を持っているのが denpa なので、待つ相手が居ない
+         * 番組表を持っているのは denpa なので、**待つ相手が居ない**。
+         * 見つかった局をその場で取り込んで、そのまま集めに行く
          */
         await sync().catch(() => undefined);
         emit('services');

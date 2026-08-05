@@ -101,7 +101,7 @@ export async function load({ url }) {
     const defaults = settings();
     /*
      * チューナーの本数。**スケジューラと同じところから取る。**
-     * 取れなければ空 (= 何も競合として出さない)。mirakc が落ちているときに
+     * 取れなければ空 (= 何も競合として出さない)。エージェントが落ちているときに
      * 予約表を赤くしても直しようが無いので、スケジューラもそう振る舞う
      */
     const capacity = await tunerCapacity().catch(() => new Map<string, number>());

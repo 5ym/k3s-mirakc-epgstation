@@ -160,7 +160,7 @@ public class ChannelStoreTests
 public class RenderTests
 {
     [Fact]
-    public void mirakcのテンプレートを埋める()
+    public void 選局コマンドのテンプレートを埋める()
     {
         Assert.Equal(
             "recisdb tune --device /dev/dvb/adapter0/frontend0 -c T27 -",

@@ -224,7 +224,7 @@ app.MapPut("/denpa/channels", async (HttpContext http) =>
     Log.Write($"チャンネルを保存しました: {found.Count} 件 ({string.Join(", ", types)})");
     /*
      * 局が入れ替わった。denpa は**これを合図に取り込み直す。**
-     * mirakc を入れ直していた頃と違って、こちらは何も再起動しない
+     * こちらは何も再起動しない (掴んでいる録画も切れない)
      */
     events.Emit("channels");
     await Respond.Write(http, merged);

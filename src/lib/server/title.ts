@@ -18,7 +18,7 @@ const EPISODE = /\s*(?:#|＃|第)\s*(\d{1,4})\s*(?:話|回)?/;
 // ファイル名に使えない文字。制御文字は別途コードポイントで弾く
 const FORBIDDEN = '/\\:*?"<>|';
 
-/** 全角英数・記号を半角に寄せる。mirakc が返す局名/番組名は全角混じりで検索しづらい */
+/** 全角英数・記号を半角に寄せる。放送波の局名/番組名は全角混じりで検索しづらい */
 export function toHalfWidth(input: string): string {
     return input
         .replace(/[Ａ-Ｚａ-ｚ０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))

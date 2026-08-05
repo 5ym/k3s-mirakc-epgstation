@@ -263,7 +263,7 @@ describe('チューナー', () => {
         stream.close();
     });
 
-    /** **mirakc から引き取りたかったところ。** 同じ物理チャンネルなら選局は1本で足りる */
+    /** 同じ物理チャンネルなら選局は1本で足りる */
     test('同じチャンネルなら相乗りする。チューナーは増えない', async () => {
         const a = await open('type=GR&channel=T21&use=rec%201&priority=10');
         const b = await open('type=GR&channel=T21&use=epg%20T21&priority=3');

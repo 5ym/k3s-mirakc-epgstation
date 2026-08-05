@@ -18,12 +18,12 @@ public sealed record TuneOptions(string? CardUrl, Func<string, int?> StreamIds)
 /// チューナーの取り合い。**エージェントの本体はここ。**
 ///
 /// <para>
-/// mirakc がやっていた「誰にどのチューナーを渡すか」を引き取ったもの。
+/// 「誰にどのチューナーを渡すか」はここだけで決まる。
 /// bun 版 (<c>agent/tuners.ts</c>) の移し替えで、決まりは1つも変えていない。
 /// </para>
 ///
 /// <list type="bullet">
-/// <item>**優先度に下限が無い。** mirakc は負値を 0 に丸め、−1 は自分の番組表集めに使っていた</item>
+/// <item>**優先度に下限が無い。** 負の値もそのまま並ぶ (丸めない)</item>
 /// <item>**番組表集めが特別扱いされない。** 録画もロゴも番組表も同じ「開きたい人」で、priority だけで並ぶ</item>
 /// <item>**同じ物理チャンネルなら1本で足りる。** 番組表・ロゴ・録画が同じ選局に相乗りする</item>
 /// </list>
@@ -435,7 +435,7 @@ public sealed class TunerPool(
         }
     }
 
-    /// <summary>チューナーコマンドの <c>{{channel}}</c> を埋める。mirakc の書き方をそのまま受ける</summary>
+    /// <summary>チューナーコマンドの <c>{{channel}}</c> を埋める</summary>
     public static string Render(string command, string channel, string type)
     {
         return System.Text.RegularExpressions.Regex.Replace(
