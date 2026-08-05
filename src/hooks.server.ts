@@ -29,11 +29,11 @@ export async function handle({ event, resolve }) {
     const { pathname, search } = event.url;
 
     /*
-     * **何も聞かずに通す相手。** 名前と住所の**両方**が合ったときだけ
-     * (`TRUSTED_NETWORKS`)。LAN のプレイヤーに資格情報を入れずに使わせるためで、
-     * ここに当たるとベーシック認証も OIDC も掛からない
+     * **何も聞かずに通す相手。** 住所が `TRUSTED_NETWORKS` に当たったときだけ。
+     * LAN のプレイヤーに資格情報を入れずに使わせるためで、ここに当たると
+     * ベーシック認証も OIDC も掛からない
      */
-    const open = trusted(event.url.hostname, clientAddress(event));
+    const open = trusted(clientAddress(event));
 
     if (!open && protects(pathname) && !authorized(event.request.headers.get('authorization'))) {
         return challenge();

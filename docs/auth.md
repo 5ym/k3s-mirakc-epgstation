@@ -96,7 +96,7 @@
 | `OIDC_CLIENT_ID` | アプリ登録のアプリケーションID |
 | `OIDC_CLIENT_SECRET` | クライアントシークレット |
 | `OIDC_GROUP` | **このグループに居る人だけ通す。** 空なら入れた人は全員 |
-| `TRUSTED_NETWORKS` | **何も聞かずに通す `名前@CIDR`** (例 `dp.l.doany.io@10.10.0.0/16`)。下記 |
+| `TRUSTED_NETWORKS` | **何も聞かずに通す網** (例 `10.10.0.0/16`)。下記 |
 | `OIDC_SESSION_TTL` | ログインの有効期間(ms)。既定30日 |
 
 **秘密を含むので環境変数だけから読み、設定画面には出しません。**
@@ -144,24 +144,22 @@ OIDC_GROUP=6f1b2c3d-4e5f-6789-abcd-ef0123456789
 | `ID トークンに groups がありません` | `groupMembershipClaims` がまだ無効 |
 | `グループが多すぎて ID トークンに載っていません` | Entra が `groups` の代わりに `_claim_names` を返した。グループを減らすか、`OIDC_GROUP` を空にして Entra 側のアプリ割り当てで決める |
 
-## 名前と網の組で、何も聞かない
+## 網の中なら、何も聞かない
 
 **`TRUSTED_NETWORKS` に当たると、ベーシック認証も OIDC も掛かりません。**
 LAN のプレイヤー (VLC / Kodi / Infuse) に資格情報を入れずに使わせるためのものです。
 
 ```sh
-TRUSTED_NETWORKS=dp.l.doany.io@10.10.0.0/16
+TRUSTED_NETWORKS=10.10.0.0/16
 # いくつでも並べられる
-TRUSTED_NETWORKS=dp.l.doany.io@10.10.0.0/16,vpn.doany.io@10.20.0.0/16
+TRUSTED_NETWORKS=10.10.0.0/16,10.20.0.0/16,192.168.1.5
 ```
 
-**名前と住所の両方が合ったときだけ**通します。**片方だけの書き方 (`@` の無いもの) は
-読み捨てます** — 網だけ書いて「通しているつもり」になるのがいちばん危ないためです。
-
-LAN の名前は LAN からしか引けず、Traefik 側も
-`Host(dp.l.doany.io) && ClientIP(10.10.0.0/16)` を条件にしています。それでも
-**denpa 側でも住所を見ます** — 経路の設定を1つ間違えただけで、家じゅうの録画が
-誰でも取れる状態になるところなので。
+**見るのは住所だけです。どの名前で来たかは問いません** — LAN から外向きの
+`dp.doany.io` を開いても、そのまま通ります。名前で分けるのは前段 (Traefik) の
+仕事で、LAN 用の名前 `dp.l.doany.io` には `ClientIP(10.10.0.0/16)` を条件に
+付けてあります (`k3s/ingress.yaml`)。同じ条件を二か所に書くと、片方だけ直して
+食い違うほうが危ないので、こちらでは持ちません。
 
 > **`ADDRESS_HEADER=x-forwarded-for` を一緒に渡すこと。** 渡さないと adapter-node は
 > 接続元として Traefik の Pod の住所を返すので、住所の側が誰にも当たりません

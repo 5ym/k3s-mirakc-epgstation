@@ -107,36 +107,25 @@ export function protects(pathname: string): boolean {
 }
 
 /**
- * **何も聞かずに通す相手か。** 名前と住所の**両方**が合ったときだけ。
- *
- * LAN の名前 (`dp.l.doany.io`) は LAN からしか引けず、Traefik 側も
- * `ClientIP(10.10.0.0/16)` を条件にしているので、外から名乗っても届きません。
- * それでも**こちらでも住所を見ます** — 経路の設定を1つ間違えただけで
- * 家じゅうの録画が誰でも取れる状態になるところなので、二重に見ておく。
+ * **何も聞かずに通す相手か。** 見るのは住所だけ (`TRUSTED_NETWORKS`、CIDR の
+ * カンマ区切り)。
  *
  * **ここに当たるとベーシック認証も OIDC も掛かりません。** プレイヤー
- * (VLC / Kodi / Infuse) に資格情報を入れずに使えるのが狙いで、
- * それが要らないのは「その名前で・その網から」来たときだけ。
+ * (VLC / Kodi / Infuse) に資格情報を入れずに使えるのが狙いです。
  *
- * 書き方は `名前@CIDR` のカンマ区切り (`TRUSTED_NETWORKS`)。
- * **どちらか片方だけでは通しません** — `@` が無い書き方は読み捨てます。
+ * **どの名前で来たかは問いません。** 名前で分けるのは前段 (Traefik) の仕事で、
+ * LAN 用の名前には `ClientIP` を条件に付けてあります。ここで名前も見ると
+ * 同じ条件を二か所に書くことになり、片方だけ直して食い違うほうが危ない。
  */
-export function trusted(hostname: string, address: string): boolean {
-    return entries().some(
-        ([host, network]) => host === hostname.toLowerCase() && inNetwork(address, network),
-    );
+export function trusted(address: string): boolean {
+    return entries().some((network) => inNetwork(address, network));
 }
 
-function entries(): [string, string][] {
-    const out: [string, string][] = [];
-    for (const raw of config.trustedNetworks.split(',')) {
-        const at = raw.indexOf('@');
-        if (at < 0) continue;
-        const host = raw.slice(0, at).trim().toLowerCase();
-        const network = raw.slice(at + 1).trim();
-        if (host !== '' && network !== '') out.push([host, network]);
-    }
-    return out;
+function entries(): string[] {
+    return config.trustedNetworks
+        .split(',')
+        .map((raw) => raw.trim())
+        .filter((raw) => raw !== '');
 }
 
 /**

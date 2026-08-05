@@ -198,8 +198,8 @@ export interface OidcStack {
     idpUrl: string;
     /** OIDC を有効にした denpa。普段の `stack.appUrl` とは別の口 */
     appUrl: string;
-    /** 何も聞かずに通す名前 (TRUSTED_NETWORKS に入れてある) */
-    trustedHost: string;
+    /** 何も聞かずに通す網 (TRUSTED_NETWORKS に入れてある) */
+    trustedNetwork: string;
     clientId: string;
     group: string;
 }
@@ -221,7 +221,7 @@ export async function bootOidc(
     const oidc: OidcStack = {
         idpUrl: `http://127.0.0.1:${idpPort}`,
         appUrl: `http://127.0.0.1:${appPort}`,
-        trustedHost: 'lan.denpa.test',
+        trustedNetwork: '10.10.0.0/16',
         clientId: 'denpa-e2e',
         group: 'admins',
     };
@@ -246,8 +246,8 @@ export async function bootOidc(
             PORT: String(appPort),
             /*
              * **ORIGIN は渡さない。** 渡すと adapter-node は Host ヘッダを見なくなり、
-             * どの名前で来ても同じ origin として扱う。ここで試したいのは
-             * 「名前で振る舞いが変わる」ところなので、本番と同じく
+             * どの名前で来ても同じ origin として扱う。Entra へ送る戻り先
+             * (`redirect_uri`) は**来たリクエストから組み立てる**ので、本番と同じく
              * リクエストごとのヘッダから決めさせる
              */
             PROTOCOL_HEADER: 'x-forwarded-proto',
@@ -269,8 +269,8 @@ export async function bootOidc(
             OIDC_CLIENT_ID: oidc.clientId,
             OIDC_CLIENT_SECRET: 'e2e-secret',
             OIDC_GROUP: oidc.group,
-            // **名前と住所の両方**が合ったときだけ素通し
-            TRUSTED_NETWORKS: `${oidc.trustedHost}@10.10.0.0/16`,
+            // この網から来たら何も聞かない
+            TRUSTED_NETWORKS: oidc.trustedNetwork,
             ADDRESS_HEADER: 'x-forwarded-for',
             BASIC_AUTH_USER: 'denpa',
             BASIC_AUTH_PASSWORD: 'ひみつ',

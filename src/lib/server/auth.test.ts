@@ -81,59 +81,42 @@ describe('パスワードを作る', () => {
  * **何も聞かずに通す相手。** LAN のプレイヤー (VLC / Kodi / Infuse) に資格情報を
  * 入れずに使わせるためのもの。ここに当たるとベーシック認証も OIDC も掛からない。
  *
- * **名前と住所の両方**が合ったときだけ通す。LAN の名前は LAN からしか引けず、
- * Traefik 側も ClientIP を条件にしているが、経路の設定を1つ間違えただけで
- * 家じゅうの録画が誰でも取れる状態になるところなので二重に見る。
+ * 見るのは住所だけ。どの名前で来たかは問わない (名前で分けるのは前段の仕事)。
  */
-describe('名前と網の組で素通しにする', () => {
+describe('網の中なら素通しにする', () => {
     const original = config.trustedNetworks;
     beforeEach(() => {
-        config.trustedNetworks = 'dp.l.doany.io@10.10.0.0/16';
+        config.trustedNetworks = '10.10.0.0/16';
     });
     afterEach(() => {
         config.trustedNetworks = original;
     });
 
-    test('両方合えば通す', () => {
-        expect(trusted('dp.l.doany.io', '10.10.5.9')).toBe(true);
-        // 大文字small文字は問わない (ブラウザがそのまま送ってくる)
-        expect(trusted('DP.L.DOANY.IO', '10.10.5.9')).toBe(true);
+    test('網の中なら通す', () => {
+        expect(trusted('10.10.5.9')).toBe(true);
     });
 
-    test('名前が違えば通さない', () => {
-        // 外向きの名前。同じ LAN から来ていても通さない
-        expect(trusted('dp.doany.io', '10.10.5.9')).toBe(false);
-    });
-
-    test('住所が違えば通さない', () => {
-        // 名前を名乗るだけでは抜けられない
-        expect(trusted('dp.l.doany.io', '203.0.113.9')).toBe(false);
+    test('網の外は通さない', () => {
+        expect(trusted('203.0.113.9')).toBe(false);
     });
 
     test('住所が読めなければ通さない', () => {
         // `clientAddress` は読めないとき空文字を返す。閉じる側に倒す
-        expect(trusted('dp.l.doany.io', '')).toBe(false);
+        expect(trusted('')).toBe(false);
     });
 
     test('何も書かなければ誰も通さない', () => {
         config.trustedNetworks = '';
-        expect(trusted('dp.l.doany.io', '10.10.5.9')).toBe(false);
-    });
-
-    test('片方だけの書き方は読み捨てる', () => {
-        // 網だけ・名前だけを書いて「通っているつもり」になるのがいちばん危ない
-        config.trustedNetworks = '10.10.0.0/16';
-        expect(trusted('dp.l.doany.io', '10.10.5.9')).toBe(false);
-        config.trustedNetworks = 'dp.l.doany.io';
-        expect(trusted('dp.l.doany.io', '10.10.5.9')).toBe(false);
+        expect(trusted('10.10.5.9')).toBe(false);
     });
 
     test('いくつでも並べられる', () => {
-        config.trustedNetworks = 'dp.l.doany.io@10.10.0.0/16, vpn.doany.io@10.20.0.0/16';
-        expect(trusted('vpn.doany.io', '10.20.1.1')).toBe(true);
-        expect(trusted('dp.l.doany.io', '10.10.1.1')).toBe(true);
-        // 組を跨いだ混ぜ合わせは通さない
-        expect(trusted('vpn.doany.io', '10.10.1.1')).toBe(false);
+        config.trustedNetworks = '10.10.0.0/16, 10.20.0.0/16, 192.168.1.5';
+        expect(trusted('10.10.1.1')).toBe(true);
+        expect(trusted('10.20.1.1')).toBe(true);
+        // CIDR でなく住所そのままでも書ける
+        expect(trusted('192.168.1.5')).toBe(true);
+        expect(trusted('192.168.1.6')).toBe(false);
     });
 });
 

@@ -2,7 +2,7 @@ import { bootOidc, type OidcStack } from '../stack';
 import { test as base, expect } from './helpers';
 
 /**
- * OIDC でのログインと、名前＋住所で素通しにする口。
+ * OIDC でのログインと、網で素通しにする口。
  *
  * **普段の一式とは別に立てます。** `stack` を OIDC にしてしまうと、他の全部の
  * テストがログインを通らないと何もできなくなるため (`bootOidc`)。
@@ -190,36 +190,34 @@ test.describe('グループで絞る', () => {
 });
 
 /**
- * **名前と住所の組で素通しにする。**
+ * **網の中なら素通しにする。**
  *
  * LAN のプレイヤー (VLC / Kodi / Infuse) に資格情報を入れずに使わせるためのもの。
  * ここに当たるとベーシック認証も OIDC も掛からない。
  */
-test.describe('名前と網で素通し', () => {
-    test('両方合えば、何も聞かずに通す', async ({ oidc }) => {
-        const get = client(oidc, { host: oidc.trustedHost, xff: INSIDE });
+test.describe('網で素通し', () => {
+    test('網の中なら、何も聞かずに通す', async ({ oidc }) => {
+        const get = client(oidc, { xff: INSIDE });
         expect((await get('/')).res.status).toBe(200);
         // ファイルの口も。ここが素通しになるのが狙い
         expect((await get('/dav/', { method: 'PROPFIND' })).res.status).toBe(207);
     });
 
-    test('名前が違えば通さない', async ({ oidc }) => {
-        // 同じ網から来ていても、外向きの名前なら守る
-        const get = client(oidc, { host: 'denpa.test', xff: INSIDE });
+    test('網の外は通さない', async ({ oidc }) => {
+        const get = client(oidc, { xff: OUTSIDE });
         expect((await get('/')).res.status).toBe(302);
         expect((await get('/dav/', { method: 'PROPFIND' })).res.status).toBe(401);
     });
 
-    test('住所が違えば通さない', async ({ oidc }) => {
-        // 名前を名乗るだけでは抜けられない
-        const get = client(oidc, { host: oidc.trustedHost, xff: OUTSIDE });
-        expect((await get('/')).res.status).toBe(302);
-        expect((await get('/dav/', { method: 'PROPFIND' })).res.status).toBe(401);
+    test('どの名前で来たかは問わない', async ({ oidc }) => {
+        // 名前で分けるのは前段 (Traefik) の仕事。ここでは住所だけ見る
+        const get = client(oidc, { host: 'lan.denpa.test', xff: INSIDE });
+        expect((await get('/')).res.status).toBe(200);
     });
 
     test('生死確認はどこからでも通る', async ({ oidc }) => {
         // ここを守ると Kubernetes の livenessProbe が落ち、Pod が再起動を繰り返す
-        const get = client(oidc, { host: 'denpa.test', xff: OUTSIDE });
+        const get = client(oidc, { xff: OUTSIDE });
         const { res } = await get('/api/health', { headers: { accept: 'application/json' } });
         expect(res.status).toBe(200);
     });

@@ -1,13 +1,31 @@
-# 外から。**認証は denpa 自身がやる** (docs/auth.md)。
+# 外からも LAN からも、ここ1つ。**認証は denpa 自身がやる** (docs/auth.md)。
 #
 # **forward-auth (oauth2-proxy) は外しました。** denpa が OIDC でログインさせ、
 # プレイヤーが来る口だけベーシック認証で守るようになったので、前段に置く理由が
 # 無くなっています。実機で入れることを確かめてから外しました。
 #
-# **ルールも1つで足ります。** 2つに割れていたのは、配信と WebDAV だけ
-# forward-auth を通さないためでした。VLC も Kodi も OIDC のリダイレクトを
-# 扱えないので、そこは今も denpa 側でベーシック認証にしています
-# (どの口をどう守るかは `src/lib/server/auth.ts`)。
+# **名前は2つあります。**
+#
+# | 名前 | 誰が | |
+# | --- | --- | --- |
+# | `dp.doany.io` | 外から | denpa がログインさせる |
+# | `dp.l.doany.io` | LAN から | 同じところへ着く。名前が違うだけ |
+#
+# **通すかどうかは住所で決まります。** denpa は `TRUSTED_NETWORKS`
+# (`10.10.0.0/16`) から来たら何も聞かず、それ以外にはログインを求めます。
+# **どちらの名前で来たかは見ていません** — LAN から `dp.doany.io` を開いても
+# そのまま通ります。
+#
+# **LAN の名前には `ClientIP` を付けます。** `*.l.doany.io` は LAN 内の DNS が
+# Traefik へ向けてあるだけ (bootstrap 側の AdGuard Home) で**外からは引けません**
+# が、公開IPへ `Host: dp.l.doany.io` と名乗って送ることはできます。名乗るだけで
+# 何かが緩むわけではありませんが、届く先を要る範囲に絞っておきます。
+# 括弧は要りませんが (`&&` のほうが強く結ぶ)、読み違えないように付けてあります。
+#
+# **どちらも https で出します。** 平文だと Chrome が `denpa://` の確認に
+# 「常にこの種類のリンクを開く」のチェックボックスを出さず (このチェックは
+# https のページからしか出ない)、録画を1本開くたびに確認を押すことになります。
+# 名前はどちらも公開ドメインなので DNS-01 で本物の証明書が取れます。
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -19,37 +37,7 @@ spec:
   tls:
     certResolver: mydnschallenge
   routes:
-    - match: Host(`dp.doany.io`)
-      kind: Rule
-      services:
-        - name: denpa
-          port: 3000
----
-# LAN から。OIDC は通さない。
-#
-# ブラウザで開く口でもあり、プレイヤー (VLC / Infuse / Kodi) が録画を取りに
-# 来る口でもある。プレイヤーは OIDC のリダイレクトを扱えないので、
-# ここは denpa 自身のベーシック認証に任せる。
-#
-# **https で出す。** 平文だと Chrome が `denpa://` の確認に
-# 「常にこの種類のリンクを開く」のチェックボックスを出さず (このチェックは
-# https のページからしか出ない)、録画を1本開くたびに確認を押すことになる。
-#
-# `*.l.doany.io` は LAN 内の DNS が Traefik のアドレスに向けてある
-# (bootstrap 側の AdGuard Home)。名前は公開ドメインなので DNS-01 で
-# 本物の証明書が取れるが、**外からは引けない**。
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
-  name: denpa-lan
-  namespace: denpa
-spec:
-  entryPoints:
-    - websecure
-  tls:
-    certResolver: mydnschallenge
-  routes:
-    - match: Host(`dp.l.doany.io`) && ClientIP(`10.10.0.0/16`)
+    - match: Host(`dp.doany.io`) || (Host(`dp.l.doany.io`) && ClientIP(`10.10.0.0/16`))
       kind: Rule
       services:
         - name: denpa

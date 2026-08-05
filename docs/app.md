@@ -147,7 +147,7 @@ k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書い�
 | `OIDC_ISSUER` | (空) | OIDC の発行元。ここを含む3つが揃うと OIDC が有効になる ([auth.md](auth.md)) |
 | `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | (空) | アプリ登録のIDと秘密 |
 | `OIDC_GROUP` | (空) | このグループに居る人だけ通す。空なら入れた人は全員 |
-| `TRUSTED_NETWORKS` | (空) | `名前@CIDR` のカンマ区切り。**両方合えば認証を掛けない** (`ADDRESS_HEADER` も要る) |
+| `TRUSTED_NETWORKS` | (空) | CIDR のカンマ区切り。**ここから来たら認証を掛けない** (`ADDRESS_HEADER` も要る) |
 | `OIDC_SESSION_TTL` | `2592000000` | ログインの有効期間(ms)。既定30日 |
 | `EPGSTATION_RECORDED_DIR` | `/epgstation-recorded` | 引き継ぎ元の録画置き場をマウントした場所 ([migrate.md](migrate.md)) |
 | `EPGSTATION_DB_HOST` / `_PORT` | `db` / `3306` | 引き継ぎ元の MariaDB |
