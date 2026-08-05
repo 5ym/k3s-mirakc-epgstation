@@ -3,41 +3,23 @@
     import { GENRE_TREE, genreName } from '$lib/arib';
     import Toasts, { type Notice } from '$lib/components/Toasts.svelte';
     import { badgeClass, CM_LABEL, dateTime, stateLabel } from '$lib/format';
+    import { jsonArray } from '$lib/json';
     import { parseSearchFields, SEARCH_FIELD_LABEL, SEARCH_FIELDS, searchFieldLabel } from '$lib/search';
 
     let { data, form } = $props();
 
     /** フォームの初期値として選んでおくチャンネルと種別 */
-    function parse(json: string | null): (string | number)[] {
-        if (json === null) return [];
-        try {
-            return JSON.parse(json) as (string | number)[];
-        } catch {
-            return [];
-        }
-    }
-    const seedTypes = $derived(parse(data.seed?.service_types ?? null).map(String));
-    const seedServices = $derived(parse(data.seed?.service_ids ?? null).map(Number));
-    const seedGenres = $derived(parse(data.seed?.genres ?? null).map(String));
+    const seedTypes = $derived(jsonArray(data.seed?.service_types).map(String));
+    const seedServices = $derived(jsonArray(data.seed?.service_ids).map(Number));
+    const seedGenres = $derived(jsonArray(data.seed?.genres).map(String));
     const seedFields = $derived(parseSearchFields(data.seed?.search_fields));
 
     const TYPE_LABEL: Record<string, string> = { GR: '地上波', BS: 'BS', CS: 'CS', SKY: 'SKY' };
 
-    /** JSON で持っている条件を読む。壊れていれば「条件なし」と同じ扱いにする */
-    function list<T>(json: string | null): T[] {
-        if (json === null || json === '') return [];
-        try {
-            const value = JSON.parse(json);
-            return Array.isArray(value) ? (value as T[]) : [];
-        } catch {
-            return [];
-        }
-    }
-
     function channels(rule: { service_types: string | null; service_ids: string | null }): string {
         const parts = [
-            ...list<string>(rule.service_types).map((t) => TYPE_LABEL[t] ?? t),
-            ...list<number>(rule.service_ids).map(
+            ...jsonArray<string>(rule.service_types).map((t) => TYPE_LABEL[t] ?? t),
+            ...jsonArray<number>(rule.service_ids).map(
                 (id) => data.services.find((s) => s.id === id)?.name ?? String(id),
             ),
         ];
@@ -46,7 +28,7 @@
 
     /** 絞り込んでいるジャンル。条件のうち一番見落としやすいので独立した列に出す */
     function genres(rule: { genres: string | null }): string {
-        const parts = list<string | number>(rule.genres).map(genreName);
+        const parts = jsonArray<string | number>(rule.genres).map(genreName);
         return parts.length === 0 ? '全ジャンル' : parts.join(', ');
     }
 

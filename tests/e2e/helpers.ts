@@ -159,3 +159,38 @@ export async function setRecording(
     const res = await request.post('/settings?/saveRecording', { form });
     await ok(res, '録画のしかたの保存');
 }
+
+/**
+ * 前のテストが残したルールを全部消す。
+ *
+ * **件数で判定するテストの前に要る。** 同じワーカーの前のファイルが作った
+ * ルールが残っていると、`toHaveCount(1)` の類が理由もなく落ちます。
+ * 消すと、そのルールが立てた予約も一緒に引っ込みます。
+ */
+export async function clearRules(page: Page): Promise<void> {
+    await goto(page, '/rules');
+    for (let i = 0; i < 20; i++) {
+        const buttons = page.getByTestId('rule-delete');
+        if ((await buttons.count()) === 0) break;
+        await buttons.first().click();
+        await page.waitForTimeout(100);
+    }
+    await expect(page.getByTestId('rule-row')).toHaveCount(0);
+}
+
+/**
+ * 残っている予約を全部取り消す。
+ *
+ * **消し切れたことを確かめてから返します。** 途中で諦めると、そのあとの
+ * 件数の検証が「何を数えているのか分からない」ものになります。
+ */
+export async function cancelAllReservations(page: Page): Promise<void> {
+    await goto(page, '/');
+    for (let i = 0; i < 80; i++) {
+        const buttons = page.getByTestId('cancel-button');
+        if ((await buttons.count()) === 0) break;
+        await buttons.first().click();
+        await page.waitForTimeout(80);
+    }
+    await expect(page.getByTestId('reservation-row')).toHaveCount(0);
+}

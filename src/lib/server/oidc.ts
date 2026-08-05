@@ -299,7 +299,10 @@ export function allowed(claims: Claims): { ok: true } | { ok: false; reason: str
     return { ok: true };
 }
 
-/** 画面に出す名前。無ければ空文字 (誰であるかは sub が持っている) */
+/**
+ * 控えに残す名前。無ければ空文字 (誰であるかは `sub` が持っている)。
+ * **画面には出しません** — 誰で入っているかでできることは変わらないので。
+ */
 export function displayName(claims: Claims): string {
     return claims.name ?? claims.preferred_username ?? claims.email ?? '';
 }

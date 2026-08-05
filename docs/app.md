@@ -54,7 +54,8 @@ EPGStation の置き換えとして作ったもので、エンコード設定は
 | `src/lib/server/dav.ts` | WebDAV (Kodi 向け) |
 | `src/lib/server/auth.ts` | どの口をどう守るか ([auth.md](auth.md)) |
 | `src/lib/server/oidc.ts` | OIDC (discovery・PKCE・ID トークンの検証)。ライブラリは使っていない |
-| `src/lib/server/session.ts` | ログインの控えと、素通しにする住所の判定 |
+| `src/lib/server/session.ts` | ログインの控え (DBに持つ。Cookie に入るのは32バイトだけ) |
+| `src/lib/server/manifest.ts` | ホーム画面に置いたときの見た目。**名前は来た名前ごとに変える** ([player.md](player.md#ホーム画面に置く)) |
 | `src/lib/server/events.ts` | 画面へ変化を知らせる (SSE。ポーリングの代わり) |
 | `src/lib/server/webhook.ts` | 録画の節目を外部へ通知する |
 | `src/lib/server/runtime.ts` | 常駐処理の起動 (hooks.server.ts から呼ばれる) |
@@ -117,9 +118,10 @@ DBは SQLite 1ファイル (`DENPA_DB`)。スキーマは `src/lib/server/schema
 **画面から変えたいものは設定画面** (`src/lib/server/settings.ts`)。映像コーデック・CMの扱い・
 CMの探し方・ロゴの当てにしかた・生TSを残すか・無料放送だけか・ベーシック認証がここです。
 
-k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書いていません。
-残りは既定値がそのままあの構成なので、同じ値を書き写すと片方だけ直したときに
-どちらが効いているのか分からなくなります。
+k3s の manifest に書いてあるのは、**既定値では決められないものだけ**です
+(前段の渡し方・OIDC・素通しにする網・PWA の名前・エンコードの本数)。置き場所や
+エージェントの居場所は既定値がそのままあの構成なので書いていません — 同じ値を
+書き写すと、片方だけ直したときにどちらが効いているのか分からなくなります。
 
 | 変数 | 既定値 | 説明 |
 | --- | --- | --- |
@@ -169,6 +171,7 @@ k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書い�
 | `/login` / `/login/callback` / `/logout` | OIDC でのログインとログアウト。設定していなければ 404 ([auth.md](auth.md)) |
 | `/api/services/<id>/logo-data` | **logoframe がいま覚えているロゴ** (白黒PNG)。番組表に出すロゴとは別物で、絵になっているかを確かめるためのもの |
 | `/dav` | WebDAV (PROPFIND / GET / HEAD)。Kodi 用。書き込みは受けない |
+| `/manifest.webmanifest` | PWA のマニフェスト。**来た名前で表示名が変わる**ので静的ファイルではない。ここだけ認証を掛けていない (ブラウザが資格情報を付けずに取りに来るため) |
 
 ## チューナーエージェント (`agent/`)
 

@@ -1,11 +1,10 @@
 import { statSync } from 'node:fs';
 import { fail } from '@sveltejs/kit';
-import { detectPlatform } from '$lib/play';
-import { enabled as authEnabled } from '$lib/server/auth';
 import { database, queryAll, queryOne } from '$lib/server/db';
 import { cancel as cancelEncode, enqueue, pump } from '$lib/server/encoder';
 import { emit } from '$lib/server/events';
 import { deleteRecordingFiles, reconcile } from '$lib/server/files';
+import { playContext } from '$lib/server/play';
 import { cancel, restore } from '$lib/server/reservations';
 import { RESERVATION_STATE } from '$lib/server/schema';
 import { settings } from '$lib/server/settings';
@@ -148,26 +147,8 @@ export function load({ url, request }) {
         recordings,
         showFinished,
         showDeleted,
-        /*
-         * 再生リンクの宛先。ブラウザで決めると、判定できるまでボタンが出ず
-         * 読み込み直後に一瞬消えて見える。UA だけで分かる分はここで決めておき、
-         * iPad (Macintosh を名乗る) だけブラウザ側で直す。
-         *
-         * origin をサーバで作れるのは PROTOCOL_HEADER を渡しているため
-         * (k3s/deployment.yaml)。素の adapter-node は https と決め打つ
-         */
-        platform: detectPlatform(request.headers.get('user-agent') ?? ''),
-        origin: url.origin,
-        /*
-         * プレイヤーに渡すURLに埋める資格情報。
-         * VLC も Infuse もベーシック認証のダイアログを出さないので、URL に入れるしかない。
-         *
-         * **この画面まで来られている時点で持っている人**なので、URL の中に
-         * 見えていても増える危険は無い (画面も守られている。docs/auth.md)
-         */
-        credentials: authEnabled()
-            ? { user: settings().basicAuthUser, password: settings().basicAuthPassword }
-            : undefined,
+        // 再生リンクの宛先と資格情報 (server/play.ts)。番組表の画面にも同じものを渡す
+        ...playContext(request, url),
     };
 }
 

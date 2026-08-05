@@ -3,7 +3,8 @@
     import ProgramDetail from '$lib/components/ProgramDetail.svelte';
     import Toasts, { type Notice } from '$lib/components/Toasts.svelte';
     import { liveUpdates } from '$lib/live-updates.svelte';
-    import { detectPlatform, type Platform, playLinks, withCredentials } from '$lib/play';
+    import { playLinks, withCredentials } from '$lib/play';
+    import { playTarget } from '$lib/play.svelte';
     import {
         badgeClass,
         date,
@@ -29,22 +30,10 @@
 
     const active = ['scheduled', 'conflict', 'recording'];
 
-    /**
-     * どのプレイヤーに渡すか。UA だけで分かる分はサーバが決めて渡してくる
-     * (ブラウザで判定してから出すと、読み込み直後に再生ボタンが一瞬消える)。
-     *
-     * iPad だけは UA で Macintosh を名乗るので、ここでタッチ点数を見て直す。
-     * origin も同じ理由でサーバの値から始める
-     */
-    let refined = $state<{ platform: Platform; origin: string } | null>(null);
-    $effect(() => {
-        refined = {
-            platform: detectPlatform(navigator.userAgent, navigator.maxTouchPoints),
-            origin: location.origin,
-        };
-    });
-    const platform = $derived(refined?.platform ?? data.platform);
-    const origin = $derived(refined?.origin ?? data.origin);
+    // どのプレイヤーに渡すか (play.svelte.ts)。番組表の画面と同じ決め方
+    const target = playTarget(() => data);
+    const platform = $derived(target.platform);
+    const origin = $derived(target.origin);
 
     /** プレイヤーに渡すので絶対URLにする */
     const fileUrl = (id: number) => `${origin}/api/recordings/${id}/file`;

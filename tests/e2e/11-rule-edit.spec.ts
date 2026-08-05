@@ -1,16 +1,10 @@
 import { BS11 } from '../fake/services';
-import { expect, goto, syncEpg, test } from './helpers';
+import { cancelAllReservations, clearRules, expect, goto, syncEpg, test } from './helpers';
 
 test.describe('ルールの編集', () => {
     test.beforeEach(async ({ page, request }) => {
         await syncEpg(request);
-        await goto(page, '/rules');
-        for (let i = 0; i < 20; i++) {
-            const buttons = page.getByTestId('rule-delete');
-            if ((await buttons.count()) === 0) break;
-            await buttons.first().click();
-            await page.waitForTimeout(100);
-        }
+        await clearRules(page);
     });
 
     test('作ったルールの条件を後から変えられる', async ({ page }) => {
@@ -46,13 +40,7 @@ test.describe('ルールの編集', () => {
 
         await page.getByTestId('rule-cancel-edit').click();
         await page.getByTestId('rule-delete').first().click();
-        await goto(page, '/');
-        for (let i = 0; i < 80; i++) {
-            const buttons = page.getByTestId('cancel-button');
-            if ((await buttons.count()) === 0) break;
-            await buttons.first().click();
-            await page.waitForTimeout(80);
-        }
+        await cancelAllReservations(page);
     });
 
     test('編集中に「何が録れるか見る」を押しても編集のまま', async ({ page }) => {
@@ -78,13 +66,7 @@ test.describe('ルールの編集', () => {
         await expect(page.getByTestId('rule-row')).toHaveCount(1);
         await page.getByTestId('rule-delete').first().click();
         await expect(page.getByTestId('rule-row')).toHaveCount(0);
-        await goto(page, '/');
-        for (let i = 0; i < 80; i++) {
-            const buttons = page.getByTestId('cancel-button');
-            if ((await buttons.count()) === 0) break;
-            await buttons.first().click();
-            await page.waitForTimeout(80);
-        }
+        await cancelAllReservations(page);
     });
 
     test('ルールが立てた予約を1件ずつ取り消せる', async ({ page }) => {
@@ -141,13 +123,7 @@ test.describe('ルールの編集', () => {
 test.describe('ルールの作り直し', () => {
     test.beforeEach(async ({ page, request }) => {
         await syncEpg(request);
-        await goto(page, '/rules');
-        for (let i = 0; i < 20; i++) {
-            const buttons = page.getByTestId('rule-delete');
-            if ((await buttons.count()) === 0) break;
-            await buttons.first().click();
-            await page.waitForTimeout(100);
-        }
+        await clearRules(page);
     });
 
     test('同じルールを消して作り直すと、また予約が立つ', async ({ page }) => {

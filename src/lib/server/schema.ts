@@ -303,7 +303,8 @@ CREATE INDEX IF NOT EXISTS encode_jobs_recording ON encode_jobs (recording_id, i
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,              -- 推測できない文字列 (32バイト)
     subject TEXT NOT NULL,            -- ID トークンの sub。誰であるかはこれだけが決める
-    -- 画面に出す名前。**これで通すかどうかは決めない** (改名で入れなくなるため)
+    -- 誰の控えか見て分かるように。**画面には出さないし、通すかどうかも決めない**
+    -- (名前で決めると改名で入れなくなる。決めるのは sub とグループ)
     name TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL,
     expires_at INTEGER NOT NULL

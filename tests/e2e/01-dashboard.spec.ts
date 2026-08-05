@@ -1,4 +1,4 @@
-import { expect, goto, syncEpg, test } from './helpers';
+import { cancelAllReservations, expect, goto, syncEpg, test } from './helpers';
 
 test.describe('ダッシュボードと画面遷移', () => {
     test('データ放送のチャンネルは取り込まない', async ({ page, request }) => {
@@ -194,12 +194,6 @@ test.describe('ダッシュボードと画面遷移', () => {
 
         await page.getByTestId('rule-row').first().getByTestId('rule-delete').click();
         await expect(page.getByTestId('rule-row')).toHaveCount(0);
-        await goto(page, '/');
-        for (let i = 0; i < 80; i++) {
-            const buttons = page.getByTestId('cancel-button');
-            if ((await buttons.count()) === 0) break;
-            await buttons.first().click();
-            await page.waitForTimeout(80);
-        }
+        await cancelAllReservations(page);
     });
 });

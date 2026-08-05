@@ -1,11 +1,9 @@
 import { fail } from '@sveltejs/kit';
-import { detectPlatform } from '$lib/play';
-import { enabled as authEnabled } from '$lib/server/auth';
 import { queryAll, queryOne } from '$lib/server/db';
 import { airing, CURRENT_SERVICES } from '$lib/server/epg';
+import { playContext } from '$lib/server/play';
 import { cancel, reserve } from '$lib/server/reservations';
 import { RESERVATION_STATE } from '$lib/server/schema';
-import { settings } from '$lib/server/settings';
 import type { ChannelType, Program, Service } from '$lib/types';
 
 const HOUR = 60 * 60 * 1000;
@@ -95,15 +93,8 @@ export async function load({ url, request }) {
         counts: queryOne<{ programs: number; services: number }>(
             'SELECT (SELECT COUNT(*) FROM programs) AS programs, (SELECT COUNT(*) FROM services) AS services',
         )!,
-        /*
-         * 録れた番組は詳細からそのまま再生できる。宛先の決め方は録画一覧と同じで、
-         * UA だけで分かる分はサーバで決めておく (ブラウザで判定すると一瞬ボタンが消える)
-         */
-        platform: detectPlatform(request.headers.get('user-agent') ?? ''),
-        origin: url.origin,
-        credentials: authEnabled()
-            ? { user: settings().basicAuthUser, password: settings().basicAuthPassword }
-            : undefined,
+        // 録れた番組は詳細からそのまま再生できる。宛先の決め方は録画一覧と同じ (server/play.ts)
+        ...playContext(request, url),
     };
 }
 

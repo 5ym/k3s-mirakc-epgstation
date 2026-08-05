@@ -1,5 +1,5 @@
 import { BS11 } from '../fake/services';
-import { expect, goto, syncEpg, test } from './helpers';
+import { cancelAllReservations, clearRules, expect, goto, syncEpg, test } from './helpers';
 
 test.describe('自動予約ルール', () => {
     test('条件が空のルールは作れない', async ({ page }) => {
@@ -42,13 +42,7 @@ test.describe('自動予約ルール', () => {
         await expect(page.getByTestId('rule-row')).toHaveCount(0);
 
         // 後続に影響しないよう、このルールが作った予約は片付ける
-        await goto(page, '/');
-        for (;;) {
-            const buttons = page.getByTestId('cancel-button');
-            if ((await buttons.count()) === 0) break;
-            await buttons.first().click();
-            await page.waitForTimeout(200);
-        }
+        await cancelAllReservations(page);
     });
 });
 
@@ -78,13 +72,7 @@ test.describe('キーワードを当てる範囲', () => {
 test.describe('ジャンル指定', () => {
     test.beforeEach(async ({ page, request }) => {
         await syncEpg(request);
-        await goto(page, '/rules');
-        for (let i = 0; i < 20; i++) {
-            const buttons = page.getByTestId('rule-delete');
-            if ((await buttons.count()) === 0) break;
-            await buttons.first().click();
-            await page.waitForTimeout(100);
-        }
+        await clearRules(page);
         await expect(page.getByTestId('rule-row')).toHaveCount(0);
     });
 

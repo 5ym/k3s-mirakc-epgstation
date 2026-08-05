@@ -3,7 +3,8 @@
     import { dragScroll, submitting } from '$lib/actions';
     import ProgramDetail from '$lib/components/ProgramDetail.svelte';
     import { genreTint, stateLabel, time } from '$lib/format';
-    import { detectPlatform, type Platform, playLinks, withCredentials } from '$lib/play';
+    import { playLinks, withCredentials } from '$lib/play';
+    import { playTarget } from '$lib/play.svelte';
 
     let { data, form } = $props();
 
@@ -157,16 +158,10 @@
         return () => cancelIdleCallback(handle);
     });
 
-    /** 番組表からそのまま再生できるようにする。宛先の決め方は録画一覧と同じ */
-    let refined = $state<{ platform: Platform; origin: string } | null>(null);
-    $effect(() => {
-        refined = {
-            platform: detectPlatform(navigator.userAgent, navigator.maxTouchPoints),
-            origin: location.origin,
-        };
-    });
-    const platform = $derived(refined?.platform ?? data.platform);
-    const origin = $derived(refined?.origin ?? data.origin);
+    // 番組表からそのまま再生できるようにする。宛先の決め方は録画一覧と同じ
+    const target = playTarget(() => data);
+    const platform = $derived(target.platform);
+    const origin = $derived(target.origin);
 
     /** 予約を取り消せるのはこれから録るものだけ。録り終わったものに出しても何も起きない */
     const CANCELABLE = ['scheduled', 'conflict', 'recording'];

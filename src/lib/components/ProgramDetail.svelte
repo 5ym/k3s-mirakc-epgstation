@@ -2,6 +2,7 @@
     import type { Snippet } from 'svelte';
     import { type Audio, audioLabel, type Genre, genreLabel, videoLabel } from '$lib/arib';
     import { dateTime, duration, linkify, time } from '$lib/format';
+    import { jsonArray } from '$lib/json';
     import type { ProgramDetail } from '$lib/types';
 
     /**
@@ -43,23 +44,12 @@
         }
     }
 
-    /** JSON で持っている列を読む。取り込みの時期によっては入っていないので空で返す */
-    function parse<T>(json: string | null): T[] {
-        if (json === null || json === '') return [];
-        try {
-            const value = JSON.parse(json);
-            return Array.isArray(value) ? (value as T[]) : [];
-        } catch {
-            return [];
-        }
-    }
-
     const genres = $derived(
-        parse<Genre>(program.genre_detail)
+        jsonArray<Genre>(program.genre_detail)
             .map(genreLabel)
             .filter((label) => label !== ''),
     );
-    const audios = $derived(parse<Audio>(program.audios).map(audioLabel));
+    const audios = $derived(jsonArray<Audio>(program.audios).map(audioLabel));
     const video = $derived(videoLabel(program.video_resolution, program.video_type));
 </script>
 

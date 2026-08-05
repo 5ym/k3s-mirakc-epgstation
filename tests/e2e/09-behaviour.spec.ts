@@ -1,4 +1,14 @@
-import { cellOf, expect, goto, reserveSoon, syncEpg, test, upcoming } from './helpers';
+import {
+    cancelAllReservations,
+    cellOf,
+    clearRules,
+    expect,
+    goto,
+    reserveSoon,
+    syncEpg,
+    test,
+    upcoming,
+} from './helpers';
 
 /**
  * 画面の反応の確かめ。
@@ -9,22 +19,8 @@ test.describe('操作したときの反応', () => {
     test.beforeEach(async ({ page, request }) => {
         await syncEpg(request);
         // 前のテストが残した予約やルールを片付ける。件数で判定するため
-        await goto(page, '/rules');
-        for (let i = 0; i < 20; i++) {
-            const buttons = page.getByTestId('rule-delete');
-            if ((await buttons.count()) === 0) break;
-            await buttons.first().click();
-            await page.waitForTimeout(100);
-        }
-        await goto(page, '/');
-        for (let i = 0; i < 80; i++) {
-            const buttons = page.getByTestId('cancel-button');
-            if ((await buttons.count()) === 0) break;
-            await buttons.first().click();
-            await page.waitForTimeout(80);
-        }
-        // 片付け切れていないと件数の検証が意味を失うので、ここで落とす
-        await expect(page.getByTestId('reservation-row')).toHaveCount(0);
+        await clearRules(page);
+        await cancelAllReservations(page);
     });
 
     test('番組表で予約すると詳細が閉じ、予約済みになる', async ({ page }) => {
