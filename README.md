@@ -19,49 +19,52 @@
 
 イメージは公開してあるので、**リポジトリを持ってくる必要はありません。**
 
-## docker compose で動かす
+## 立てる
 
 ```sh
 mkdir denpa && cd denpa
-curl -LO https://raw.githubusercontent.com/danything/denpa/main/compose.prod.yml
-docker compose -f compose.prod.yml up -d
+curl -Lo compose.yml https://raw.githubusercontent.com/danything/denpa/main/compose.prod.yml
+docker compose up -d
+
+# 入るためのパスワード。初回の起動で作られ、ここに1度だけ出ます
+# (まだ出ていなければ、起動を待ってもう一度)
+docker compose logs denpa | grep ベーシック認証
 ```
 
-手元に合わせるのは `compose.prod.yml` の `devices:` だけです。**チューナーは
-書かなくても動きます** — 定義が無ければエージェントが `/dev/dvb/*` を開いて、
-地上波か衛星かまで自分で判別します。LNB や「1本だけ止める」を決めたいときは
-画面の「チューナー」から書き換えます (`./config/tuners.json`)。
+1. **開く** — <http://localhost:3000>。ユーザー名は `denpa`、パスワードは上のログ
+2. **スキャンする** — 画面の「チューナー」から。チャンネルは空で出荷しているので、
+   これをやるまで番組表も空です。地上波の総当たりで**十数分**
+3. **待つ** — 終われば自分で番組表を集めに行きます。空いているチューナーの数だけ
+   並べて回るので**数分**
+4. **予約する** — 番組表から選ぶか、「ルール」にキーワードを登録して自動で
 
-チャンネルも書きません。**スキャンで見つかったものは別のファイル**
-(`channels.json`) に書き出されるので、機材の定義が巻き添えで消えることはありません。
+**うまくいかないときも「チューナー」を見てください。** エージェントとカードリーダーの
+状態、スキャンの1チャンネルごとの結果、番組表がどこまで集まったかが出ます。
+**カードリーダーが NG のまま録ると、成功したように見えて中身が全部スクランブル
+されたまま**になります。
+
+### 書き換えるところ
+
+**`devices:` だけです。** チューナーの定義は要りません — 書かなければエージェントが
+`/dev/dvb/*` を開いて、地上波か衛星かまで自分で判別します。LNB や「1本だけ止める」を
+決めたいときは画面の「チューナー」から (`./config/tuners.json` に書かれます)。
+スキャンで見つかったチャンネルは**別のファイル** (`channels.json`) なので、
+機材の定義が巻き添えで消えることはありません。
 
 **指しているのは `latest` で、これはリリースを作ったときだけ動きます。** main へ
 入ったぶんは `develop` に積み上がるので、作業中のものが勝手に降ってくることは
 ありません ([docs/architecture.md](docs/architecture.md#像のタグ))。
 
-## Kubernetes で動かす
+### Kubernetes なら
 
 ```sh
 curl -L https://github.com/danything/denpa/archive/refs/heads/main.tar.gz | tar xz --strip=1 denpa-main/k3s
 kubectl apply -f k3s/
 ```
 
-`k3s/` は自分のクラスタ向けの例です。そのまま使えるものではないので、
-**namespace・StorageClass・Ingress のホスト名**を書き換えてから適用してください。
+`k3s/` は自分のクラスタ向けの例です。そのままでは使えないので、
+**namespace・StorageClass・Ingress のホスト名**を書き換えてから当ててください。
 必要なものは [docs/architecture.md](docs/architecture.md#クラスタ側の前提条件)。
-
-## 最初にすること
-
-1. **チャンネルスキャン** — 画面の「チューナー」から実行します。チャンネル設定は
-   空で出荷しているので、これをやるまで番組表は空です。地上波の総当たりで
-   十数分かかります
-2. **番組表を集める** — スキャンが終わると自動で集めに行きます。空いている
-   チューナーの数だけ並べて回るので、待つのは数分です
-3. **番組を予約** — 番組表から選ぶか、「ルール」でキーワードを登録して自動予約に
-
-うまくいかないときは画面の「チューナー」を見てください。エージェントとカードリーダーの
-状態、スキャンの1チャンネルごとの結果、番組表がどこまで集まったかが出ます。**カードリーダーが NG のまま録ると、
-成功したように見えて中身が全部スクランブルされたまま**になります。
 
 ## 再生
 
@@ -105,21 +108,19 @@ Kodi や VLC にも同じものを入れます。
 
 ### パスワードが分からなくなったら
 
-**遠くのサーバに入れて、ログを流してしまったとき**です。画面を開くにもその
-パスワードが要るので、DBから直に読みます (像に `bun` が入っているのでそれで足ります)。
+**遠くのサーバに入れて、起動のログを流してしまったとき**です。画面を開くにも
+そのパスワードが要るので、DBから直に読みます (像に `bun` が入っています)。
 
 ```sh
-# docker compose
-docker compose -f compose.prod.yml exec denpa \
+docker compose exec denpa \
   bun -e 'import {Database} from "bun:sqlite"; const db = new Database(process.env.DENPA_DB ?? "/app/data/denpa.db", {readonly: true}); console.log(db.query("SELECT value FROM settings WHERE key = ?").get("basicAuthPassword")?.value)'
+```
 
-# Kubernetes
+```sh
 kubectl -n denpa exec deploy/denpa -- \
   bun -e 'import {Database} from "bun:sqlite"; const db = new Database(process.env.DENPA_DB ?? "/app/data/denpa.db", {readonly: true}); console.log(db.query("SELECT value FROM settings WHERE key = ?").get("basicAuthPassword")?.value)'
 ```
 
-立てた直後なら、起動のログにも残っています
-(`docker compose logs denpa | grep ベーシック認証` / `kubectl -n denpa logs deploy/denpa | grep ベーシック認証`)。
 **作り直すのは最後の手段です** — 登録済みのプレイヤーが全部つながらなくなります。
 
 ### LAN からは何も聞かせない

@@ -1,6 +1,7 @@
-# 実運用向け。開発用は compose.yml のほう。
+# 実運用向け。このリポジトリの中では開発用の compose.yml と並ぶので別名だが、
+# **入れて使う人は `compose.yml` として置く** (README)。`-f` を書かずに済む。
 #
-#   docker compose -f compose.prod.yml up -d
+#   curl -Lo compose.yml .../compose.prod.yml && docker compose up -d
 #
 # イメージは公開してあるので、リポジトリを持ってこなくてもこのファイルだけで動きます。
 # 自分で焼くなら image: を消して build: を書いてください。
