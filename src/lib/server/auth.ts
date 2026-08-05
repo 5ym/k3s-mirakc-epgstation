@@ -1,3 +1,4 @@
+import { config } from './config';
 import { enabled as oidcEnabled } from './oidc';
 import { saveSettings, settings } from './settings';
 
@@ -103,6 +104,72 @@ export function protects(pathname: string): boolean {
     if (isOpenPath(pathname)) return false;
     if (isFilePath(pathname)) return true;
     return !oidcEnabled();
+}
+
+/**
+ * **何も聞かずに通す相手か。** 名前と住所の**両方**が合ったときだけ。
+ *
+ * LAN の名前 (`dp.l.doany.io`) は LAN からしか引けず、Traefik 側も
+ * `ClientIP(10.10.0.0/16)` を条件にしているので、外から名乗っても届きません。
+ * それでも**こちらでも住所を見ます** — 経路の設定を1つ間違えただけで
+ * 家じゅうの録画が誰でも取れる状態になるところなので、二重に見ておく。
+ *
+ * **ここに当たるとベーシック認証も OIDC も掛かりません。** プレイヤー
+ * (VLC / Kodi / Infuse) に資格情報を入れずに使えるのが狙いで、
+ * それが要らないのは「その名前で・その網から」来たときだけ。
+ *
+ * 書き方は `名前@CIDR` のカンマ区切り (`TRUSTED_NETWORKS`)。
+ * **どちらか片方だけでは通しません** — `@` が無い書き方は読み捨てます。
+ */
+export function trusted(hostname: string, address: string): boolean {
+    return entries().some(
+        ([host, network]) => host === hostname.toLowerCase() && inNetwork(address, network),
+    );
+}
+
+function entries(): [string, string][] {
+    const out: [string, string][] = [];
+    for (const raw of config.trustedNetworks.split(',')) {
+        const at = raw.indexOf('@');
+        if (at < 0) continue;
+        const host = raw.slice(0, at).trim().toLowerCase();
+        const network = raw.slice(at + 1).trim();
+        if (host !== '' && network !== '') out.push([host, network]);
+    }
+    return out;
+}
+
+/**
+ * 住所がその網の中か。IPv4 の CIDR (`10.10.0.0/16`) か、そのままの住所。
+ * **IPv6 は書いたとおりに一致したときだけ**通す (前置き長での判定は入れていない)。
+ */
+export function inNetwork(address: string, entry: string): boolean {
+    // ::ffff:10.0.0.1 のような書き方で届くことがある
+    const target = address.replace(/^::ffff:/i, '');
+    const [network, bits] = entry.split('/');
+    const left = toIpv4(target);
+    const right = toIpv4(network.replace(/^::ffff:/i, ''));
+    if (left === null || right === null) return target === network;
+
+    const length = bits === undefined ? 32 : Number(bits);
+    if (!Number.isInteger(length) || length < 0 || length > 32) return false;
+    if (length === 0) return true;
+    // >>> で符号なしに戻す。32bit シフトは 0 シフトになるので上で外してある
+    const mask = (0xffffffff << (32 - length)) >>> 0;
+    return (left & mask) >>> 0 === (right & mask) >>> 0;
+}
+
+function toIpv4(value: string): number | null {
+    const parts = value.split('.');
+    if (parts.length !== 4) return null;
+    let out = 0;
+    for (const part of parts) {
+        if (!/^\d{1,3}$/.test(part)) return null;
+        const byte = Number(part);
+        if (byte > 255) return null;
+        out = ((out << 8) | byte) >>> 0;
+    }
+    return out;
 }
 
 /** OIDC でログインを求める口か */

@@ -154,12 +154,19 @@ spec:
             - name: OIDC_GROUP
               valueFrom:
                 secretKeyRef: { name: denpa-oidc, key: group }
-            # **LAN からは今までどおり素通し。** ingress の
-            # `ClientIP(10.10.0.0/16)` と同じ範囲。
+            # **LAN の名前で・LAN の網から来たときだけ、何も聞かずに通す。**
+            # ベーシック認証も OIDC も掛からないので、プレイヤー (VLC / Kodi /
+            # Infuse) に資格情報を入れずに使える。
+            #
+            # **名前と住所の両方**を見る。ingress 側も
+            # `Host(dp.l.doany.io) && ClientIP(10.10.0.0/16)` を条件にしているが、
+            # 経路の設定を1つ間違えただけで家じゅうの録画が誰でも取れる状態に
+            # なるところなので、こちらでも住所を見る。
+            #
             # `ADDRESS_HEADER` が無いと adapter-node は Traefik の Pod の住所を
-            # 返すので、ここが誰にも当たらない (=全員ログインを求められる)
-            - name: OIDC_BYPASS_CIDR
-              value: 10.10.0.0/16
+            # 返すので、住所の側が誰にも当たらない (=全員ログインを求められる)
+            - name: TRUSTED_NETWORKS
+              value: dp.l.doany.io@10.10.0.0/16
             - name: ADDRESS_HEADER
               value: x-forwarded-for
           ports:

@@ -1,8 +1,8 @@
 import { redirect } from '@sveltejs/kit';
-import { authorized, challenge, needsLogin, protects } from '$lib/server/auth';
+import { authorized, challenge, needsLogin, protects, trusted } from '$lib/server/auth';
 import { handleDav } from '$lib/server/dav';
 import { start } from '$lib/server/runtime';
-import { bypassed, COOKIE, find } from '$lib/server/session';
+import { COOKIE, find } from '$lib/server/session';
 
 // SvelteKit のサーバ起動時に一度だけ走る。EPG取得・スケジューラ・エンコーダを立ち上げる
 start();
@@ -28,7 +28,14 @@ function clientAddress(event: Parameters<typeof handle>[0]['event']): string {
 export async function handle({ event, resolve }) {
     const { pathname, search } = event.url;
 
-    if (protects(pathname) && !authorized(event.request.headers.get('authorization'))) {
+    /*
+     * **何も聞かずに通す相手。** 名前と住所の**両方**が合ったときだけ
+     * (`TRUSTED_NETWORKS`)。LAN のプレイヤーに資格情報を入れずに使わせるためで、
+     * ここに当たるとベーシック認証も OIDC も掛からない
+     */
+    const open = trusted(event.url.hostname, clientAddress(event));
+
+    if (!open && protects(pathname) && !authorized(event.request.headers.get('authorization'))) {
         return challenge();
     }
 
@@ -38,16 +45,12 @@ export async function handle({ event, resolve }) {
      * ここで見るのは Cookie の控えだけ。Entra とのやり取りは `/login` と
      * `/login/callback` に閉じてあり、普段のリクエストで外へ出ることはない。
      */
-    if (needsLogin(pathname)) {
+    if (!open && needsLogin(pathname)) {
         const session = find(event.cookies.get(COOKIE));
         if (session !== null) {
             event.locals.user = { subject: session.subject, name: session.name };
-        } else if (!bypassed(clientAddress(event))) {
+        } else {
             /*
-             * **LAN からは今までどおり素通し** (`bypassed`)。住所は adapter-node が
-             * `ADDRESS_HEADER` を見て決めるので、渡していないと Traefik の Pod の
-             * 住所が来て、ここが誰にも当たらない (=全員ログインを求められる)。
-             *
              * **画面の読み込み以外はリダイレクトしない。** fetch やフォーム送信を
              * 302 でログイン画面へ送ると、返ってきた HTML を JSON として読もうとして
              * 意味の分からない失敗になる。401 なら画面側は「切れた」と分かる

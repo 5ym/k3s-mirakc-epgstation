@@ -193,6 +193,99 @@ async function boot(index: number): Promise<{ stack: Stack; shutdown: () => Prom
     return { stack, shutdown };
 }
 
+export interface OidcStack {
+    /** 偽 Entra。`/__control/groups` で誰を通すか差し替えられる */
+    idpUrl: string;
+    /** OIDC を有効にした denpa。普段の `stack.appUrl` とは別の口 */
+    appUrl: string;
+    /** 何も聞かずに通す名前 (TRUSTED_NETWORKS に入れてある) */
+    trustedHost: string;
+    clientId: string;
+    group: string;
+}
+
+/**
+ * **OIDC を有効にした一式を、要るテストのときだけ立てる。**
+ *
+ * 普段の `stack` を OIDC にしてしまうと、全部のテストがログインを通らないと
+ * 何もできなくなる。別の口に立てて、そこだけで試す。
+ *
+ * 港はワーカーの帯 (STRIDE=10) の中から取るので、並べて流しても衝突しない。
+ */
+export async function bootOidc(
+    index: number,
+    root: string,
+): Promise<{ oidc: OidcStack; shutdown: () => Promise<void> }> {
+    const appPort = APP_PORT + index * STRIDE + 5;
+    const idpPort = WEBHOOK_PORT + index * STRIDE + 5;
+    const oidc: OidcStack = {
+        idpUrl: `http://127.0.0.1:${idpPort}`,
+        appUrl: `http://127.0.0.1:${appPort}`,
+        trustedHost: 'lan.denpa.test',
+        clientId: 'denpa-e2e',
+        group: 'admins',
+    };
+
+    const started: Started[] = [];
+    const shutdown = async () => {
+        await Promise.all(started.map(stop));
+    };
+
+    try {
+        const idp = start(['bun', 'tests/fake/idp.ts'], {
+            FAKE_IDP_PORT: String(idpPort),
+            FAKE_IDP_ISSUER: oidc.idpUrl,
+            FAKE_IDP_GROUPS: oidc.group,
+        });
+        started.push(idp);
+        await waitFor(`${oidc.idpUrl}/.well-known/openid-configuration`, idp, '偽 IdP');
+
+        const app = start(['bun', './build/index.js'], {
+            TZ: 'Asia/Tokyo',
+            HOST: '127.0.0.1',
+            PORT: String(appPort),
+            /*
+             * **ORIGIN は渡さない。** 渡すと adapter-node は Host ヘッダを見なくなり、
+             * どの名前で来ても同じ origin として扱う。ここで試したいのは
+             * 「名前で振る舞いが変わる」ところなので、本番と同じく
+             * リクエストごとのヘッダから決めさせる
+             */
+            PROTOCOL_HEADER: 'x-forwarded-proto',
+            /*
+             * **名前は `x-forwarded-host` から読ませる。** 本番は既定の `host` だが、
+             * Node の fetch は `Host` を禁止ヘッダとして**黙って落とす**ので、
+             * テストからは名前を差し替えられない (Bun の fetch は通す)。
+             * denpa 側が見るのは `event.url.hostname` で、どちらのヘッダから
+             * 組み立てられたかは同じなので、試している道は変わらない
+             */
+            HOST_HEADER: 'x-forwarded-host',
+            DENPA_DB: `${root}/oidc.db`,
+            RECORDED_DIR: `${root}/oidc-recorded`,
+            LIBRARY_DIR: `${root}/oidc-library`,
+            // 常駐処理は要らない。ログインの道だけ見る
+            DENPA_AUTOSTART: '0',
+            SHUTDOWN_WAIT: '0',
+            OIDC_ISSUER: oidc.idpUrl,
+            OIDC_CLIENT_ID: oidc.clientId,
+            OIDC_CLIENT_SECRET: 'e2e-secret',
+            OIDC_GROUP: oidc.group,
+            // **名前と住所の両方**が合ったときだけ素通し
+            TRUSTED_NETWORKS: `${oidc.trustedHost}@10.10.0.0/16`,
+            ADDRESS_HEADER: 'x-forwarded-for',
+            BASIC_AUTH_USER: 'denpa',
+            BASIC_AUTH_PASSWORD: 'ひみつ',
+        });
+        started.push(app);
+        // 生死確認は守られていないので、ログインを通さずに待てる
+        await waitFor(`${oidc.appUrl}/api/health`, app, 'denpa (OIDC)');
+    } catch (error) {
+        await shutdown();
+        throw error;
+    }
+
+    return { oidc, shutdown };
+}
+
 /**
  * `stack` はワーカーに1つ。`auto` にしてあるので、明示的に受け取らないテストでも
  * 立ち上がった状態で始まる (`baseURL` がこれに乗っているため)。

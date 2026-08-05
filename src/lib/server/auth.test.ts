@@ -1,5 +1,6 @@
-import { describe, expect, test } from 'bun:test';
-import { generatePassword, isFilePath, isOpenPath } from './auth';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { generatePassword, inNetwork, isFilePath, isOpenPath, trusted } from './auth';
+import { config } from './config';
 
 /**
  * どの口をどう守るか。
@@ -73,5 +74,111 @@ describe('パスワードを作る', () => {
     test('毎回違う', () => {
         const made = new Set(Array.from({ length: 100 }, () => generatePassword()));
         expect(made.size).toBe(100);
+    });
+});
+
+/**
+ * **何も聞かずに通す相手。** LAN のプレイヤー (VLC / Kodi / Infuse) に資格情報を
+ * 入れずに使わせるためのもの。ここに当たるとベーシック認証も OIDC も掛からない。
+ *
+ * **名前と住所の両方**が合ったときだけ通す。LAN の名前は LAN からしか引けず、
+ * Traefik 側も ClientIP を条件にしているが、経路の設定を1つ間違えただけで
+ * 家じゅうの録画が誰でも取れる状態になるところなので二重に見る。
+ */
+describe('名前と網の組で素通しにする', () => {
+    const original = config.trustedNetworks;
+    beforeEach(() => {
+        config.trustedNetworks = 'dp.l.doany.io@10.10.0.0/16';
+    });
+    afterEach(() => {
+        config.trustedNetworks = original;
+    });
+
+    test('両方合えば通す', () => {
+        expect(trusted('dp.l.doany.io', '10.10.5.9')).toBe(true);
+        // 大文字small文字は問わない (ブラウザがそのまま送ってくる)
+        expect(trusted('DP.L.DOANY.IO', '10.10.5.9')).toBe(true);
+    });
+
+    test('名前が違えば通さない', () => {
+        // 外向きの名前。同じ LAN から来ていても通さない
+        expect(trusted('dp.doany.io', '10.10.5.9')).toBe(false);
+    });
+
+    test('住所が違えば通さない', () => {
+        // 名前を名乗るだけでは抜けられない
+        expect(trusted('dp.l.doany.io', '203.0.113.9')).toBe(false);
+    });
+
+    test('住所が読めなければ通さない', () => {
+        // `clientAddress` は読めないとき空文字を返す。閉じる側に倒す
+        expect(trusted('dp.l.doany.io', '')).toBe(false);
+    });
+
+    test('何も書かなければ誰も通さない', () => {
+        config.trustedNetworks = '';
+        expect(trusted('dp.l.doany.io', '10.10.5.9')).toBe(false);
+    });
+
+    test('片方だけの書き方は読み捨てる', () => {
+        // 網だけ・名前だけを書いて「通っているつもり」になるのがいちばん危ない
+        config.trustedNetworks = '10.10.0.0/16';
+        expect(trusted('dp.l.doany.io', '10.10.5.9')).toBe(false);
+        config.trustedNetworks = 'dp.l.doany.io';
+        expect(trusted('dp.l.doany.io', '10.10.5.9')).toBe(false);
+    });
+
+    test('いくつでも並べられる', () => {
+        config.trustedNetworks = 'dp.l.doany.io@10.10.0.0/16, vpn.doany.io@10.20.0.0/16';
+        expect(trusted('vpn.doany.io', '10.20.1.1')).toBe(true);
+        expect(trusted('dp.l.doany.io', '10.10.1.1')).toBe(true);
+        // 組を跨いだ混ぜ合わせは通さない
+        expect(trusted('vpn.doany.io', '10.10.1.1')).toBe(false);
+    });
+});
+
+describe('住所が網の中か', () => {
+    test('CIDR の中と外', () => {
+        expect(inNetwork('10.10.0.1', '10.10.0.0/16')).toBe(true);
+        expect(inNetwork('10.10.255.254', '10.10.0.0/16')).toBe(true);
+        // 隣の /16。1ビット違いを通してしまわないこと
+        expect(inNetwork('10.11.0.1', '10.10.0.0/16')).toBe(false);
+        expect(inNetwork('10.9.255.255', '10.10.0.0/16')).toBe(false);
+    });
+
+    test('境界の長さ', () => {
+        expect(inNetwork('192.168.1.5', '192.168.1.5/32')).toBe(true);
+        expect(inNetwork('192.168.1.6', '192.168.1.5/32')).toBe(false);
+        // /0 は全部。書いた人がそう書いたなら通す
+        expect(inNetwork('8.8.8.8', '0.0.0.0/0')).toBe(true);
+    });
+
+    test('長さを書かなければ1台だけ', () => {
+        expect(inNetwork('10.0.0.1', '10.0.0.1')).toBe(true);
+        expect(inNetwork('10.0.0.2', '10.0.0.1')).toBe(false);
+    });
+
+    /*
+     * IPv4 の住所が IPv6 の形で届くことがある。素で比べると
+     * `::ffff:10.10.0.1` が `10.10.0.0/16` に当たらず、LAN から入れなくなる
+     */
+    test('IPv6 に包まれた IPv4 も解く', () => {
+        expect(inNetwork('::ffff:10.10.0.1', '10.10.0.0/16')).toBe(true);
+        expect(inNetwork('::FFFF:10.11.0.1', '10.10.0.0/16')).toBe(false);
+    });
+
+    test('IPv6 は書いたとおりに一致したときだけ', () => {
+        expect(inNetwork('fd00::1', 'fd00::1')).toBe(true);
+        expect(inNetwork('fd00::2', 'fd00::1')).toBe(false);
+        expect(inNetwork('fd00::1', 'fd00::/8')).toBe(false);
+    });
+
+    test('壊れた指定では通さない', () => {
+        expect(inNetwork('10.0.0.1', '10.0.0.0/33')).toBe(false);
+        expect(inNetwork('10.0.0.1', '10.0.0.0/-1')).toBe(false);
+        expect(inNetwork('10.0.0.1', '10.0.0.0/abc')).toBe(false);
+        expect(inNetwork('10.0.0.1', '')).toBe(false);
+        // 桁が溢れているもの。数として読めても住所ではない
+        expect(inNetwork('10.0.0.1', '10.0.0.256/24')).toBe(false);
     });
 });

@@ -290,15 +290,21 @@ export const config = {
      */
     oidcGroup: str('OIDC_GROUP', ''),
     /**
-     * **ここから来た人はログインを求めない。** カンマ区切りの IPv4 CIDR
-     * (`10.10.0.0/16`) か、そのままの住所。LAN からは今までどおり素通しにするため。
+     * **何も聞かずに通す「名前と網」の組。** 書き方は `名前@CIDR` のカンマ区切り
+     * (`dp.l.doany.io@10.10.0.0/16`)。
+     *
+     * ここに当たると**ベーシック認証も OIDC も掛かりません**。LAN のプレイヤー
+     * (VLC / Kodi / Infuse) に資格情報を入れずに使えるのが狙い。
+     *
+     * **両方が合ったときだけ通します。** LAN の名前は LAN からしか引けず、
+     * Traefik 側も `ClientIP` を条件にしていますが、経路の設定を1つ間違えただけで
+     * 家じゅうの録画が誰でも取れる状態になるところなので、こちらでも住所を見る。
      *
      * **`ADDRESS_HEADER=x-forwarded-for` を一緒に渡すこと。** 渡さないと
-     * adapter-node は接続元として Traefik の Pod の住所を返すので、
-     * ここが誰にも当たらない (=全員ログインを求められる)。
-     * 逆に、denpa へ直に届く経路があると住所を詐称できる
+     * adapter-node は接続元として Traefik の Pod の住所を返すので、住所の側が
+     * 誰にも当たらない。逆に、denpa へ直に届く経路があると住所を詐称できる
      */
-    oidcBypassCidr: str('OIDC_BYPASS_CIDR', ''),
+    trustedNetworks: str('TRUSTED_NETWORKS', ''),
     /** ログインしてからの有効期間。切れたらもう一度 Entra へ行く */
     oidcSessionTtl: num('OIDC_SESSION_TTL', 30 * 24 * 60 * MIN),
 
