@@ -7,6 +7,7 @@ import {
     chapterMetadata,
     detectCm,
     invertRanges,
+    probeLeadIn,
     probeVideo,
     type Range,
     widenKeep,
@@ -910,8 +911,8 @@ async function runJob(jobId: number): Promise<void> {
     if (Number.isFinite(measured.width) && Number.isFinite(measured.height)) {
         encodeOptions.canvasSize = `${measured.width}x${measured.height}`;
     }
-    // 映像が始まるまでの間。全部のトラックをこのぶん前へ寄せて 0 秒から始める
-    encodeOptions.videoStart = measured.videoStart;
+    // 映像が出るまでの音声だけの区間。頭から捨てて 0 秒から始める
+    encodeOptions.videoStart = await probeLeadIn(source, measured.formatStart, measured.packetStart);
 
     /*
      * 画素が横長なら、正方形に直した大きさで焼く (地上波HDは 1440x1080 の SAR 4:3)。
@@ -940,7 +941,7 @@ async function runJob(jobId: number): Promise<void> {
         source,
         encodeOptions.canvasSize,
         SUBTITLE_FONTS,
-        measured.formatStart + headSkip(measured.videoStart),
+        measured.formatStart + headSkip(encodeOptions.videoStart),
         signal,
     );
     if (pgs !== null) {
