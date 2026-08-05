@@ -155,31 +155,29 @@
             </details>
 
             <!--
-                誰で入っているか。**OIDC を設定しているときだけ**出す。
-                前段の forward-auth に任せている構成では denpa は誰か知らないので、
-                空の枠だけが並ぶことになる
+                誰で入っているか。**ログインして入っているときだけ**出す。
+
+                素通し (LAN) と、前段の forward-auth に任せている構成では denpa は
+                誰か知らないので、ここには何も出さない。かつて「ログイン」を置いて
+                いたが、押しても**できることが1つも増えない** (人ごとの権限も
+                個人設定も無い) ので外した
             -->
-            {#if data.oidc}
-                {#if data.user}
-                    <details class="dropdown dropdown-end" data-testid="user-menu">
-                        <summary class="btn btn-ghost btn-sm" title={data.user.name || 'ログイン中'}>
-                            <span class="max-w-24 truncate">{data.user.name || 'ログイン中'}</span>
-                        </summary>
-                        <ul class="menu dropdown-content rounded-box bg-base-100 z-50 mt-2 w-40 shadow">
-                            <li>
-                                <!-- 控えを消すので GET では出させない (先読みで勝手に切れる) -->
-                                <form method="POST" action="/logout">
-                                    <button type="submit" class="w-full text-left" data-testid="logout">
-                                        ログアウト
-                                    </button>
-                                </form>
-                            </li>
-                        </ul>
-                    </details>
-                {:else}
-                    <!-- LAN から素通しで入っている。押せばログインもできる -->
-                    <a class="btn btn-ghost btn-sm" href="/login" data-testid="login">ログイン</a>
-                {/if}
+            {#if data.user}
+                <details class="dropdown dropdown-end" data-testid="user-menu">
+                    <summary class="btn btn-ghost btn-sm" title={data.user.name || 'ログイン中'}>
+                        <span class="max-w-24 truncate">{data.user.name || 'ログイン中'}</span>
+                    </summary>
+                    <ul class="menu dropdown-content rounded-box bg-base-100 z-50 mt-2 w-40 shadow">
+                        <li>
+                            <!-- 控えを消すので GET では出させない (先読みで勝手に切れる) -->
+                            <form method="POST" action="/logout">
+                                <button type="submit" class="w-full text-left" data-testid="logout">
+                                    ログアウト
+                                </button>
+                            </form>
+                        </li>
+                    </ul>
+                </details>
             {/if}
         </nav>
 
