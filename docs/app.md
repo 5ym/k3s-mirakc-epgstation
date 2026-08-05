@@ -52,7 +52,9 @@ EPGStation の置き換えとして作ったもので、エンコード設定は
 | `src/lib/ts/synth.ts` | TS のセクションを組み立てる (テストと偽エージェント用) |
 | `src/lib/server/migrate.ts` | EPGStation からの引き継ぎ ([migrate.md](migrate.md)) |
 | `src/lib/server/dav.ts` | WebDAV (Kodi 向け) |
-| `src/lib/server/auth.ts` | ベーシック認証 |
+| `src/lib/server/auth.ts` | どの口をどう守るか ([auth.md](auth.md)) |
+| `src/lib/server/oidc.ts` | OIDC (discovery・PKCE・ID トークンの検証)。ライブラリは使っていない |
+| `src/lib/server/session.ts` | ログインの控えと、素通しにする住所の判定 |
 | `src/lib/server/events.ts` | 画面へ変化を知らせる (SSE。ポーリングの代わり) |
 | `src/lib/server/webhook.ts` | 録画の節目を外部へ通知する |
 | `src/lib/server/runtime.ts` | 常駐処理の起動 (hooks.server.ts から呼ばれる) |
@@ -143,6 +145,11 @@ k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書い�
 | `JLS_LOGO_LEVEL` | `6` | ロゴをどれだけ当てにするか(1〜8)の初期値。設定画面で変えられる |
 | `CM_CUT_MARGIN` | `0.8` | CMを実カットするとき、残す区間の頭を戻す長さ(秒) |
 | `SHUTDOWN_WAIT` | `21600000` | 止められたとき、録画が終わるまで待つ上限(ms)。`0` で待たない |
+| `OIDC_ISSUER` | (空) | OIDC の発行元。ここを含む3つが揃うと OIDC が有効になる ([auth.md](auth.md)) |
+| `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | (空) | アプリ登録のIDと秘密 |
+| `OIDC_GROUP` | (空) | このグループに居る人だけ通す。空なら入れた人は全員 |
+| `OIDC_BYPASS_CIDR` | (空) | ここから来た人はログインを求めない (`ADDRESS_HEADER` も要る) |
+| `OIDC_SESSION_TTL` | `2592000000` | ログインの有効期間(ms)。既定30日 |
 | `EPGSTATION_RECORDED_DIR` | `/epgstation-recorded` | 引き継ぎ元の録画置き場をマウントした場所 ([migrate.md](migrate.md)) |
 | `EPGSTATION_DB_HOST` / `_PORT` | `db` / `3306` | 引き継ぎ元の MariaDB |
 | `EPGSTATION_DB_USER` / `_PASSWORD` / `_NAME` | `root` / `epgstation` / `epgstation` | 〃 |
@@ -159,6 +166,7 @@ k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書い�
 | `/settings` | 録画のしかた(映像コーデック — **「エンコードしない」もここ**/CMの扱い/CMの探し方/ロゴの当てにしかた/生TSを残すか/無料放送だけか)、通知先(Webhook)、ベーシック認証(パスワードの表示と作り直し)、EPGStation からの引き継ぎ |
 | `/api/recordings/<id>/file` | 録画ファイル。Range 対応。**エンコード済みがあればそちら、無ければ生TS。焼き直している間は生TS** (始める前に前のものを消すので、その間は保存先に何も無い) |
 | `/api/recordings/<id>/frame?at=<秒>` | 録画から1コマ (JPEG)。ロゴの位置を指定するときに使う (既定で右上を 16:9 のまま拡大、覚えてある枠は掴んで動かせる) |
+| `/login` / `/login/callback` / `/logout` | OIDC でのログインとログアウト。設定していなければ 404 ([auth.md](auth.md)) |
 | `/api/services/<id>/logo-data` | **logoframe がいま覚えているロゴ** (白黒PNG)。番組表に出すロゴとは別物で、絵になっているかを確かめるためのもの |
 | `/dav` | WebDAV (PROPFIND / GET / HEAD)。Kodi 用。書き込みは受けない |
 

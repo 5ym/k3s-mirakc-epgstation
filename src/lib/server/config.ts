@@ -282,6 +282,37 @@ export const config = {
      */
     basicAuthScope: (str('BASIC_AUTH_SCOPE', 'files') === 'all' ? 'all' : 'files') as 'files' | 'all',
 
+    /**
+     * **OIDC でのログイン。** 3つ揃ったときだけ有効になり、揃っていなければ
+     * 今までどおり (前段の forward-auth 頼み) のまま動く。
+     *
+     * 秘密を含むので**環境変数だけ**から読み、設定画面には出さない。
+     * 使い方は docs/auth.md
+     */
+    oidcIssuer: str('OIDC_ISSUER', '').replace(/\/+$/, ''),
+    oidcClientId: str('OIDC_CLIENT_ID', ''),
+    oidcClientSecret: str('OIDC_CLIENT_SECRET', ''),
+    /**
+     * **このグループに居る人だけ入れる。** Entra ID の `groups` クレームに
+     * 入っているもの (既定ではグループのオブジェクトID) と照合する。
+     *
+     * 空にすると「入れた人は全員通す」。誰が入れるかを Entra 側の
+     * アプリ割り当てで決めているなら、そちらで足りる
+     */
+    oidcGroup: str('OIDC_GROUP', ''),
+    /**
+     * **ここから来た人はログインを求めない。** カンマ区切りの IPv4 CIDR
+     * (`10.10.0.0/16`) か、そのままの住所。LAN からは今までどおり素通しにするため。
+     *
+     * **`ADDRESS_HEADER=x-forwarded-for` を一緒に渡すこと。** 渡さないと
+     * adapter-node は接続元として Traefik の Pod の住所を返すので、
+     * ここが誰にも当たらない (=全員ログインを求められる)。
+     * 逆に、denpa へ直に届く経路があると住所を詐称できる
+     */
+    oidcBypassCidr: str('OIDC_BYPASS_CIDR', ''),
+    /** ログインしてからの有効期間。切れたらもう一度 Entra へ行く */
+    oidcSessionTtl: num('OIDC_SESSION_TTL', 30 * 24 * 60 * MIN),
+
     /** 0 にすると EPG 取得・スケジューラ・エンコーダを起動しない (単体テスト用) */
     autostart: bool('DENPA_AUTOSTART', true),
 };

@@ -101,6 +101,7 @@ URLに埋めても壊れない文字だけで24文字作って、そのまま保
 - [docs/player.md](docs/player.md) — `denpa://` の登録、ライブ視聴の繋ぎ方
 - [docs/agent.md](docs/agent.md) — チューナーを掴むところ (エージェント・取り合い・B-CAS)
 - [docs/encode.md](docs/encode.md) — CM とエンコード (字幕・AV1・CM検出)
+- [docs/auth.md](docs/auth.md) — **誰を通すか** (OIDC でのログイン・ベーシック認証)
 - [docs/migrate.md](docs/migrate.md) — **EPGStation からの引き継ぎ**
 - [docs/roadmap.md](docs/roadmap.md) — これから入れるもの
 - [docs/stream.md](docs/stream.md) — ライブ視聴の設計 (未実装)

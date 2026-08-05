@@ -298,4 +298,16 @@ CREATE TABLE IF NOT EXISTS encode_jobs (
 CREATE INDEX IF NOT EXISTS encode_jobs_state ON encode_jobs (state, id);
 -- 録画一覧は1行ごとに「この録画の最新のジョブ」を2回引く (状態と失敗の理由)
 CREATE INDEX IF NOT EXISTS encode_jobs_recording ON encode_jobs (recording_id, id);
+
+-- OIDC でログインした控え。Cookie に入るのは id だけで、中身はここにしかない
+CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,              -- 推測できない文字列 (32バイト)
+    subject TEXT NOT NULL,            -- ID トークンの sub。誰であるかはこれだけが決める
+    -- 画面に出す名前。**これで通すかどうかは決めない** (改名で入れなくなるため)
+    name TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+);
+-- 切れたものを片付けるときに舐める
+CREATE INDEX IF NOT EXISTS sessions_expires ON sessions (expires_at);
 `;

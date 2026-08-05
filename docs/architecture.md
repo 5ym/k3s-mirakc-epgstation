@@ -13,6 +13,7 @@
 | 録画の置き場と配り方 (保存先・認証・削除・通知) | [library.md](library.md) |
 | エージェントに聞くもの / denpa が持つもの (番組表・スキャン・予約) | [data.md](data.md) |
 | どこに何があるか (ファイル・環境変数・画面・DB) | [app.md](app.md) |
+| 誰を通すか (OIDC・ベーシック認証) | [auth.md](auth.md) |
 | EPGStation からの引き継ぎ | [migrate.md](migrate.md) |
 | ライブ視聴の設計 (未実装) | [stream.md](stream.md) |
 | これからやるもの | [roadmap.md](roadmap.md) |

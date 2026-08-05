@@ -10,6 +10,7 @@ import { reconcile as logoReconcile, ride, sweep } from './logo';
 import { sweep as learnSweep } from './logo-learn';
 import { activeRecordingIds, recoverOrphanedRecordings } from './recorder';
 import { tick } from './scheduler';
+import { prune as pruneSessions } from './session';
 import { beginDraining } from './shutdown';
 
 let started = false;
@@ -92,6 +93,13 @@ export function start(): void {
      */
     void guard('prune', pruneHistory);
     every(config.reconcileInterval, 'prune', pruneHistory);
+
+    /*
+     * 切れたログインの控えを片付ける。**入れなくなる人は居ません** — 切れたものは
+     * 読む側 (`session.find`) が既に無視しているので、消しているのは行だけ
+     */
+    void guard('sessions', pruneSessions);
+    every(config.reconcileInterval, 'sessions', pruneSessions);
 
     /*
      * 局ロゴ。放送波から拾うしかないので、持っていない局のぶんを少しずつ取りに行く。

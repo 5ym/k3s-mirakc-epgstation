@@ -1,25 +1,58 @@
+import { enabled as oidcEnabled } from './oidc';
 import { settings } from './settings';
 
 /**
- * ベーシック認証。
+ * 誰を通すか。**口によって守り方が違う。**
  *
- * VLC も Kodi も、画面の前段に置く forward-auth のようなリダイレクト型の認証は扱えない。
- * かといってファイルを誰でも取れる状態にはしたくないので、
- * 「ファイルを取りに来る口だけ」に素のベーシック認証をかけられるようにしてある。
+ * | 口 | 守り方 |
+ * | --- | --- |
+ * | `/api/recordings/<id>/file` と `/dav` | **ベーシック認証だけ** |
+ * | それ以外 | OIDC (設定してあれば)。無ければベーシック認証 |
+ * | `/login` まわり | 素通し (ここを守ると入口が無くなる) |
+ *
+ * **プレイヤーはリダイレクトを扱えない。** VLC も Kodi も Infuse も、ログイン画面へ
+ * 飛ばされたところで何もできず「再生できません」で終わる。だからファイルを取りに
+ * 来る口だけは、前段に何を置いていようと素のベーシック認証のまま残してある。
  */
 
-/** 認証をかける口。範囲が files のときはここだけ見る */
+/** ベーシック認証で守る口。**ここは OIDC にしない** */
 const FILE_PATHS = [/^\/api\/recordings\/\d+\/file$/, /^\/dav(\/|$)/];
+
+/** ログインの入口。守ると入れなくなる */
+const OPEN_PATHS = [/^\/login(\/|$)/, /^\/logout$/];
+
+export function isFilePath(pathname: string): boolean {
+    return FILE_PATHS.some((pattern) => pattern.test(pathname));
+}
+
+export function isOpenPath(pathname: string): boolean {
+    return OPEN_PATHS.some((pattern) => pattern.test(pathname));
+}
 
 export function enabled(): boolean {
     const { basicAuthUser, basicAuthPassword } = settings();
     return basicAuthUser !== '' && basicAuthPassword !== '';
 }
 
+/**
+ * ベーシック認証で守る口か。
+ *
+ * **OIDC を入れると、画面のぶんは OIDC に譲る。** 両方掛けると、ブラウザの
+ * 認証ダイアログを閉じないとログイン画面にすら行けない。`BASIC_AUTH_SCOPE=all`
+ * を入れたままでもそうする (ファイルの口の扱いは変わらない)。
+ */
 export function protects(pathname: string): boolean {
     if (!enabled()) return false;
-    if (settings().basicAuthScope === 'all') return true;
-    return FILE_PATHS.some((pattern) => pattern.test(pathname));
+    if (isOpenPath(pathname)) return false;
+    if (isFilePath(pathname)) return true;
+    return settings().basicAuthScope === 'all' && !oidcEnabled();
+}
+
+/** OIDC でログインを求める口か */
+export function needsLogin(pathname: string): boolean {
+    if (!oidcEnabled()) return false;
+    if (isOpenPath(pathname)) return false;
+    return !isFilePath(pathname);
 }
 
 /** 長さの違いで早く返らないよう、桁数を揃えてから全桁比較する */
