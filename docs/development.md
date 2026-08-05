@@ -101,7 +101,13 @@ sh mac/verify.sh
 ## イメージ
 
 `Dockerfile` が denpa 本体、`agent/Dockerfile` がチューナー側です。
-CI が両方を焼いて `k3s/` のタグを書き戻します。
+CI が両方を焼いて `k3s/` の印を書き戻します。
+
+**main へ入れたぶんは `develop` に積み上がるだけで、`latest` は動きません。**
+`latest` が動くのは **GitHub でリリースを作ったとき**だけで、そのとき焼き直さずに
+リリースしたコミットの像へ貼り替えます。タグの決め方は
+[architecture.md](architecture.md#像のタグ)、出し方は `.github/image-tags.sh`
+(main のぶんとリリースのぶんで同じ答えが要るので、1箇所に置いてあります)。
 
 エージェントの口に当てる適合テストは `agent/conformance.test.ts`。
 **本物を起こして**、偽の選局コマンド (`tests/fake/tune.ts`) で流します。

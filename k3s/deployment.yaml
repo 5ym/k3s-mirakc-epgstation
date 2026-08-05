@@ -14,11 +14,18 @@ spec:
     metadata:
       labels:
         app: tuner-agent
+      annotations:
+        # **入れ替えの合図。** 像のタグは `develop` で動かないので、ここを
+        # 書き換えないと ArgoCD には「何も変わっていない」ように見え、
+        # 古い Pod がそのまま残る。中身を最後に変えたコミット (CI が書く)
+        denpa.doany.io/agent-image: sha-1053265a9bd9
     spec:
       containers:
         - name: tuner-agent
-          image: ghcr.io/danything/denpa-agent:sha-1053265a9bd9
-          imagePullPolicy: IfNotPresent
+          image: ghcr.io/danything/denpa-agent:develop
+          # 動くタグなので、起動のたびに取りに行かせる。
+          # IfNotPresent だと古い develop が手元に残っていたときに黙ってそれで上がる
+          imagePullPolicy: Always
           securityContext:
             privileged: true
           env:
@@ -68,7 +75,7 @@ spec:
 #   ScalingReplicaSet (旧Podを削除) → Pulling → Pulled 13.6秒 → Started
 #
 # ArgoCD の PreSync フックはマニフェスト本体より先に走るので、ここで引いておけば
-# 入れ替えのときには `imagePullPolicy: IfNotPresent` が効いて取得が要らなくなる。
+# 入れ替えのときにはノードの手元にあり、取得が要らなくなる。
 # 中身は動かさない (/bin/true)。引くことだけが目的
 apiVersion: batch/v1
 kind: Job
@@ -86,8 +93,10 @@ spec:
       restartPolicy: Never
       containers:
         - name: prepull
-          image: ghcr.io/danything/denpa:sha-9e0d52207b4a
-          imagePullPolicy: IfNotPresent
+          image: ghcr.io/danything/denpa:develop
+          # **ここは必ず取りに行かせる。** IfNotPresent だと、古い develop が
+          # ノードに残っているかぎり何も引かず、引いておく意味が無くなる
+          imagePullPolicy: Always
           command: ['/bin/true']
 ---
 apiVersion: apps/v1
@@ -107,6 +116,9 @@ spec:
     metadata:
       labels:
         app: denpa
+      annotations:
+        # **入れ替えの合図** (上の tuner-agent と同じ理由)。CI が書き換える
+        denpa.doany.io/denpa-image: sha-9e0d52207b4a
     spec:
       # 録画中に入れ替えが来たら、終わるまで居座ってから止まる (SHUTDOWN_WAIT)。
       # ここを伸ばしておかないと、待っている途中で SIGKILL されて意味が無くなる。
@@ -114,8 +126,8 @@ spec:
       terminationGracePeriodSeconds: 21900
       containers:
         - name: denpa
-          image: ghcr.io/danything/denpa:sha-9e0d52207b4a
-          imagePullPolicy: IfNotPresent
+          image: ghcr.io/danything/denpa:develop
+          imagePullPolicy: Always
           env:
             - name: TZ
               value: Asia/Tokyo

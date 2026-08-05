@@ -93,9 +93,28 @@ ScalingReplicaSet (旧Podを削除) → Pulling → Pulled 13.6秒 → Started �
 
 そこで、**マニフェストを当てる前にイメージだけ引いておく** Job を ArgoCD の
 PreSync フックに置いています (`denpa-prepull`、中身は `/bin/true`)。
-これで入れ替えのときには `imagePullPolicy: IfNotPresent` が効いて取得が要らなくなり、
-隙間は起動そのものだけになります。イメージのタグは CI が `k3s/deployment.yaml` を
-まるごと `sed` で書き換えるので、この Job のぶんも自動で揃います。
+これで入れ替えのときにはノードの手元にあり、隙間は起動そのものだけになります。
+
+### 像のタグ
+
+| タグ | いつ動くか | 誰が指しているか |
+| --- | --- | --- |
+| `develop` | **main へ入るたび** | `k3s/deployment.yaml` (この構成) |
+| `latest` | **GitHub でリリースを作ったときだけ** | `compose.prod.yml` (入れて使う人) |
+| `sha-<12桁>` | 動かない。中身ごとに1つ | 戻したいときに手で |
+
+**`develop` は動くタグなので、マニフェストは変わりません。** そのままだと ArgoCD には
+「何も変わっていない」ように見えて古い Pod が残るので、CI は Pod の注釈
+(`denpa.doany.io/denpa-image`) に**焼いた中身のコミット**を書き戻します。注釈が
+変われば Pod が入れ替わり、`imagePullPolicy: Always` が新しい `develop` を引きます。
+
+**`Always` にしているのは、動くタグだからです。** `IfNotPresent` だと、古い
+`develop` がノードに残っているかぎり黙ってそれで上がります。引き替えに、
+**GHCR に繋がらないと Pod が起動しません** (前は手元の像で上がれました)。
+
+`sha-` のタグはリリースのときの目印にも使っています。リリースを作ると、
+**焼き直さずに** そのコミットの `sha-` へ `latest` を貼り替えます
+(`.github/workflows/release.yml`)。試したものとリリースしたものが別にならないように。
 
 **録画そのものを引き継ぐことはしていません。** 引き継ぐには新旧のPodが同時に
 居る必要がありますが、denpa は1本のSQLiteに書き、スケジューラもEPG取得も

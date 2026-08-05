@@ -1,0 +1,67 @@
+name: Publish latest
+
+# **`latest` はリリースを作ったときだけ動きます。**
+#
+# main へ入れたぶんは `develop` に積み上がるだけで、`latest` は動きません
+# (compose.prod.yml が指しているのが `latest` なので、入れて使っている人の
+# ところで、こちらの作業中のものが勝手に動かないようにするため)。
+#
+# **焼き直しません。** リリースにしたコミットの中身から出るタグ
+# (`sha-…`) は main への push のときに焼いてあるので、その像に `latest` を
+# 貼り足すだけです。焼き直すと「試したものとリリースしたものが別」になります。
+on:
+  release:
+    types: [published]
+  # 貼り直したいときのために、手でも回せるようにしてある
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'latest を貼る先 (タグ名かコミット)'
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # リリースのタグそのものを見る。既定 (トリガーしたコミット) だと、
+          # タグを古いコミットに付けたときに指す先がずれる
+          ref: ${{ github.event.inputs.ref || github.event.release.tag_name }}
+          fetch-depth: 0
+
+      # main の build-and-deploy と同じ出し方 (.github/image-tags.sh)。
+      # ここが食い違うと、焼いたものと違う像に latest が付く
+      - name: Compute image tags
+        id: tag
+        run: |
+          . .github/image-tags.sh
+          echo "agent=$AGENT_TAG" >> "$GITHUB_OUTPUT"
+          echo "denpa=$DENPA_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # `imagetools create` は像を引かずに、レジストリの中で名前を足すだけ。
+      # 元の像が無ければここで落ちる (黙って古い latest が残るより、そのほうがいい)
+      - name: Point latest at this release
+        run: |
+          set -eu
+          base="${{ env.REGISTRY }}/${{ github.repository_owner }}"
+          docker buildx imagetools create \
+            --tag "${base}/denpa-agent:latest" "${base}/denpa-agent:${{ steps.tag.outputs.agent }}"
+          docker buildx imagetools create \
+            --tag "${base}/denpa:latest" "${base}/denpa:${{ steps.tag.outputs.denpa }}"
+          echo "latest → agent ${{ steps.tag.outputs.agent }} / denpa ${{ steps.tag.outputs.denpa }}"

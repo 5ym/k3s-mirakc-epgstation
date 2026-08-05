@@ -38,17 +38,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      # イメージごとに「そのイメージの中身を最後に変えたコミット」でタグを付ける。
-      # 全部を HEAD で揃えると、denpa を直しただけの push でエージェントの
-      # タグまで変わり、録画中に選局が落ちる。
+      # イメージごとに「そのイメージの中身を最後に変えたコミット」でタグを付ける
+      # (.github/image-tags.sh)。全部を HEAD で揃えると、denpa を直しただけの
+      # push でエージェントのタグまで変わり、録画中に選局が落ちる。
       - name: Compute image tags
         id: tag
         run: |
-          set -eu
-          # denpa はリポジトリ直下なので、エージェントなど別物のパスを除いて見る
-          denpa_paths="Dockerfile src static package.json bun.lock svelte.config.js vite.config.ts"
-          echo "agent=sha-$(git log -1 --format=%H -- agent | cut -c1-12)" >> "$GITHUB_OUTPUT"
-          echo "denpa=sha-$(git log -1 --format=%H -- $denpa_paths | cut -c1-12)" >> "$GITHUB_OUTPUT"
+          . .github/image-tags.sh
+          echo "agent=$AGENT_TAG" >> "$GITHUB_OUTPUT"
+          echo "denpa=$DENPA_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
         uses: docker/login-action@v4
@@ -74,7 +72,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=agent
           tags: |
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/denpa-agent:${{ steps.tag.outputs.agent }}
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/denpa-agent:latest
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/denpa-agent:develop
 
       - name: Build and push denpa image
         uses: docker/build-push-action@v7
@@ -88,17 +86,21 @@ jobs:
           cache-to: type=gha,mode=max,scope=denpa
           tags: |
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/denpa:${{ steps.tag.outputs.denpa }}
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/denpa:latest
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/denpa:develop
 
+      # **像のタグは `develop` のまま動かさず、印だけ書き換える。**
+      # 動くタグを指しているとマニフェストが変わらず、ArgoCD には「何も
+      # 変わっていない」ように見えて古い Pod が残る。Pod の注釈を書き換えれば
+      # 入れ替わり、`imagePullPolicy: Always` で新しい develop を引く。
+      #
       # 書き換えとpushを1つにまとめてある。
       # actions/checkout はブランチ先端ではなく「トリガーしたコミット」を取るので、
       # 2つのrunが重なると後発は先発のタグ更新を知らないまま同じ行を書き換えてしまう。
       # rebase では同じ行の衝突を解けないため、毎回 origin/main に戻してから
       # 書き換え直す(sedはTAGから一意に決まるので何度やっても同じ結果になる)。
-      - name: Rewrite image tags and push
+      - name: Rewrite image marks and push
         run: |
           set -eu
-          OWNER="${{ github.repository_owner }}"
           FILES="k3s/deployment.yaml"
 
           git config user.name "github-actions[bot]"
@@ -108,20 +110,15 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
-            for image in denpa-agent denpa; do
-              case "$image" in
-                denpa-agent) tag="${{ steps.tag.outputs.agent }}" ;;
-                denpa) tag="${{ steps.tag.outputs.denpa }}" ;;
-              esac
-              sed -i -E "s#image: [^[:space:]]*/${image}:[^[:space:]]*#image: ${{ env.REGISTRY }}/${OWNER}/${image}:${tag}#g" ${FILES}
-            done
+            sed -i -E "s#(denpa\.doany\.io/agent-image:).*#\1 ${{ steps.tag.outputs.agent }}#" ${FILES}
+            sed -i -E "s#(denpa\.doany\.io/denpa-image:).*#\1 ${{ steps.tag.outputs.denpa }}#" ${FILES}
 
             git add ${FILES}
             if git diff --cached --quiet; then
               echo "no manifest changes to commit"
               exit 0
             fi
-            git commit -m "chore: bump image tags [skip ci]"
+            git commit -m "chore: bump image marks [skip ci]"
 
             if git push; then
               exit 0
