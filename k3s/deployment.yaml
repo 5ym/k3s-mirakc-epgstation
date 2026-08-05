@@ -118,7 +118,7 @@ spec:
         app: denpa
       annotations:
         # **入れ替えの合図** (上の tuner-agent と同じ理由)。CI が書き換える
-        denpa.doany.io/denpa-image: sha-9e0d52207b4a
+        denpa.doany.io/denpa-image: sha-b44fe5c30122
     spec:
       # 録画中に入れ替えが来たら、終わるまで居座ってから止まる (SHUTDOWN_WAIT)。
       # ここを伸ばしておかないと、待っている途中で SIGKILL されて意味が無くなる。
