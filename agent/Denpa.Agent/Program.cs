@@ -14,7 +14,7 @@ using Microsoft.AspNetCore.Http.Features;
  *
  * **中身は読まない。** NIT も SDT も EIT も解かず、TS をそのまま流す。
  * 読むのは denpa (`src/lib/ts`) で、局を選り分けるのも番組表を組み立てるのも、
- * チャンネルスキャンで見つかった局を判断するのもあちらの仕事 (docs/roadmap.md)。
+ * チャンネルスキャンで見つかった局を判断するのもあちらの仕事 (docs/agent.md)。
  */
 
 // 実機で選局と復号だけ試す口。サーバは立てない (Probe.cs)
@@ -85,7 +85,7 @@ app.MapGet("/denpa/stream", async (HttpContext http) =>
          * 掴めたが選局できなかった (同期しない・デバイスが開けない…)。
          * **理由を必ず残す。** 空の 500 を返していたせいで、総当たりの
          * スキャンが「選局できません (500)」としか言えず、何が起きているのか
-         * 分からなかった (docs/roadmap.md)
+         * 分からなかった (docs/agent.md)
          */
         Log.Write($"{type} {channel} ({use}): {error.Message}");
         await Respond.Write(http, new JsonObject { ["error"] = error.Message }, 500);

@@ -9,7 +9,7 @@ namespace Denpa.Agent;
 /// 借りるのは <a href="https://github.com/tsukumijima/libaribb25">libaribb25</a>。
 /// **いま実機で解けているものそのもの**で、<c>recisdb</c> も
 /// recisdb-rs → <c>b25-sys</c> → libaribb25 と積んでいる。差し替えても
-/// 復号の挙動が変わらないのが何よりの利点 (docs/roadmap.md)。
+/// 復号の挙動が変わらないのが何よりの利点 (docs/agent.md)。
 /// </para>
 ///
 /// <para>
@@ -23,7 +23,7 @@ namespace Denpa.Agent;
 /// **カードは差し替えられる。** libaribb25 の口 (<c>B_CAS_CARD</c>) も
 /// 関数ポインタの表なので、<c>proc_ecm</c> だけ別のところへ投げる実装を
 /// 後から挿せる。1枚のカードを別のマシンのチューナーからも使いたい、という
-/// ときはここに入る (docs/roadmap.md)。
+/// ときはここに入る (docs/agent.md)。
 /// </para>
 /// </summary>
 public sealed unsafe partial class AribB25 : IDisposable

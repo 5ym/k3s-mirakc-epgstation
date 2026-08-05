@@ -263,7 +263,7 @@ export function buildArgs(
 
     /*
      * 字幕は**PGS 1本だけ**。denpa が別に作った .sup をそのまま copy する
-     * (作り方は subtitle.ts、なぜ PGS だけかは docs/architecture.md)。
+     * (作り方は subtitle.ts、なぜ PGS だけかは docs/encode.md)。
      * 作れなかったとき (字幕の無い番組・sub2video が落ちた場合) は字幕トラックが入らない
      */
     let next = 1;

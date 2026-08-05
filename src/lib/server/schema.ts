@@ -175,7 +175,7 @@ CREATE TABLE IF NOT EXISTS rules (
     genres TEXT,                      -- JSON 配列 (lv1)。NULL は全ジャンル
     enabled INTEGER NOT NULL DEFAULT 1,
     -- チューナーが足りないとき、どの予約を残すか。大きいほうが残る (conflict.ts)。
-    -- **エージェントに渡す「掴む強さ」とは別物** (docs/architecture.md)。
+    -- **エージェントに渡す「掴む強さ」とは別物** (docs/agent.md)。
     -- ルールは 1、手動予約は 2。mirakc の頃の 2/3 を引きずっていたが、
     -- 比べる相手は予約どうしだけなので小さいところから数える
     priority INTEGER NOT NULL DEFAULT 1,

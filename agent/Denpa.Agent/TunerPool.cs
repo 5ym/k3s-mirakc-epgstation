@@ -55,7 +55,7 @@ public sealed class TunerPool(
     /// ここが選局 (lease) ごとではなく**チューナーごと**なのが肝。チャンネルを
     /// 変えるたびに開き直すと、前の選局がまだ持っているデバイスを開こうとして
     /// <c>Device or resource busy</c> で落ちる。実際そうなっていて、スキャンが
-    /// 1チャンネル目以降ぜんぶ落ちた (docs/roadmap.md)。
+    /// 1チャンネル目以降ぜんぶ落ちた (docs/agent.md)。
     /// </para>
     /// </summary>
     private readonly Dictionary<int, Held> _held = [];

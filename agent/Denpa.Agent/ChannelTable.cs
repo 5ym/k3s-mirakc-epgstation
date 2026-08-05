@@ -9,7 +9,7 @@ namespace Denpa.Agent;
 /// いままでこれを持っていたのは <c>recisdb</c> のほうで、こちらは
 /// <c>--channel T27</c> と渡すだけだった。掴んだまま選局するには自分で
 /// ioctl を叩くことになるので、名前から周波数への対応もこちらに要る
-/// (docs/roadmap.md)。
+/// (docs/agent.md)。
 /// </para>
 ///
 /// <para>

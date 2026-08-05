@@ -79,7 +79,7 @@
 
 放送に絵は流れてこない。乗っているのは文字と「どこに・どの大きさで・何色で・背景の箱つきで」という指定で、テレビはそれを見て毎回自分で描いている。`-sub_type bitmap` はその描画を libaribcaption にやらせたもので、**それが「放送どおりの字幕の絵」**になる。
 
-この経路は**録画側で実装・実測済み**（[architecture.md「字幕は PGS 1本だけ」](architecture.md)、`src/lib/server/subtitle.ts`）。live で変わるのは出口だけで、`.sup` に書く代わりに WebSocket へ流す。
+この経路は**録画側で実装・実測済み**（[encode.md「字幕は PGS 1本だけ」](encode.md#字幕は-pgs-1本だけ)、`src/lib/server/subtitle.ts`）。live で変わるのは出口だけで、`.sup` に書く代わりに WebSocket へ流す。
 
 | | サーバで描く（採用） | ブラウザで描く（aribb24.js） |
 | --- | --- | --- |

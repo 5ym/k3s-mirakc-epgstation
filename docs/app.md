@@ -165,7 +165,7 @@ k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書い�
 機材に触る側。中身は読まず、掴んだチャンネルの TS をそのまま流す。
 **`src/lib/ts` に依存していない** — TS を1バイトも解釈しないため。
 .NET の Native AOT で実行ファイル1個。
-なぜこの切り分けなのかは [architecture.md](architecture.md#チューナーエージェント)。
+なぜこの切り分けなのかは [agent.md](agent.md)。
 
 | ファイル | 役割 |
 | --- | --- |

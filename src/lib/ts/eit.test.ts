@@ -298,7 +298,7 @@ describe('EpgReader', () => {
      * **実機で踏んだところ。** running_status を 4 にしてくれない局がある
      * (NHK は 74 節ぜんぶ 0 だった)。4 だけを見ていると、そういう局では
      * 延長追従が丸ごと効かない。p/f は仕様で section 0 が現在なので、
-     * 0 (未定義) のときはそちらで決める (docs/roadmap.md)
+     * 0 (未定義) のときはそちらで決める (docs/agent.md)
      */
     test('running_status を入れてこない局でも「放送中」が分かる', () => {
         const reader = new EpgReader();

@@ -99,5 +99,7 @@ URLに埋めても壊れない文字だけで24文字作って、そのまま保
 - [docs/data.md](docs/data.md) — エージェントに都度聞くもの / denpa が持つもの
 - [docs/development.md](docs/development.md) — **手を入れるとき** (開発環境・テスト)
 - [docs/player.md](docs/player.md) — `denpa://` の登録、ライブ視聴の繋ぎ方
+- [docs/agent.md](docs/agent.md) — チューナーを掴むところ (エージェント・取り合い・B-CAS)
+- [docs/encode.md](docs/encode.md) — CM とエンコード (字幕・AV1・CM検出)
 - [docs/roadmap.md](docs/roadmap.md) — これから入れるもの
 - [docs/stream.md](docs/stream.md) — ライブ視聴の設計 (未実装)

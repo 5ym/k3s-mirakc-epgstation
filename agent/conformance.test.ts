@@ -6,7 +6,7 @@
  *
  * **口に当てているので、中身が何語で書かれていても走る。** エージェントを
  * .NET に書き直したら、`AGENT_CMD` を差し替えて同じものを通す — それが
- * 「今までと同じように動く」の定義になる ([roadmap.md](../docs/roadmap.md))。
+ * 「今までと同じように動く」の定義になる ([agent.md](../docs/agent.md))。
  *
  *     bun run test:conformance
  *
@@ -352,7 +352,7 @@ describe('チャンネル', () => {
     /**
      * **中身を作るのは denpa。** 総当たりの選局はエージェントに頼むが、
      * NIT も SDT も解かないので「何が居たか」は分からない。ここは
-     * 預かって配るだけ ([roadmap.md](../docs/roadmap.md))
+     * 預かって配るだけ ([agent.md](../docs/agent.md))
      */
     test('預かったチャンネルを、探した種別だけ差し替える', async () => {
         const put = await request('PUT', '/denpa/channels', {
@@ -407,7 +407,7 @@ describe('カードとスクランブル解除', () => {
      *
      * .NET 版は libaribb25 を直に呼ぶので、外から偽物を差し込めなくなった
      * (`recisdb` を起こしていた頃はそこを差し替えて試せた)。実際に解ける
-     * ことは実機のカードで確かめてある (docs/roadmap.md)。
+     * ことは実機のカードで確かめてある (docs/agent.md)。
      */
     test('掛かったままのTSは、解けるか理由が返るかのどちらか', async () => {
         const packet = new Uint8Array(188 * 2);

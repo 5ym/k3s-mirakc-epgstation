@@ -28,7 +28,7 @@ namespace Denpa.Agent;
 ///
 /// <para>
 /// **拠点にカードがあるならそちらが速いし、落ちません。** 配るのは「カードが
-/// 無い拠点」のためのもので、既定にはしません (docs/roadmap.md)。
+/// 無い拠点」のためのもので、既定にはしません (docs/agent.md)。
 /// </para>
 /// </summary>
 public sealed unsafe partial class AribB25

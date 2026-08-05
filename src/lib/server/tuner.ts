@@ -3,7 +3,7 @@
  *
  * mirakc とのやり取り (`mirakc.ts`) を置き換えたもの。**相手が返すのは素のTSだけ**で、
  * 局も番組も時刻も、意味を持つものは何も返ってこない。読むのは denpa の仕事
- * ([roadmap.md](../../../docs/roadmap.md))。
+ * ([agent.md](../../../docs/agent.md))。
  *
  * 掴み方も1つに減った。mirakc には「サービス単位」「番組単位」「チャンネル単位」の
  * 3つの開き方があったが、ここにあるのは**物理チャンネルを丸ごと**だけ。
@@ -195,7 +195,7 @@ export async function ping(): Promise<{ ok: boolean; tuners?: number; error?: st
  * (`BS01_3` = `BS01_0`、`BS05_2` と `BS05_3` = `BS05_0` …)。
  *
  * **中身は1つも減りません。** 実機で見つかった BS の 26 TS は、放送自身が
- * 名乗っている 26 TS と一致していました (docs/roadmap.md)。
+ * 名乗っている 26 TS と一致していました (docs/agent.md)。
  */
 export function twinOf(found: Iterable<AgentChannel>, entry: AgentChannel): string | null {
     // TSID が分からないものは判断できない。地上波は1周波数1TSなので、そもそも起きない
