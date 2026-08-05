@@ -18,7 +18,7 @@ spec:
         # **入れ替えの合図。** 像のタグは `develop` で動かないので、ここを
         # 書き換えないと ArgoCD には「何も変わっていない」ように見え、
         # 古い Pod がそのまま残る。中身を最後に変えたコミット (CI が書く)
-        denpa.doany.io/agent-image: sha-1053265a9bd9
+        denpa.doany.io/agent-image: sha-63c5a76f0353
     spec:
       # **録画中に入れ替えが来たら、終わるまで居座ってから止まる** (SHUTDOWN_WAIT)。
       # denpa 側と同じ扱い。ここを既定 (30秒) のままにしていた頃は、Pod を
@@ -122,7 +122,7 @@ spec:
         app: denpa
       annotations:
         # **入れ替えの合図** (上の tuner-agent と同じ理由)。CI が書き換える
-        denpa.doany.io/denpa-image: sha-b44fe5c30122
+        denpa.doany.io/denpa-image: sha-63c5a76f0353
     spec:
       # 録画中に入れ替えが来たら、終わるまで居座ってから止まる (SHUTDOWN_WAIT)。
       # ここを伸ばしておかないと、待っている途中で SIGKILL されて意味が無くなる。
