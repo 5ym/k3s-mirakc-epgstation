@@ -50,7 +50,7 @@ EPGStation の置き換えとして作ったもので、エンコード設定は
 | `src/lib/ts/logo-dsmcc.ts` | 衛星の局ロゴをデータカルーセル (DSM-CC) から読む |
 | `src/lib/ts/logo-palette.ts` | 局ロゴPNGに ARIB の色の表 (PLTE/tRNS) を入れ直す |
 | `src/lib/ts/synth.ts` | TS のセクションを組み立てる (テストと偽エージェント用) |
-| `src/lib/server/migrate.ts` | EPGStation からの引き継ぎ |
+| `src/lib/server/migrate.ts` | EPGStation からの引き継ぎ ([migrate.md](migrate.md)) |
 | `src/lib/server/dav.ts` | WebDAV (Kodi 向け) |
 | `src/lib/server/auth.ts` | ベーシック認証 |
 | `src/lib/server/events.ts` | 画面へ変化を知らせる (SSE。ポーリングの代わり) |
@@ -126,7 +126,7 @@ k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書い�
 | `RECORDED_DIR` | `/app/recorded` | 生TSの作業領域 |
 | `LIBRARY_DIR` | `/library` | エンコード済みの置き場。ここから配る |
 | `FFMPEG` / `FFPROBE` | `/usr/local/bin/...` | 開発時は偽物に差し替える |
-| `ENCODE_CONCURRENCY` | `1` | 録画エンコードの同時実行数。ライブ配信の本数とは無関係 |
+| `ENCODE_CONCURRENCY` | `1` | 録画エンコードの同時実行数 |
 | `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` | `denpa` / (空) | 初期値。パスワードが入っているときだけ有効 |
 | `BASIC_AUTH_SCOPE` | `files` | 初期値。`files` … 配信と WebDAV だけ / `all` … 画面も含めて全部 |
 | `START_MARGIN` / `END_MARGIN` | `10000` / `15000` | 録画の前後マージン(ms)。延長には EIT[p/f] で追従する |
@@ -143,7 +143,9 @@ k3s の manifest には `PROTOCOL_HEADER` と `ENCODE_CONCURRENCY` しか書い�
 | `JLS_LOGO_LEVEL` | `6` | ロゴをどれだけ当てにするか(1〜8)の初期値。設定画面で変えられる |
 | `CM_CUT_MARGIN` | `0.8` | CMを実カットするとき、残す区間の頭を戻す長さ(秒) |
 | `SHUTDOWN_WAIT` | `21600000` | 止められたとき、録画が終わるまで待つ上限(ms)。`0` で待たない |
-| `EPGSTATION_*` | — | 引き継ぎ元の DB と録画置き場 |
+| `EPGSTATION_RECORDED_DIR` | `/epgstation-recorded` | 引き継ぎ元の録画置き場をマウントした場所 ([migrate.md](migrate.md)) |
+| `EPGSTATION_DB_HOST` / `_PORT` | `db` / `3306` | 引き継ぎ元の MariaDB |
+| `EPGSTATION_DB_USER` / `_PASSWORD` / `_NAME` | `root` / `epgstation` / `epgstation` | 〃 |
 | `DENPA_AUTOSTART` | `1` | `0` で常駐処理を止める |
 
 ## 画面
