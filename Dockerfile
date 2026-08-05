@@ -111,7 +111,7 @@ RUN apt-get update && \
 # CM検出の中身が黙って変わる。Renovate が新しいコミットを見つけて PR を出す
 # ので、上げるのは意識してやる (renovate.json の customManagers)。
 WORKDIR /src
-# renovate: datasource=git-refs depName=https://github.com/tobitti0/dtvindex branch=master
+# renovate: datasource=git-refs depName=https://github.com/tobitti0/dtvindex branch=main
 ARG DTVINDEX_SHA=196272d2e1b8d8aa0d960b4245a8f3a419debfae
 # renovate: datasource=git-refs depName=https://github.com/tobitti0/chapter_exe branch=master
 ARG CHAPTER_EXE_SHA=a32c8f06c3207f8d144b6be37110c63221d7e79a
