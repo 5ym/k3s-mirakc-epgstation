@@ -138,8 +138,8 @@ spec:
             # **OIDC でのログイン** (docs/auth.md)。
             #
             # 値は oauth2-proxy が使っているアプリ登録と同じものを、denpa 名前空間の
-            # Secret `denpa-oidc` に写してある。**git には置かない** — 秘密が混ざるうえ、
-            # テナントIDとアプリIDも公開リポジトリに残す理由が無い。
+            # Secret `denpa-oidc` に写してある。中身は `oidc-sealed.yaml` に封をして
+            # あり (SealedSecret)、それを controller が Secret にする。
             # 作り直すときは docs/auth.md の手順。
             - name: OIDC_ISSUER
               valueFrom:

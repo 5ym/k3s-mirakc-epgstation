@@ -201,9 +201,8 @@ TRUSTED_NETWORKS=10.10.0.0/16,10.20.0.0/16,192.168.1.5
 **oauth2-proxy (`auth` 名前空間) と同じアプリ登録を使い回しています。** テナントも
 グループも同じなので、入れる人の集合は forward-auth のときと変わりません。
 
-値は **`denpa` 名前空間の Secret `denpa-oidc`** に置いてあり、`k3s/deployment.yaml`
-はそれを `secretKeyRef` で引くだけです。**git には置きません** — 秘密が混ざるうえ、
-テナントIDとアプリIDを公開リポジトリに残す理由もありません。
+値は **`denpa` 名前空間の Secret `denpa-oidc`** に入っていて、`k3s/deployment.yaml`
+はそれを `secretKeyRef` で引くだけです。
 
 | 鍵 | 何 |
 | --- | --- |
@@ -212,17 +211,42 @@ TRUSTED_NETWORKS=10.10.0.0/16,10.20.0.0/16,192.168.1.5
 | `client-secret` | `auth/auth-secrets` の `oidc-client-secret` を写したもの |
 | `group` | `OAUTH2_PROXY_ALLOWED_GROUPS` と同じ |
 
-作り直すときは、秘密を手元に出さずに写せます。
+#### 封をして git に置いてあります
+
+**`k3s/oidc-sealed.yaml` は SealedSecret です。** クラスタの中の鍵でしか開けないので、
+公開リポジトリに置いても中身は読めません。`kube-system` の
+`sealed-secrets-controller` がこれを見て Secret `denpa-oidc` を作ります。
+
+そうする理由は、**手で作った Secret がどこにも書かれていない状態を無くす**ためです。
+クラスタを立て直したら、他は全部 ArgoCD が git から戻すのに、これだけ手順を
+思い出して打ち直すことになります。
+
+**名前と名前空間を変えると開けなくなります** (既定の scope が `denpa/denpa-oidc` を
+鍵の一部にしているため)。移すときは封をし直します。
+
+作り直すときは `~/bootstrap/kubeseal.sh` に通します。
 
 ```sh
-CS=$(kubectl get secret auth-secrets -n auth -o jsonpath='{.data.oidc-client-secret}')
-kubectl create secret generic denpa-oidc -n denpa \
-  --from-literal=issuer='<OAUTH2_PROXY_OIDC_ISSUER_URL>' \
-  --from-literal=client-id='<OAUTH2_PROXY_CLIENT_ID>' \
-  --from-literal=group='<OAUTH2_PROXY_ALLOWED_GROUPS>' \
-  --dry-run=client -o json \
-  | python3 -c "import json,sys;d=json.load(sys.stdin);d['data']['client-secret']='$CS';print(json.dumps(d))" \
-  | kubectl apply -f -
+umask 077
+cat > /tmp/oidc.yaml <<'YAML'
+apiVersion: v1
+kind: Secret
+metadata: { name: denpa-oidc, namespace: denpa }
+type: Opaque
+stringData:
+  issuer: "..."
+  client-id: "..."
+  client-secret: "..."
+  group: "..."
+YAML
+~/bootstrap/kubeseal.sh /tmp/oidc.yaml k3s/oidc-sealed.yaml && rm /tmp/oidc.yaml
+```
+
+**平文の Secret が先にあると、controller は上書きしません。** 自分が作ったもので
+なければ触らない作りです。引き取らせるには印を付けます (この構成では実施済み)。
+
+```sh
+kubectl -n denpa annotate secret denpa-oidc sealedsecrets.bitnami.com/managed=true
 ```
 
 > **グループが載ってくるかは、入ってみるまで分かりません。** oauth2-proxy が

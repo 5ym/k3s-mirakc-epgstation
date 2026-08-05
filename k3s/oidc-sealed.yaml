@@ -1,0 +1,52 @@
+# **OIDC の設定。封をしてあるので、これは git に置けます。**
+#
+# SealedSecret はクラスタの中の鍵でしか開けません。封をした側 (この YAML) は
+# 公開リポジトリに置いても中身が読めず、`kube-system` の
+# `sealed-secrets-controller` が同じ名前・同じ名前空間の Secret `denpa-oidc` を
+# 作ります。deployment.yaml はそれを `secretKeyRef` で引きます。
+#
+# **名前と名前空間を変えると開けなくなります。** 既定の scope (strict) は
+# `denpa/denpa-oidc` を鍵の一部にしているためです。移すときは封をし直します。
+#
+# 中身は4つ。値の意味は docs/auth.md:
+#
+# | 鍵 | |
+# | --- | --- |
+# | `issuer` | `https://login.microsoftonline.com/<tenant>/v2.0` |
+# | `client-id` | アプリ登録のアプリケーションID |
+# | `client-secret` | クライアントシークレット |
+# | `group` | このグループに居る人だけ通す (オブジェクトID) |
+#
+# **作り直しかた** (main の上で):
+#
+#   umask 077
+#   cat > /tmp/oidc.yaml <<'YAML'
+#   apiVersion: v1
+#   kind: Secret
+#   metadata: { name: denpa-oidc, namespace: denpa }
+#   type: Opaque
+#   stringData:
+#     issuer: "..."
+#     client-id: "..."
+#     client-secret: "..."
+#     group: "..."
+#   YAML
+#   ~/bootstrap/kubeseal.sh /tmp/oidc.yaml k3s/oidc-sealed.yaml && rm /tmp/oidc.yaml
+#
+# **元の平文は消すこと。** git に入れてよいのは封をしたこちらだけです。
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: denpa-oidc
+  namespace: denpa
+spec:
+  encryptedData:
+    client-id: AgAVJSDIWNB1iPmvFM4ueJJ2TZs4keHoUtA8XnmrmGHzfG2ahbYHmjV4GA04WJtRScbBzm/hFUlTZPn8qnlRtE3bUW2kc2p7YAOkpMDNtqc5qPQxyay91mFeZcJHrop97AYEPzF0CkLZ44ksYSj7Abj+vaHyGCIu36fcpDRASLFWkIp8rv3rAGzJjwQFXpKG1Ps9Ox3c0o4MTqD4uLRJKI7118XROArlelVEyZ7A5gNsgJLinIagiMsVkNE1kn49pje3zb2Y9szVhiZQwMZe51K1HoM12sYHU2P0rRSL/9lI5pT+s9YPs5k3X/JodWmYC6svGqglqQIodMgdUHFr6XxnV90kLxIWXgh5Dxvu/n9qH1aIvYQ4pV3sNB+ARrfwz+s9d+gQ5c4oSiAfbiPRT/Tbzqp5kN8u46gxO7vetjU0I4WA6bozoNHsqT8DogPn24pH0W4eIlqYLcp3ynF3Cm3SsINJudNcZsiPuK0Y4Y93onhzYU+hUgWSqIczexZLw9aHl9ORnltZN3YQPjcqDtbU7Bj2JF+5aLwYrxoATzgz4ulBr9IEqvyqCbFEAqtJx3azCot+chTFUUMV4Y2FA85U63oAl/ROmR3j7t3+zAOqAFzpLvv3hsOwf9xhsHl5cQI1b/bUseFxsY9Nud+G9vic+itpfDHrbPcC/RbrAoZl+PEtgHKXNI01Sau08fAjioPhRPE4lkCmt7v6gbcmZGUag0vJo2h1b856QjyEkDjgoYe0DU8=
+    client-secret: AgCF5cWc/XaKBKtX8VL/pPpxgVBCMhv7G/FH1UQxvA3CGrtiQPwKlmJEJOmPciHpoqnWUluTm4HO/kDHUqkz8QI8Tcv/yWjnLFMe6J6EElDJ71014q/nwTA1yBqz6TmJaChAkqeVYJlSSlsBGNAgDv8YZcG8gzSIkEk72mlYni2EZKNHm2HTtPDDRjJ8PEPGub3yF0bMUH5ef9EInQyr/JVHaN0N9wAmRU9I062wd+TV1/aMDRbZ4/mPikQJvPvdVyn4Srk/11bGEx20GNtx/vEiF7bKI+mXF4ZLK0HavAz5gus5AqG4jLn/88nmM7Q2te5omzi3q2yxEcOFPPQtldmAXWeX0+s/Gl3aJDrgwttZgLRffO7xIwuIvud5Yprl4GMDqRtY5zxKPItcwPsusD73u8RUBEYpcQ6hbqSJ09eGKjFMtgxfb1G/g6OZXC93ta45oeF9II7u3s4g18FOY+X/fymybB7Arnm3gufKf5ii+3wnFPvUMPu+9ALg6XPVwQmME2dgLbHoHRjJNgXzT9Ha+MXZ3LNB5lUtiYf35cTa3NBMTNcg2bZDcRA/m8MIQ349m6TQOOsrCmN9A2h/N/Q9ZcTY2HKPpKPat48fBb4Pm+0m9OlQ0JY8WkPhnx9y1Xyt7ih73+LSsg3SkuQ6FSkWZ7RiLI6hguUc2d4zYrpZTNzWajbm6Gs6l8B6OTxLSbbMdnZMTzLx7WZZiAPtCIkvuUkx3J7TBkMaqqmE0qqIpT1bqIi21ktc
+    group: AgAXgJtV+Qv1FOqCEypSoPocsTLwIXwznWOi5GmNsCRz98qWGEzmlN5nsIDXBfbCe3MWgYUspst80tISLCgDqokdt9K48kIJhjyUo9n/4VhmfRff6kjOf/hQ41Ir7+dTerLAoX0QgbpkDSzS/OBSu1xyLjxamjyMBSYuURwOx0hmcZF8pN0SNzGIEmgwYRmkdOuAJIhSr3BOonpshAuLWdy1FFF+4Qtd6qfZ6MLCtKMYI+4WS3zBCwVRXu4yrtQtAVoOfKGDahUsr3eTybJyIC4qUobxPZlpYkd7m9joNUb1hA+hUFs20Y+faGy+0ZSnE/nFVjqNYo9dgmVidpsXhiTf/Z8eF2uJDpHhzEkcpy0OKYckRMSev/lE1je2vh7soGos/iBPWSF/Pyy80UmvnFaHhMLo9fpXq8SX0AQqgmBd/RkXRvv4BybD48UY41OsG6EhwQqDnTfqT6Ic7vsnvq7EZtzf7WXb8dAqNMw2YTqcikQsd1njyuT9p9ZZf6dNCGSci1smjl8pGQ2QaZz0TSrwxtg6+zS6Xt9Z53rEyqfJN/SvEuW65Y9y6iUdcUv4oFx0vwxftZDLsDyEgBJhm8ASO1GAgxgrHbEn6f3UNFBYFe5raFv4rWitz1GZA1RsaBPrG9dUhndoHEYLMzlyj/2k6UhhYeTL5qS5fdJyHuh6oZhyFf3QJ2enUGo6nZidrs+x0NF/RrTHugn9P0t0XkWH3q+09ZxUNd6O/90rwk8AYaak2OI=
+    issuer: AgBmC+7NTuycOrmR1CAAioJkMDvak8vcYcLXQqvRAXQXDYeteIVNe61rzHwW8GtQmTv4PMu9CQ8ynkrDV01+a13o/JK1ulGAvoMWazQPqKktubRY+uMdD3igXb2RHgsR07bKnLUIVk4cXwzInyXC+L/ONz18hy3xKfoAHamT6+nV2kGcd+1sbY8E9oPVk37WN/7aTKxWD37CGFcNwzmy9Xtic3kdzgy6ZpwCo8uoR03WnAvPaD8JWaQ1hW8ZzHSH3iiPHam7dOzyyks5jHHGuOgX+C4S6eQl37knVstR5r9Q+k6pQkp+C/Qq0Z1FAv38bCROTXFBWstuykgJWOsbkAaMrLSEQXAfxoqHgF4o76DG+YnUDNHsa/pAhPJtNGSuQMnjYEjyxUBgkXKRbwW1ak0Y1W5Qakw66HTFbpV4o7T7YamfiM0Qv11Gm4rALUWm+RSMQLILxxE3NPu1EjOBNySRpIiOJUd+L+PUTS+nuoZ/3OZvE3kVJdExW2P5PcZq4EaM/uRBvIdtY5aRGA1HX+6v4JdgWFNm4tqfiZJlx1YkNBTGwCtmTJ9t5VHd0imp3AASTn4BOJA+x6yXG5IF4ABibU4IMSZGAqihjYDP+MYCqC6X0L45ahaaJdSOmIG1T0529Fj7uwstBu+AQkqndC8irsYr9D9vQ6EOh7UWwc6ISLPMmLTkx9/oaKFQi/HJk4u0uJ1aBzGGBC8YhfMhe9EJKp5p3+9i0h4lPrXn+kWdhPqzztzECTLH48YNouQ3ExqtceDj5N+f2nmn/zdNWlYex9SX4g3v+Mw88gs=
+  template:
+    metadata:
+      name: denpa-oidc
+      namespace: denpa
+    type: Opaque
