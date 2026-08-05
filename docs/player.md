@@ -67,8 +67,9 @@ Chrome も Edge も、この覚えさせ方を **https のページからしか�
 名前を LAN 内のアドレスに向ければ**、公開しないまま本物の証明書が使えます
 (DNS-01 なので外から繋がる必要がありません)。
 
-`k3s/ingress.yaml` の `denpa-lan` がその口で、**https://dp.l.doany.io** です。
-LAN 内 (10.10.0.0/16) からだけ通り、forward-auth も通しません。
+`k3s/ingress.yaml` にその名前を足してあり、**https://dp.l.doany.io** です。
+Traefik 側で LAN 内 (10.10.0.0/16) からだけ通し、denpa 側もその網からは
+何も聞きません (`TRUSTED_NETWORKS`、[auth.md](auth.md))。
 プレイヤーが録画を取りに来るのも同じ口です。
 
 ## ライブ視聴

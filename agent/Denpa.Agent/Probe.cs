@@ -30,8 +30,8 @@ public static class Probe
     /// ファイルを1つ解く。**チューナーを使わずに B25 だけ確かめる。**
     ///
     /// <para>
-    /// 掛かったまま録れてしまったものを救うのにも使える (いまは
-    /// <c>/denpa/decode</c> が <c>recisdb</c> を起こしてやっている)。
+    /// 掛かったまま録れてしまったものを救うのにも使える (denpa からは
+    /// <c>/denpa/decode</c> が同じことをする)。
     /// </para>
     /// </summary>
     public static int Decode(string[] args)

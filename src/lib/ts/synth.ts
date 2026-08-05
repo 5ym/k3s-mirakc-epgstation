@@ -5,20 +5,10 @@
  * 読む側 (psi.ts / logo.ts) と対になる書く側で、ここだけが仕様の写し。
  */
 
-import { crc32, PACKET, SYNC } from './psi';
+import { PACKET, SYNC, withCrc } from './psi';
 
-/** セクション本体に CRC32 を付ける。section_length も実長に直す */
-export function withCrc(body: number[]): Uint8Array {
-    const section = Uint8Array.from(body);
-    const length = section.length - 3 + 4;
-    section[1] = 0xb0 | ((length >> 8) & 0x0f);
-    section[2] = length & 0xff;
-
-    const out = new Uint8Array(section.length + 4);
-    out.set(section);
-    new DataView(out.buffer).setUint32(section.length, crc32(section));
-    return out;
-}
+// 組み立てる側はここから取る人が多いので、そのまま出しておく
+export { withCrc };
 
 const be = (value: number) => [(value >> 8) & 0xff, value & 0xff];
 

@@ -176,13 +176,13 @@
     <div class="flex flex-wrap items-center gap-2">
         <h1 class="text-2xl font-bold">番組表</h1>
         <!-- 番組表が古いことに気づくのはこの画面なので、いま何件あるかは出す。
-             mirakc 自体の状態は設定画面にまとめてある -->
+             集まり具合の内訳はチューナー画面にまとめてある -->
         <div class="badge badge-lg badge-ghost" data-testid="counts">
             番組 {data.counts.programs} / 局 {data.counts.services}
         </div>
         <!--
-            「EPGを今すぐ取得」は置いていない。mirakc が番組表を更新したら
-            その場で知らせてくるので (docs/data.md)、押す前に入っている
+            「EPGを今すぐ取得」は置いていない。30分ごとに「集め直すべき局」を
+            選び直して自分で集めるので (docs/data.md)、押す前に入っている
         -->
     </div>
     <!--

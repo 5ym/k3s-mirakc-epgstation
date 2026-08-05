@@ -273,7 +273,7 @@ export const config = {
     basicAuthPassword: str('BASIC_AUTH_PASSWORD', ''),
     /**
      * **OIDC でのログイン。** 3つ揃ったときだけ有効になり、揃っていなければ
-     * 今までどおり (前段の forward-auth 頼み) のまま動く。
+     * 画面もベーシック認証が守る。
      *
      * 秘密を含むので**環境変数だけ**から読み、設定画面には出さない。
      * 使い方は docs/auth.md
@@ -291,17 +291,11 @@ export const config = {
     oidcGroup: str('OIDC_GROUP', ''),
     /**
      * **何も聞かずに通す網。** CIDR (か住所そのまま) のカンマ区切り
-     * (`10.10.0.0/16`)。
-     *
-     * ここに当たると**ベーシック認証も OIDC も掛かりません**。LAN のプレイヤー
-     * (VLC / Kodi / Infuse) に資格情報を入れずに使えるのが狙い。
-     *
-     * **どの名前で来たかは問いません。** 名前で分けるのは前段 (Traefik) の仕事で、
-     * LAN 用の名前には `ClientIP` を条件に付けてあります。同じ条件を二か所に
-     * 書くと、片方だけ直して食い違うほうが危ない。
+     * (`10.10.0.0/16`)。当たるとベーシック認証も OIDC も掛からない
+     * (どう効くかは `auth.trusted`)。
      *
      * **`ADDRESS_HEADER=x-forwarded-for` を一緒に渡すこと。** 渡さないと
-     * adapter-node は接続元として Traefik の Pod の住所を返すので、住所の側が
+     * adapter-node は接続元として Traefik の Pod の住所を返すので、ここが
      * 誰にも当たらない。逆に、denpa へ直に届く経路があると住所を詐称できる
      */
     trustedNetworks: str('TRUSTED_NETWORKS', ''),

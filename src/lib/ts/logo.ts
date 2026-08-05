@@ -18,7 +18,7 @@
 
 import { DsmccLogoCollector } from './logo-dsmcc';
 import { withPalette } from './logo-palette';
-import { descriptors, PacketStream, SectionAssembler } from './psi';
+import { descriptors, PacketStream, SectionAssembler, sdtServices } from './psi';
 
 const PID_CDT = 0x0029;
 const PID_SDT = 0x0011;
@@ -82,14 +82,7 @@ export function parseLogoLinks(section: Uint8Array): Map<number, number> {
     const links = new Map<number, number>();
     if (section[0] !== TABLE_SDT_ACTUAL) return links;
 
-    let at = 11;
-    const end = section.length - 4;
-    while (at + 5 <= end) {
-        const serviceId = (section[at] << 8) | section[at + 1];
-        const loop = ((section[at + 3] & 0x0f) << 8) | section[at + 4];
-        const body = section.subarray(at + 5, at + 5 + loop);
-        at += 5 + loop;
-
+    for (const [serviceId, body] of sdtServices(section)) {
         for (const [tag, descriptor] of descriptors(body)) {
             if (tag !== DESC_LOGO_TRANSMISSION || descriptor.length < 3) continue;
             const type = descriptor[0];

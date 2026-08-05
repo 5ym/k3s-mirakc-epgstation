@@ -21,7 +21,7 @@
  * 落とすもの: 他局の PMT と ES、そして詰め物 (PID 0x1FFF)。
  */
 
-import { crc32, PACKET, PacketStream, SectionAssembler, SYNC } from './psi';
+import { PACKET, PacketStream, SectionAssembler, SYNC, withCrc } from './psi';
 
 const PID_PAT = 0x0000;
 const PID_NULL = 0x1fff;
@@ -65,15 +65,7 @@ function buildPat(transportStreamId: number, version: number, serviceId: number,
         0xe0 | ((pmtPid >> 8) & 0x1f),
         pmtPid & 0xff,
     ];
-    const section = Uint8Array.from(body);
-    const length = section.length - 3 + 4;
-    section[1] = 0xb0 | ((length >> 8) & 0x0f);
-    section[2] = length & 0xff;
-
-    const out = new Uint8Array(section.length + 4);
-    out.set(section);
-    new DataView(out.buffer).setUint32(section.length, crc32(section));
-    return out;
+    return withCrc(body);
 }
 
 /** セクション1本を TS パケット1つに詰める。PAT は小さいので必ず収まる */

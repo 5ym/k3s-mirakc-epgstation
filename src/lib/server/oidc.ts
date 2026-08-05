@@ -13,7 +13,7 @@
 
 import { config } from './config';
 
-/** 有効かどうか。3つ揃っていなければ、今までどおり前段の認証に任せる */
+/** 有効かどうか。3つ揃っていなければ、画面もベーシック認証が守る (auth.ts) */
 export function enabled(): boolean {
     return config.oidcIssuer !== '' && config.oidcClientId !== '' && config.oidcClientSecret !== '';
 }

@@ -72,9 +72,9 @@ const FILE_PATHS = [/^\/api\/recordings\/\d+\/file$/, /^\/dav(\/|$)/];
  * 素通しにする口。
  *
  * - **ログインの入口。** 守ると入れなくなる (ログイン画面へ行くのにログインが要る)
- * - **`/api/health`。** Kubernetes の `livenessProbe` と compose の healthcheck が
- *   叩く。守ると**Pod が再起動を繰り返す** (掛ける範囲を選べるのをやめたときに
- *   実際に踏んだ — E2E のスタックが起動待ちで固まった)。出しているのは
+ * - **`/api/health`。** Kubernetes の `livenessProbe` が叩く。守ると**Pod が
+ *   再起動を繰り返す** (掛ける範囲を選べるのをやめたときに実際に踏んだ —
+ *   E2E のスタックが起動待ちで固まった)。出しているのは
  *   「生きているか・局が何件か・録画が何本か」だけ
  */
 const OPEN_PATHS = [/^\/login(\/|$)/, /^\/logout$/, /^\/api\/health$/];

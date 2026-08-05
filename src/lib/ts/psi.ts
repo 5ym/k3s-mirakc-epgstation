@@ -52,6 +52,25 @@ export function crc32(data: Uint8Array): number {
     return crc >>> 0;
 }
 
+/**
+ * セクション本体に CRC32 を付けて仕上げる。`section_length` も実長に直す。
+ *
+ * **書く側が2つある。** PAT を書き直して流す `service-filter.ts` と、
+ * 偽の放送を組み立てる `synth.ts`。長さの直し方を間違えると読む側が黙って
+ * 捨てるだけなので、1箇所に置く。
+ */
+export function withCrc(body: number[]): Uint8Array {
+    const section = Uint8Array.from(body);
+    const length = section.length - 3 + 4;
+    section[1] = 0xb0 | ((length >> 8) & 0x0f);
+    section[2] = length & 0xff;
+
+    const out = new Uint8Array(section.length + 4);
+    out.set(section);
+    new DataView(out.buffer).setUint32(section.length, crc32(section));
+    return out;
+}
+
 export interface Service {
     serviceId: number;
     serviceType: number;
@@ -217,19 +236,29 @@ export function* descriptors(data: Uint8Array): Generator<[number, Uint8Array]> 
     }
 }
 
-/** SDT からサービスの一覧を読む。自分の TS のものだけ */
-export function parseSdt(section: Uint8Array): TransportInfo | null {
-    if (section[0] !== TABLE_SDT_ACTUAL) return null;
-
-    const services: Service[] = [];
+/**
+ * SDT のサービスの並びを (service_id, 記述子の並び) に切り分ける。
+ *
+ * **読む側が2つある。** 局名 (`parseSdt`) とロゴの対応 (`ts/logo.ts`) で、
+ * 欲しい記述子が違うだけで歩き方は同じ。並びの読み方をここ1箇所に置く。
+ */
+export function* sdtServices(section: Uint8Array): Generator<[number, Uint8Array]> {
     let at = 11;
     const end = section.length - 4;
     while (at + 5 <= end) {
         const serviceId = (section[at] << 8) | section[at + 1];
         const loop = ((section[at + 3] & 0x0f) << 8) | section[at + 4];
-        const body = section.subarray(at + 5, at + 5 + loop);
+        yield [serviceId, section.subarray(at + 5, at + 5 + loop)];
         at += 5 + loop;
+    }
+}
 
+/** SDT からサービスの一覧を読む。自分の TS のものだけ */
+export function parseSdt(section: Uint8Array): TransportInfo | null {
+    if (section[0] !== TABLE_SDT_ACTUAL) return null;
+
+    const services: Service[] = [];
+    for (const [serviceId, body] of sdtServices(section)) {
         for (const [tag, descriptor] of descriptors(body)) {
             if (tag === DESC_SERVICE && descriptor.length > 0) {
                 /*
