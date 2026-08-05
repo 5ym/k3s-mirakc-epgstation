@@ -176,6 +176,46 @@ LAN 用の名前 (`dp.l.doany.io`) を今までどおり使い続けるための
 3. **クライアントシークレット**を作る
 4. **トークン構成**で `groupMembershipClaims` を有効にする (グループで絞るなら)
 
+> **リダイレクト URI は authorize を叩いても確かめられません。** 未登録の URI でも
+> Entra はまずログイン画面を返し、**認証が済んでから** `AADSTS50011` を出します
+> (出鱈目な URI を対照にして確認済み)。**登録してあることは Azure の画面で見るしか
+> ありません。**
+
+#### この構成で実際に使っている値
+
+**oauth2-proxy (`auth` 名前空間) と同じアプリ登録を使い回しています。** テナントも
+グループも同じなので、入れる人の集合は forward-auth のときと変わりません。
+
+値は **`denpa` 名前空間の Secret `denpa-oidc`** に置いてあり、`k3s/deployment.yaml`
+はそれを `secretKeyRef` で引くだけです。**git には置きません** — 秘密が混ざるうえ、
+テナントIDとアプリIDを公開リポジトリに残す理由もありません。
+
+| 鍵 | 何 |
+| --- | --- |
+| `issuer` | `OAUTH2_PROXY_OIDC_ISSUER_URL` と同じ |
+| `client-id` | `OAUTH2_PROXY_CLIENT_ID` と同じ |
+| `client-secret` | `auth/auth-secrets` の `oidc-client-secret` を写したもの |
+| `group` | `OAUTH2_PROXY_ALLOWED_GROUPS` と同じ |
+
+作り直すときは、秘密を手元に出さずに写せます。
+
+```sh
+CS=$(kubectl get secret auth-secrets -n auth -o jsonpath='{.data.oidc-client-secret}')
+kubectl create secret generic denpa-oidc -n denpa \
+  --from-literal=issuer='<OAUTH2_PROXY_OIDC_ISSUER_URL>' \
+  --from-literal=client-id='<OAUTH2_PROXY_CLIENT_ID>' \
+  --from-literal=group='<OAUTH2_PROXY_ALLOWED_GROUPS>' \
+  --dry-run=client -o json \
+  | python3 -c "import json,sys;d=json.load(sys.stdin);d['data']['client-secret']='$CS';print(json.dumps(d))" \
+  | kubectl apply -f -
+```
+
+> **グループが載ってくるかは、入ってみるまで分かりません。** oauth2-proxy が
+> `ALLOWED_GROUPS` で絞れている以上、載っている見込みは高いのですが、あちらは
+> 載っていなければ Graph に聞きに行く作りなので**証拠にはなりません**。
+> 載っていなければ denpa は理由を出して断るので、そこで分かります
+> (「ID トークンに groups がありません」)。
+
 ### 前段の forward-auth はどうするか
 
 **denpa 自身がログインさせるようになったら、`k3s/ingress.yaml` の

@@ -7,6 +7,24 @@ import { bypassed, COOKIE, find } from '$lib/server/session';
 // SvelteKit のサーバ起動時に一度だけ走る。EPG取得・スケジューラ・エンコーダを立ち上げる
 start();
 
+/**
+ * 接続元の住所。**読めなければ空文字を返す。**
+ *
+ * adapter-node は `ADDRESS_HEADER` を渡してあるのにそのヘッダが無いリクエストが
+ * 来ると**例外を投げる**。Traefik を通らずに Pod へ直に届くもの (kubelet の
+ * ヘルスチェックなど) がそれで、そのまま呼ぶと 500 になる。
+ *
+ * **読めなかったときは素通しにしない** (空文字はどの CIDR にも当たらない)。
+ * 分からないほうを通すと、ヘッダを外すだけで認証を抜けられてしまう
+ */
+function clientAddress(event: Parameters<typeof handle>[0]['event']): string {
+    try {
+        return event.getClientAddress();
+    } catch {
+        return '';
+    }
+}
+
 export async function handle({ event, resolve }) {
     const { pathname, search } = event.url;
 
@@ -24,7 +42,7 @@ export async function handle({ event, resolve }) {
         const session = find(event.cookies.get(COOKIE));
         if (session !== null) {
             event.locals.user = { subject: session.subject, name: session.name };
-        } else if (!bypassed(event.getClientAddress())) {
+        } else if (!bypassed(clientAddress(event))) {
             /*
              * **LAN からは今までどおり素通し** (`bypassed`)。住所は adapter-node が
              * `ADDRESS_HEADER` を見て決めるので、渡していないと Traefik の Pod の
