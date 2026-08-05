@@ -69,3 +69,36 @@ test.describe('放送の延長 (追従できない局と、延長)', () => {
         expect(after, '終了時刻が延びていない').not.toBe(before);
     });
 });
+
+/**
+ * **繋ぎが切れても、掴み直して録り続ける。**
+ *
+ * エージェントの Pod を入れ替えると、読んでいる最中に接続が切れる
+ * (`The socket connection was closed unexpectedly`)。ここを掴み直さずに
+ * 失敗にしていた頃は、**入れ替えただけで始まって10秒の30分番組が丸ごと落ちた**
+ * (実機)。向こうがきれいに閉じたとき (EOF) は前から掴み直していて、
+ * 例外で切れたときだけ扱いが違っていた。
+ */
+test.describe('録画の途中で繋ぎが切れたとき', () => {
+    test('掴み直して、録画は最後まで残る', async ({ page, request, stack }) => {
+        test.setTimeout(120_000);
+        await syncEpg(request);
+        const programId = await reserveSoon(page, request, 'BS');
+        const row = page.locator(`[data-testid="recording-row"][data-program-id="${programId}"]`);
+
+        // 録り始めるのを待ってから切る
+        await expect(async () => {
+            await goto(page, '/');
+            await expect(page.getByTestId('reservation-row').filter({ hasText: '録画中' })).toHaveCount(1);
+        }).toPass({ timeout: 60_000 });
+
+        const cut = await request.post(`${stack.agentUrl}/__control/cut`);
+        expect((await cut.json()).cut).toBe(true);
+
+        // 切れても失敗にしない。掴み直して録り終える
+        await expect(async () => {
+            await goto(page, '/?all=1');
+            await expect(row.getByTestId('recording-state')).toHaveText('視聴可能');
+        }).toPass({ timeout: 90_000 });
+    });
+});

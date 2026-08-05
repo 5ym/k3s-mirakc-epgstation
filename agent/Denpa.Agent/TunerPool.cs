@@ -425,6 +425,29 @@ public sealed class TunerPool(
         }
     }
 
+    /// <summary>
+    /// いま録画に使われているか。**止めるときに待つかどうかの判断だけに使う。**
+    ///
+    /// <para>
+    /// 見ているのは <c>use</c> の頭。denpa は録画に <c>rec &lt;録画ID&gt;</c>、
+    /// それ以外に <c>epg</c> / <c>logo</c> / <c>scan</c> を渡してくる
+    /// (`src/lib/server/*.ts`)。番組表もロゴも切れたら取り直せばいいだけだが、
+    /// **放送は二度と来ない**ので、録画だけは終わるまで待つ。
+    /// </para>
+    /// </summary>
+    public bool Recording
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _leases.Values.Any(lease =>
+                    lease.Sinks.Any(sink =>
+                        sink.Use == "rec" || sink.Use.StartsWith("rec ", StringComparison.Ordinal)));
+            }
+        }
+    }
+
     /// <summary>全部畳む。止めるときに使う</summary>
     public void CloseAll()
     {

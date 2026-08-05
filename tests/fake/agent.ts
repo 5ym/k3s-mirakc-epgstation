@@ -226,7 +226,7 @@ function openStream(url: URL, signal: AbortSignal): Response {
     });
 }
 
-Bun.serve({
+const options: Bun.ServeOptions = {
     port: PORT,
     hostname: '0.0.0.0',
     idleTimeout: 0,
@@ -253,6 +253,27 @@ Bun.serve({
             return json({ ok: true, noPresentFollowing: knobs.noPresentFollowing });
         }
         if (url.pathname === '/__control/listeners') return json({ listeners: listeners.size });
+        /*
+         * **繋ぎを壊す。Pod を入れ替えたのと同じ形。**
+         *
+         * 接続ごと落として、その場で立て直す。読んでいる側には
+         * `The socket connection was closed unexpectedly` が飛ぶ — 本物で
+         * エージェントの Pod が入れ替わったときと同じ壊れ方。
+         *
+         * **ストリームを `controller.error()` で壊すのでは足りない。** それだと
+         * 読み手には EOF として届き (実測)、denpa は前から掴み直せていた。
+         * 直したかったのは例外で切れたほうなので、本当に接続を壊す。
+         *
+         * この応答を返しきってから壊す (返す前に壊すと、頼んだ側が結果を
+         * 受け取れない)
+         */
+        if (url.pathname === '/__control/cut' && request.method === 'POST') {
+            setTimeout(() => {
+                server.stop(true);
+                server = Bun.serve(options);
+            }, 50);
+            return json({ cut: true });
+        }
         if (url.pathname === '/__control/scrambled' && request.method === 'POST') {
             knobs.scrambled = url.searchParams.get('on') === '1';
             return json({ scrambled: knobs.scrambled });
@@ -328,6 +349,8 @@ Bun.serve({
         }
         return new Response('not found', { status: 404 });
     },
-});
+};
+
+let server = Bun.serve(options);
 
 console.log(`fake tuner agent listening on :${PORT}`);

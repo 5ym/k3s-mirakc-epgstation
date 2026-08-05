@@ -474,3 +474,77 @@ describe('機材の定義', () => {
         expect(res.status).toBe(400);
     });
 });
+
+/**
+ * **止められても、開いている選局が終わるまで畳まない。**
+ *
+ * ここが既定 (30秒) のままだった頃は、Pod を入れ替えるだけで TS が切れ、
+ * 始まって10秒の30分番組が丸ごと失敗した (実機)。denpa 側は録画が終わるまで
+ * 待つ作りなので、流しているこちらが先に消えると意味が無い。
+ *
+ * **別のエージェントを1つ立てて試す。** 上の一式を止めてしまうと、
+ * 残りのテストが相手を失う。
+ */
+describe('止まれと言われたとき', () => {
+    const PORT2 = PORT + 1;
+    const BASE2 = `http://127.0.0.1:${PORT2}`;
+
+    test('選局が開いている間は生きていて、離すと落ちる', async () => {
+        const room = mkdtempSync(join(tmpdir(), 'denpa-agent-stop-'));
+        writeFileSync(join(room, 'tuners.json'), TUNERS);
+        writeFileSync(join(room, 'channels.json'), JSON.stringify(channels(), null, 4));
+
+        const other = Bun.spawn(AGENT_CMD, {
+            cwd: ROOT,
+            env: {
+                ...process.env,
+                AGENT_PORT: String(PORT2),
+                TUNERS_FILE: join(room, 'tuners.json'),
+                CHANNELS_FILE: join(room, 'channels.json'),
+                RECORDED_DIR: join(room, 'recorded'),
+                FAKE_SLOTS: '4',
+                // 本番は6時間。テストなので短くするが、待つ道は同じ
+                SHUTDOWN_WAIT: '30000',
+            },
+            stdout: 'ignore',
+            stderr: 'ignore',
+        });
+
+        try {
+            // 立ち上がるまで待つ
+            for (let i = 0; i < 100; i++) {
+                try {
+                    if ((await fetch(`${BASE2}/denpa/tuners`)).ok) break;
+                } catch {
+                    // まだ聞いていない
+                }
+                await sleep(100);
+            }
+
+            const aborter = new AbortController();
+            const res = await fetch(`${BASE2}/denpa/stream?type=GR&channel=T16&use=rec&priority=10`, {
+                signal: aborter.signal,
+            });
+            expect(res.ok).toBe(true);
+            const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+            await reader.read();
+
+            other.kill('SIGTERM');
+
+            // **掴んでいる間は落ちない。** ついでに、切られずに読み続けられること
+            await sleep(1500);
+            expect(other.killed && other.exitCode !== null).toBe(false);
+            const still = await reader.read();
+            expect(still.done).toBe(false);
+
+            // 離せばそこで畳む
+            aborter.abort();
+            await Promise.race([other.exited, sleep(15_000)]);
+            expect(other.exitCode).not.toBeNull();
+        } finally {
+            other.kill('SIGKILL');
+            await other.exited;
+            rmSync(room, { recursive: true, force: true });
+        }
+    }, 60_000);
+});

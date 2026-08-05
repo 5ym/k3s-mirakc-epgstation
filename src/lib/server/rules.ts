@@ -233,9 +233,9 @@ export function applyRules(options: { rule?: number } = {}): RuleSync {
     const at = now();
     // 録画のしかたは全体で1つ。ルールごとに持たせるとどこで決まったか分からなくなる
     const recording = settings();
-    // 種別(GR/BS/CS)でも絞り込めるよう、番組にチャンネル種別を添えて取る
-    const programs = queryAll<Program & { service_type: string }>(
-        `SELECT p.*, s.type AS service_type FROM programs p
+    // 種別(GR/BS/CS)でも絞り込めるよう、番組にチャンネル種別と物理チャンネルを添えて取る
+    const programs = queryAll<Program & { service_type: string; channel: string }>(
+        `SELECT p.*, s.type AS service_type, s.channel AS channel FROM programs p
          JOIN services s ON s.id = p.service_id
          WHERE p.start_at > ? ORDER BY p.start_at`,
         at,
@@ -246,11 +246,32 @@ export function applyRules(options: { rule?: number } = {}): RuleSync {
 
     /** 番組 → 受け持つルール。同じ番組に何本当たっても予約は1つで、**先勝ち** */
     const wanted = new Map<number, { rule: Rule; program: Program }>();
+    /**
+     * **同じ放送は1本だけ。** 同じ物理チャンネルの中で、同じ時刻に同じ題名が
+     * 流れていたら同じ放送とみなし、いちばん小さい局だけを残す。
+     *
+     * 局は分割放送のために枝番を持っていて (TOKYO MX なら 23608 / 23609、
+     * どちらも名前は「TOKYO MX1」)、**分割していない間は同じ番組が両方に載る**。
+     * 素通しにしていた実機では、同じ回が2本録れたうえに、2つのエンコードが
+     * 同じ名前のファイルへ同時に書いて中身が壊れた。
+     *
+     * 中身が違うとき (MX1 と MX2 で別番組) は題名が違うので、両方残る。
+     */
+    const simulcast = new Map<string, { serviceId: number; programId: number }>();
     for (const program of programs) {
         const textOf = textCache(program);
         for (const candidate of searching) {
             if (!matchesCompiled(candidate, program, program.service_type, recording.freeOnly, textOf))
                 continue;
+            const key = `${program.channel} ${program.start_at} ${program.end_at} ${program.name}`;
+            const twin = simulcast.get(key);
+            if (twin !== undefined) {
+                // 枝番の小さいほうが本線 (MX1 なら 23608)。並び順に左右されないよう、
+                // あとから小さいものが来たら入れ替える
+                if (twin.serviceId <= program.service_id) break;
+                wanted.delete(twin.programId);
+            }
+            simulcast.set(key, { serviceId: program.service_id, programId: program.id });
             wanted.set(program.id, { rule: candidate.rule, program });
             break;
         }

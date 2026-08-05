@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json.Nodes;
 using Denpa.Agent;
@@ -51,6 +52,29 @@ builder.WebHost.ConfigureKestrel(options =>
     options.Limits.MinResponseDataRate = null;
 });
 builder.Logging.ClearProviders();
+
+/*
+ * **録画中に止められたら、終わるまで居座る** (denpa の `SHUTDOWN_WAIT` と同じ考え)。
+ *
+ * これが無かった頃は、**Pod を入れ替えるだけで録画が落ちた** — denpa 側は録画が
+ * 終わるまで待つ作りなのに、TS を流しているこちらが先に消えるので、掴んでいた
+ * ストリームごと切れる。実機で 30 分番組を始まって 10 秒で失っている。
+ *
+ * **Kestrel に任せることはできない。** 止まれの合図で畳みに入った時点で、
+ * 開いている応答への書き込みが止まる (実測: バイトが1つも進まなくなる)。
+ * だから**サーバが止まり始める前に**待つ。ここで待っている間は今までどおり
+ * 流れ続け、離してから畳みに入る。
+ *
+ * 待つのは録画だけ。番組表もロゴもスキャンも、切れたら取り直せばいいだけ。
+ *
+ * Kubernetes には `terminationGracePeriodSeconds` を一緒に伸ばしておくこと
+ * (足りないと待っている途中で SIGKILL される)。
+ */
+var shutdownWait = long.TryParse(Environment.GetEnvironmentVariable("SHUTDOWN_WAIT"), out var waitMs)
+    ? Math.Max(0, waitMs)
+    : 6 * 60 * 60 * 1000;
+builder.Services.AddSingleton<IHostLifetime>(services =>
+    new Drain(pool, shutdownWait, services.GetRequiredService<IHostApplicationLifetime>()));
 
 var app = builder.Build();
 
@@ -290,7 +314,19 @@ app.MapFallback((HttpContext http) =>
     Respond.Write(http, new JsonObject { ["ok"] = false, ["error"] = "not found" }, 404));
 
 await Card.EnsurePcscd();
-app.Lifetime.ApplicationStopping.Register(pool.CloseAll);
+
+/*
+ * **畳むのは、流し終えてから。**
+ *
+ * ここを `ApplicationStopping` でやっていた頃は、止まれの合図を受けたその場で
+ * 全部のチューナーを離していた。**録画中でも問答無用で切れる**ので、Pod を
+ * 入れ替えるだけで 30 分番組が始まって 10 秒で失敗している (実機)。
+ *
+ * `ApplicationStopped` は Kestrel が開いている応答を流し終えたあとに来る
+ * (その上限が上の `ShutdownTimeout`)。読み手が居なくなってから離せば、
+ * 録画は最後まで届く。
+ */
+app.Lifetime.ApplicationStopped.Register(pool.CloseAll);
 
 Log.Write($"listening on :{port} (tuners: {config.TunersFile} / channels: {config.ChannelsFile})");
 Log.Write($"チューナー {pool.Tuners.Count} 本 / チャンネル {config.LoadChannels().Count} 件");
@@ -318,5 +354,64 @@ internal static class Respond
         {
             return null;
         }
+    }
+}
+
+/// <summary>
+/// 止まれと言われてから、**録画が終わるまで待つ**もの。
+///
+/// <para>
+/// **合図をこちらで受け取る。** 既定の受け取り役 (ConsoleLifetime) に任せると、
+/// その場でホストが畳みに入り、**Kestrel が開いている応答への書き込みを止める**
+/// (実測: 合図の直後からバイトが1つも進まなくなる)。止めるかどうかを決める前に
+/// 止まってしまうので、受け取り役ごと差し替える。
+/// </para>
+///
+/// <para>
+/// 待つのは録画だけ (<see cref="TunerPool.Recording"/>)。番組表もロゴも
+/// 切れたら取り直せばいいが、放送は二度と来ない。待ち終えたら
+/// <c>StopApplication</c> を呼んで、いつもどおり畳ませる。
+/// </para>
+/// </summary>
+internal sealed class Drain(TunerPool pool, long waitMs, IHostApplicationLifetime lifetime)
+    : IHostLifetime, IDisposable
+{
+    private readonly List<PosixSignalRegistration> _signals = [];
+    private int _stopping;
+
+    public Task WaitForStartAsync(CancellationToken token)
+    {
+        foreach (var signal in new[] { PosixSignal.SIGTERM, PosixSignal.SIGINT, PosixSignal.SIGQUIT })
+        {
+            _signals.Add(PosixSignalRegistration.Create(signal, Handle));
+        }
+        return Task.CompletedTask;
+    }
+
+    private void Handle(PosixSignalContext context)
+    {
+        // 既定の即死を止める。畳むのはこちらから頼む
+        context.Cancel = true;
+        if (Interlocked.Exchange(ref _stopping, 1) == 1) return;
+        _ = Task.Run(WaitThenStop);
+    }
+
+    private async Task WaitThenStop()
+    {
+        if (waitMs > 0 && pool.Recording)
+        {
+            Log.Write($"止まれの合図。録画が終わるまで待ちます (上限 {waitMs / 1000} 秒)");
+            var until = DateTime.UtcNow.AddMilliseconds(waitMs);
+            while (pool.Recording && DateTime.UtcNow < until) await Task.Delay(1000);
+            Log.Write(pool.Recording ? "待ちきれないので畳みます" : "録画が終わったので畳みます");
+        }
+        lifetime.StopApplication();
+    }
+
+    public Task StopAsync(CancellationToken token) => Task.CompletedTask;
+
+    public void Dispose()
+    {
+        foreach (var registration in _signals) registration.Dispose();
     }
 }

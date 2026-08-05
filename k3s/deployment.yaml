@@ -20,6 +20,10 @@ spec:
         # 古い Pod がそのまま残る。中身を最後に変えたコミット (CI が書く)
         denpa.doany.io/agent-image: sha-1053265a9bd9
     spec:
+      # **録画中に入れ替えが来たら、終わるまで居座ってから止まる** (SHUTDOWN_WAIT)。
+      # denpa 側と同じ扱い。ここを既定 (30秒) のままにしていた頃は、Pod を
+      # 入れ替えるだけで TS が切れ、始まって10秒の30分番組が丸ごと失敗した
+      terminationGracePeriodSeconds: 21900
       containers:
         - name: tuner-agent
           image: ghcr.io/danything/denpa-agent:develop

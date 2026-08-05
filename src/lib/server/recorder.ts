@@ -267,14 +267,21 @@ async function pump(recording: Recording, controller: AbortController): Promise<
              * **選局は自分から切るまで終わらないもの。**
              *
              * 向こうから終わったなら、それは失敗である — 優先度で蹴られたか、
-             * recisdb が落ちたか、デバイスが黙ったか。掴み直せば続きが録れるので、
-             * 終了時刻が来るまでは何度でも掛け直す。
+             * デバイスが黙ったか、エージェントごと入れ替わったか。掴み直せば
+             * 続きが録れるので、終了時刻が来るまでは何度でも掛け直す。
              *
              * **EOF を「録り終えた」と読んではいけない。** HTTP を1枚挟むと、
              * エージェントが失敗として畳んだストリームも、こちらには正常終了
              * として届く (Bun は接続を壊さず、残りを打ち切るだけ)。ここを
              * 素直に受けていた頃は、蹴られた録画が尻切れのまま「録れた」に
-             * なっていた (`agent/conformance.test.ts`)
+             * なっていた (`agent/conformance.test.ts`)。
+             *
+             * **途中で例外が飛んだときも同じ扱いにする。** 繋ぎが切れると
+             * 読んでいる最中に投げてくる (`The socket connection was closed
+             * unexpectedly`)。ここを外へ抜けさせていた頃は、**エージェントの
+             * Pod を入れ替えただけで、始まって10秒の30分番組が丸ごと失敗した**
+             * (実機)。切れ方が EOF か例外かは向こうの都合で、こちらの
+             * 「掴み直せば続きが録れる」は変わらない
              */
             while (!controller.signal.aborted) {
                 const stream = await openWithRetry(
@@ -282,27 +289,33 @@ async function pump(recording: Recording, controller: AbortController): Promise<
                     controller.signal,
                 );
 
-                for await (const chunk of chunks(stream)) {
-                    if (config.followOnair && epg.feed(chunk) && eventId !== null) {
-                        const present = epg.present.get(service.service_id);
-                        if (
-                            present !== undefined &&
-                            present.eventId === eventId &&
-                            present.startAt !== null &&
-                            present.duration !== null
-                        ) {
-                            extendIfLonger(recording, present.startAt + present.duration);
+                /** 切れた理由。EOF なら null のまま */
+                let broke: unknown = null;
+                try {
+                    for await (const chunk of chunks(stream)) {
+                        if (config.followOnair && epg.feed(chunk) && eventId !== null) {
+                            const present = epg.present.get(service.service_id);
+                            if (
+                                present !== undefined &&
+                                present.eventId === eventId &&
+                                present.startAt !== null &&
+                                present.duration !== null
+                            ) {
+                                extendIfLonger(recording, present.startAt + present.duration);
+                            }
+                            if (Date.now() - savedEpgAt >= EPG_SAVE_INTERVAL) {
+                                savedEpgAt = Date.now();
+                                savePrograms(epg.all());
+                            }
                         }
-                        if (Date.now() - savedEpgAt >= EPG_SAVE_INTERVAL) {
-                            savedEpgAt = Date.now();
-                            savePrograms(epg.all());
-                        }
-                    }
 
-                    const out = filter.filter(chunk);
-                    if (out.length === 0) continue;
-                    written += out.byteLength;
-                    if (!sink.write(out)) await once(sink, 'drain');
+                        const out = filter.filter(chunk);
+                        if (out.length === 0) continue;
+                        written += out.byteLength;
+                        if (!sink.write(out)) await once(sink, 'drain');
+                    }
+                } catch (error) {
+                    broke = error ?? new Error('不明な理由');
                 }
 
                 // 終了時刻に達して自分で切った。ここだけが正常な終わり方
@@ -310,7 +323,8 @@ async function pump(recording: Recording, controller: AbortController): Promise<
 
                 interrupted++;
                 console.warn(
-                    `[recorder] 録画 ${recording.id}: 選局が切れました (${interrupted} 回目)。掴み直します`,
+                    `[recorder] 録画 ${recording.id}: 選局が切れました (${interrupted} 回目` +
+                        `${broke === null ? '' : `: ${broke}`})。掴み直します`,
                 );
                 await new Promise((resolve) => setTimeout(resolve, OPEN_RETRY_WAIT));
             }

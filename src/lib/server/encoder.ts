@@ -842,15 +842,25 @@ async function runJob(jobId: number): Promise<void> {
      */
     emit('recordings');
 
-    const output = libraryPath(recording, '.mkv');
-    mkdirSync(dirname(output), { recursive: true });
+    /*
+     * **置き場所は出来上がってから決める** (下の `renameSync` の直前)。
+     * ここで決めた名前を最後まで使うと、**同じ番組を2本同時に焼いたときに
+     * 両方が同じ名前を選ぶ** — どちらもまだ書き終えていないので、
+     * `libraryPath` の「空いているか」がどちらにも空いて見える。
+     * いま要るのは置き場所ではなく**フォルダ**だけ
+     */
+    mkdirSync(dirname(libraryPath(recording, '.mkv')), { recursive: true });
 
     /*
      * いったん別名に書いてから置き換える。
      * 同じ番組を録り直すと入力と出力が同じ場所になることがあり、
-     * そのまま書くと元を壊す。失敗したときに元が消えないのも同じ理由
+     * そのまま書くと元を壊す。失敗したときに元が消えないのも同じ理由。
+     *
+     * **ジョブごとに別の名前にする。** ここを番組名だけで決めていた頃は、
+     * 同じ番組の2本が**1つの作業ファイルに同時に書き込み**、片方は
+     * 壊れたまま「成功」、もう片方は rename で `ENOENT` になっていた (実機)
      */
-    const working = `${output}.encoding`;
+    const working = `${libraryPath(recording, '.mkv')}.${jobId}.encoding`;
 
     // スクランブルが掛かったまま録れていたら、ここで解く (scramble.ts)
     /** 後始末で消す作業ファイル。生TSを置き換えたときは残す側になるので null のまま */
@@ -1030,7 +1040,14 @@ async function runJob(jobId: number): Promise<void> {
         return;
     }
 
-    // ここで初めて本来の場所に置く。同じ名前なら上書きになる
+    /*
+     * **ここで初めて置き場所を決める。**
+     *
+     * 同じ番組の別の録画が先に置き終えていれば、`libraryPath` がそれを見て
+     * `[録画ID]` を足した名前を返す。決めてから `renameSync` までの間に
+     * `await` を挟まないので、2本が同じ名前を掴むことはない (同じプロセスの中)
+     */
+    const output = libraryPath(recording, '.mkv');
     renameSync(working, output);
     /*
      * 番組名が変わっていると置き場所も変わる。前のエンコード済みが別名で残ると

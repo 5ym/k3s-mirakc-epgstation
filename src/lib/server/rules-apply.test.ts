@@ -236,3 +236,94 @@ describe('ルールを当て直す', () => {
         ]);
     });
 });
+
+/**
+ * **枝番の局に同じ番組が載っているとき。**
+ *
+ * 局は分割放送のために枝番を持っていて (TOKYO MX なら 23608 / 23609、名前まで
+ * どちらも「TOKYO MX1」)、**分割していない間は同じ回が両方に載る**。素通しに
+ * していた実機では同じ回が2本録れ、さらに2つのエンコードが同じ名前のファイルへ
+ * 同時に書いて中身まで壊れた。
+ */
+describe('同じ放送は1本だけ', () => {
+    const MX2 = 3239123610;
+
+    function sub(id: number, name: string, channel = 'T16'): void {
+        database()
+            .prepare(
+                `INSERT OR REPLACE INTO services
+                    (id, service_id, network_id, name, type, service_type, channel, has_logo, updated_at)
+                 VALUES (?, ?, 32391, ?, 'GR', 1, ?, 0, ?)`,
+            )
+            .run(id, id % 100000, name, channel, now());
+    }
+
+    /** 局を指定して番組を1つ置く */
+    function on(serviceId: number, id: number, name: string, startsIn = 3 * HOUR): void {
+        const start = now() + startsIn;
+        database()
+            .prepare(
+                `INSERT OR REPLACE INTO programs
+                    (id, service_id, network_id, event_id, start_at, end_at, name, description, is_free, updated_at)
+                 VALUES (?, ?, 32391, ?, ?, ?, ?, '', 1, ?)`,
+            )
+            .run(id, serviceId, id, start, start + HOUR, name, now());
+    }
+
+    test('枝番の小さいほうだけ録る', () => {
+        reset();
+        // 23609 は MX1 の枝番。名前まで同じで、同じ回が載っている
+        sub(SERVICE + 1, 'TOKYO MX1');
+        rule(1, '幼女戦記');
+        on(SERVICE, 10, '幼女戦記Ⅱ #5「貧乏籤」');
+        on(SERVICE + 1, 11, '幼女戦記Ⅱ #5「貧乏籤」');
+
+        expect(applyRules()).toMatchObject({ created: 1 });
+        expect(reservations()).toEqual([{ program_id: 10, rule_id: 1, state: 'scheduled' }]);
+    });
+
+    test('番組表に載る順が逆でも同じ答え', () => {
+        reset();
+        sub(SERVICE + 1, 'TOKYO MX1');
+        rule(1, '幼女戦記');
+        // 枝番の大きいほうを先に見る並び (id が小さいほうが先に出る)
+        on(SERVICE + 1, 10, '幼女戦記Ⅱ #5「貧乏籤」');
+        on(SERVICE, 11, '幼女戦記Ⅱ #5「貧乏籤」');
+
+        expect(applyRules()).toMatchObject({ created: 1 });
+        expect(reservations()).toEqual([{ program_id: 11, rule_id: 1, state: 'scheduled' }]);
+    });
+
+    test('中身が違えば両方録る', () => {
+        reset();
+        // 分割している時間。MX1 と MX2 で別の番組を流している
+        sub(MX2, 'TOKYO MX2');
+        rule(1, '幼女戦記');
+        on(SERVICE, 10, '幼女戦記Ⅱ #5「貧乏籤」');
+        on(MX2, 11, '幼女戦記Ⅱ 一挙放送');
+
+        expect(applyRules()).toMatchObject({ created: 2 });
+        expect(reservations()).toHaveLength(2);
+    });
+
+    test('時刻が違えば別の放送', () => {
+        reset();
+        rule(1, '幼女戦記');
+        on(SERVICE, 10, '幼女戦記Ⅱ #5「貧乏籤」');
+        // 同じ局の再放送。名前もチャンネルも同じだが、時刻が違う
+        on(SERVICE, 11, '幼女戦記Ⅱ #5「貧乏籤」', 27 * HOUR);
+
+        expect(applyRules()).toMatchObject({ created: 2 });
+    });
+
+    test('別のチャンネルなら両方録る', () => {
+        reset();
+        // 系列局の同時ネット。チューナーも別なので、どちらも録れる
+        sub(3273801040, 'テレビ愛知', 'T23');
+        rule(1, '幼女戦記');
+        on(SERVICE, 10, '幼女戦記Ⅱ #5「貧乏籤」');
+        on(3273801040, 11, '幼女戦記Ⅱ #5「貧乏籤」');
+
+        expect(applyRules()).toMatchObject({ created: 2 });
+    });
+});
