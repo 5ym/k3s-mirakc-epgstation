@@ -352,7 +352,8 @@
                                 role="button"
                                 tabindex="0"
                                 onclick={() => detail.open(program.id, program)}
-                                onkeydown={(event) => event.key === 'Enter' && detail.open(program.id, program)}
+                                onkeydown={(event) =>
+                                    event.key === 'Enter' && detail.open(program.id, program)}
                             >
                                 <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
                                     {#if program.reservation_state}
