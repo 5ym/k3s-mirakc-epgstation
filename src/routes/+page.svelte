@@ -20,8 +20,8 @@
         stateLabel,
         time,
     } from '$lib/format';
+    import { type DetailSeed, programDetail } from '$lib/detail.svelte';
     import { encodeSource } from '$lib/source';
-    import type { ProgramDetail as Detail } from '$lib/types';
 
     let { data, form } = $props();
 
@@ -65,8 +65,8 @@
         return list;
     });
 
-    /** 行から開いた番組詳細。番組表と同じ見せ方をする */
-    let detail = $state<Detail | null>(null);
+    /** 行から開いた番組詳細。番組表と同じ見せ方をする (detail.svelte.ts) */
+    const detail = programDetail();
     /** その行が失敗・削除された理由。詳細の中で見せる */
     let detailNotes = $state<{ title: string; text: string }[]>([]);
     /**
@@ -83,48 +83,21 @@
      */
     let detailRec = $state<(typeof data.recordings)[number] | null>(null);
 
-    /** 続けて別の行を押したとき、遅れて届いた前の結果で上書きされないようにする */
-    let opened = 0;
-
-    /** 行が自分で持っている分。EPG から引けなくても、これだけは必ず出せる */
-    interface Row {
-        name: string;
-        service_name: string;
-        description: string;
-        start_at: number;
-        end_at: number;
-    }
-
     /**
-     * 行を押したら番組詳細を出す。
-     *
-     * まず行が持っている分をすぐ出し、EPG から引けたら中身を差し替える。
-     * 古い録画は番組が EPG から消えているので、引けないことのほうが普通。
+     * 行を押したら番組詳細を出す。中身の出し方は `detail` が持っている。
+     * ここで決めるのは、その行に添える札 (失敗の理由・CMの判定) だけ。
      */
-    async function openDetail(
+    function openDetail(
         programId: number | null,
-        row: Row,
+        row: DetailSeed,
         notes: { title: string; text: string }[] = [],
         cmNote: string | null = null,
-    ): Promise<void> {
-        const token = ++opened;
+    ): void {
         // 予約から開いたときは録画のボタンを出さない (openRecording が入れ直す)
         detailRec = null;
         detailNotes = notes;
         detailCmNote = cmNoteWorthShowing(cmNote) ? cmNote : null;
-        detail = {
-            ...row,
-            extended: null,
-            genre_detail: null,
-            audios: null,
-            video_type: null,
-            video_resolution: null,
-            is_free: 1,
-        };
-        if (programId === null) return;
-
-        const res = await fetch(`/api/programs/${programId}`);
-        if (res.ok && token === opened) detail = await res.json();
+        void detail.open(programId, row);
     }
 
     /**
@@ -208,7 +181,7 @@
         if (rec.encode_error) {
             notes.push({ title: 'エンコードに失敗しました', text: rec.encode_error });
         }
-        void openDetail(rec.program_id, rec, notes, rec.cm_note);
+        openDetail(rec.program_id, rec, notes, rec.cm_note);
         detailRec = rec;
     }
 </script>
@@ -626,12 +599,12 @@
     </div>
 </div>
 
-{#if detail}
+{#if detail.current}
     <ProgramDetail
-        program={detail}
+        program={detail.current}
         notes={detailNotes}
         cmNote={detailCmNote}
-        onclose={() => (detail = null)}
+        onclose={() => detail.close()}
         actions={detailRec === null ? undefined : recordingActions}
     />
 {/if}
@@ -658,7 +631,7 @@
                 class="btn btn-outline"
                 href={downloadUrl(rec.id)}
                 download
-                onclick={() => (detail = null)}
+                onclick={() => detail.close()}
                 data-testid="download-link"
             >
                 ダウンロード
@@ -676,7 +649,7 @@
                     action="?/reencode"
                     use:submitting={() => async (options) => {
                         await options.update();
-                        detail = null;
+                        detail.close();
                     }}
                 >
                     <input type="hidden" name="id" value={rec.id} />
@@ -685,5 +658,5 @@
             {/if}
         {/if}
     {/if}
-    <button class="btn" onclick={() => (detail = null)} data-testid="detail-close">閉じる</button>
+    <button class="btn" onclick={() => detail.close()} data-testid="detail-close">閉じる</button>
 {/snippet}

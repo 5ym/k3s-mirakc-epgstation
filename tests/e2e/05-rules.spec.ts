@@ -67,6 +67,32 @@ test.describe('キーワードを当てる範囲', () => {
         // 選んだ範囲は結果と一緒に残る。押し直すたびに戻ると使えない
         await expect(page.getByTestId('rule-search-fields').locator('input[value="extended"]')).toBeChecked();
     });
+
+    /*
+     * **この条件で本当にこれを録りたいのか**は、題名と局と時刻だけでは決められない。
+     * 同じ題名の再放送、傍題の違い、番組の中身は詳細にしか無く、確かめるには
+     * 番組表を別に開いて探し直すことになっていた。予約一覧と同じ詳細をここでも出す
+     */
+    test('プレビューの行を押すと、番組詳細が出る', async ({ page, request }) => {
+        await syncEpg(request);
+        await goto(page, '/rules');
+        await page.getByTestId('rule-keyword').fill('テストアニメ');
+        await page.getByTestId('rule-preview').click();
+
+        const row = page.getByTestId('preview-row').first();
+        await expect(row).toBeVisible();
+        await row.getByTestId('preview-open').click();
+
+        // 行が持っているのは題名・局・時刻だけ。EPG から引いた中身まで出ること
+        const detail = page.getByTestId('program-detail');
+        await expect(detail).toBeVisible();
+        await expect(detail).toContainText('ゲスト太郎');
+
+        // 予約する口は出さない。足すかどうかを決めるのはルールの条件のほう
+        await expect(detail.getByTestId('detail-reserve')).toHaveCount(0);
+        await page.getByTestId('detail-close').click();
+        await expect(detail).toHaveCount(0);
+    });
 });
 
 test.describe('ジャンル指定', () => {

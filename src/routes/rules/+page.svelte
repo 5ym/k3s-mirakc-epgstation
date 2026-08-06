@@ -1,7 +1,9 @@
 <script lang="ts">
     import { submitting } from '$lib/actions';
     import { GENRE_TREE, genreName } from '$lib/arib';
+    import ProgramDetail from '$lib/components/ProgramDetail.svelte';
     import Toasts, { type Notice } from '$lib/components/Toasts.svelte';
+    import { programDetail } from '$lib/detail.svelte';
     import { badgeClass, CM_LABEL, dateTime, stateLabel } from '$lib/format';
     import { jsonArray } from '$lib/json';
     import { parseSearchFields, SEARCH_FIELD_LABEL, SEARCH_FIELDS, searchFieldLabel } from '$lib/search';
@@ -15,6 +17,15 @@
     const seedFields = $derived(parseSearchFields(data.seed?.search_fields));
 
     const TYPE_LABEL: Record<string, string> = { GR: '地上波', BS: 'BS', CS: 'CS', SKY: 'SKY' };
+
+    /**
+     * プレビューの行から開く番組詳細 (detail.svelte.ts)。予約一覧と同じ見せ方。
+     *
+     * 出しているのは番組名と局と時刻だけで、**この条件で本当にこれを録りたいのか**は
+     * それだけでは決められなかった。同じ題名の再放送・傍題の違い・番組の中身は
+     * 詳細にしか無く、確かめるには番組表を別に開いて探し直すことになっていた
+     */
+    const detail = programDetail();
 
     function channels(rule: { service_types: string | null; service_ids: string | null }): string {
         const parts = [
@@ -328,7 +339,21 @@
                             data-testid="preview-row"
                             data-program-id={program.id}
                         >
-                            <div class="min-w-0 flex-1 basis-64">
+                            <!--
+                                押すと番組詳細が出る。予約一覧・番組表と同じもの。
+
+                                **押せるのは中身のところだけ。** 行ごと押せるようにすると
+                                取消ボタンまで詳細を開く的の中に入り、押し間違えたときに
+                                何が起きたのか分からなくなる
+                            -->
+                            <div
+                                class="hover:bg-base-200/60 min-w-0 flex-1 basis-64 cursor-pointer rounded"
+                                data-testid="preview-open"
+                                role="button"
+                                tabindex="0"
+                                onclick={() => detail.open(program.id, program)}
+                                onkeydown={(event) => event.key === 'Enter' && detail.open(program.id, program)}
+                            >
                                 <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
                                     {#if program.reservation_state}
                                         <span
@@ -399,6 +424,16 @@
             {/if}
         </div>
     </div>
+{/if}
+
+<!--
+    プレビューの行から開いた番組詳細。**押すものは「閉じる」だけ。**
+    予約・取消はここに出さない — 予約するかどうかはルールの条件が決めるところで、
+    1件ずつ手で足せると「ルールが作ったのか自分で足したのか」が後から分からなくなる
+    (取り消しだけは行に置いてある)
+-->
+{#if detail.current}
+    <ProgramDetail program={detail.current} onclose={() => detail.close()} />
 {/if}
 
 <!--
