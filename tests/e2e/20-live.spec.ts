@@ -64,6 +64,18 @@ test.describe('ライブ視聴', () => {
     });
 
     /*
+     * **既定で黙らせない。** `muted` を書き付けていた頃は、開いても永久に
+     * 無音だった (備え付けの操作で外すまで誰も気付けない)。黙るのは
+     * 自動再生を断られたときだけで、そのときは押せる場所を出す
+     */
+    test('音を止めた状態では始めない', async ({ page }) => {
+        await goto(page, '/live');
+        await expect(page.getByTestId('live-video')).toBeVisible();
+        const muted = await page.getByTestId('live-video').evaluate((v) => (v as HTMLVideoElement).muted);
+        expect(muted).toBe(false);
+    });
+
+    /*
      * **繋がったことは、掴んだチューナーで分かる。** 画面に絵が出ないので、
      * 「押したら何かが起きた」をこちらで見る。用途に `live` と出るのは
      * ライブ視聴だけなので、これが出ていれば経路は通っている

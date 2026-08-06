@@ -63,15 +63,33 @@
         <div class="bg-base-300 relative aspect-video max-h-full overflow-hidden rounded-lg">
             <!-- svelte-ignore a11y_media_has_caption -->
             <!-- 字幕は第2段階。放送の字幕は canvas に重ねる (docs/stream.md §5.2) -->
+            <!--
+                **`autoplay` と `muted` は付けない。** 鳴らし始めるのは
+                `live-player` の役目で、音ありで断られたときだけ自分で黙る。
+                ここで `muted` にすると、断られていないときまで無音になる
+            -->
             <video
                 bind:this={video}
                 class="h-full w-full bg-black"
-                autoplay
-                muted
                 playsinline
                 controls
                 data-testid="live-video"
             ></video>
+
+            {#if player.silenced && player.state === 'playing'}
+                <!--
+                    **押されるまで音は出せない。** 前回のチャンネルで勝手に
+                    始める作りなので、開いた直後は「押した」ことになっておらず、
+                    ブラウザが音ありの再生を断る。押せる場所を出す
+                -->
+                <button
+                    class="btn btn-sm btn-neutral absolute top-3 left-3 gap-2"
+                    onclick={() => player.unmute()}
+                    data-testid="live-unmute"
+                >
+                    音を出す
+                </button>
+            {/if}
 
             {#if player.state !== 'playing'}
                 <!-- 何も出ていない間に何が起きているかを出す。黒いままだと壊れて見える -->

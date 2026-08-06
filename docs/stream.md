@@ -239,6 +239,17 @@ tsreadex -x 18/38/39 -n -1 -a 13 -b 5 -c 1 -u 1 - \
 - Node 側は `spawn(..., { stdio: ['pipe','pipe','pipe','pipe','pipe'] })`
 - **`-copyts` 必須**（元TSの90kHz PTSを維持し、字幕・データ放送と同一時間軸に揃える）
 
+> **第1段階は1本の pipe に多重化している**（実装の都合。SourceBuffer も1つ）。
+> このとき `frag_every_frame` は使えない — 映像だけ・音声だけの moof が交互に並び、
+> MSE がそれぞれを別の区切りとして扱うため、映像と音声が別々に並べ直されて
+> 絵が絶えず引っかかる。代わりに `-frag_duration 200000`（0.2秒）で切り、
+> 1つの塊に両トラックを入れている。トラックごとに pipe を分ける形（上の設計）へ
+> 移せば `frag_every_frame` に戻せる。
+>
+> あわせて、クライアント側の SourceBuffer は `segments`（既定）で使う。
+> `sequence` は「届いた順に詰める」動きなので、1つ取りこぼすと以降ずっとずれる。
+> 再生位置の面倒（貯めてから出す・離れたら速める）は `src/lib/ts/pacing.ts`。
+
 AV1 のリアルタイムエンコードはソフトウェアでは厳しい。実運用では
 `av1_nvenc`（RTX40以降）/ `av1_qsv`（Arc・Meteor Lake以降）/ `av1_amf`（RDNA3以降）を前提とする。
 

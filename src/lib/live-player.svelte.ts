@@ -7,6 +7,7 @@
  */
 
 import { CHANNEL, type Command, type Notice, SOCKET_PATH } from '$lib/live';
+import { pacing } from '$lib/ts/pacing';
 
 export type LiveState = 'idle' | 'connecting' | 'playing' | 'error';
 
@@ -37,10 +38,16 @@ export function livePlayer() {
     let state = $state<LiveState>('idle');
     let message = $state('');
     let tuned = $state<Tuned | null>(null);
+    /** 音を止められているか。**自動再生を断られたときだけ立つ** */
+    let silenced = $state(false);
 
     let socket: WebSocket | null = null;
     let source: MediaSource | null = null;
     let buffer: SourceBuffer | null = null;
+    /** いま鳴らしている器。押して音を出すのに要る */
+    let element: HTMLVideoElement | null = null;
+    /** もう再生を始めたか。始めるまでは貯める */
+    let running = false;
     /**
      * 追加待ちの列。**`appendBuffer` は1つずつしか受け付けない** —
      * 前のが終わる前に呼ぶと `InvalidStateError` で止まる
@@ -60,15 +67,60 @@ export function livePlayer() {
     }
 
     /**
-     * 溜まったぶんを捨てる。**放送は待ってくれない。**
+     * 再生位置を面倒みる。**届いた端でそのまま出すと、絶えず止まる。**
      *
-     * 見ている人が別のタブへ行くと、その間ぶん溜まって戻ってきたときに
-     * 何分も遅れて再生される。持つのは直近だけにして、常に端へ寄せる。
+     * 少し貯めてから始め、離れたら速めて詰める ([pacing.ts](./ts/pacing.ts))。
+     * 別のタブへ行って戻ってきたときだけ跳ぶ — 跳ぶと音が切れるので、
+     * 常用するとそれ自体が「かくつき」になる。
      */
-    function trim(video: HTMLVideoElement): void {
+    function pace(video: HTMLVideoElement): void {
         if (buffer === null || buffer.updating || buffer.buffered.length === 0) return;
-        const end = buffer.buffered.end(buffer.buffered.length - 1);
-        if (end - video.currentTime > 10) video.currentTime = end - 0.5;
+        const next = pacing({
+            start: buffer.buffered.start(0),
+            end: buffer.buffered.end(buffer.buffered.length - 1),
+            at: video.currentTime,
+            playing: running,
+        });
+
+        if (next.seek !== null) video.currentTime = next.seek;
+        if (next.rate !== null) video.playbackRate = next.rate;
+        if (next.play && !running) {
+            running = true;
+            state = 'playing';
+            void play(video);
+        }
+    }
+
+    /**
+     * 鳴らす。**断られたら、音を諦めて絵だけ出す。**
+     *
+     * 前回のチャンネルで勝手に始める作りなので、開いた直後は「押した」ことに
+     * なっていない。その状態で音ありの再生を求めると、ブラウザは丸ごと断る —
+     * 黙って諦めると、絵も出ないまま黒い画面が残る。
+     */
+    async function play(video: HTMLVideoElement): Promise<void> {
+        video.muted = silenced;
+        try {
+            await video.play();
+        } catch {
+            video.muted = true;
+            silenced = true;
+            try {
+                await video.play();
+            } catch {
+                // それでも駄目。備え付けの再生ボタンを押してもらう
+            }
+        }
+    }
+
+    /** 音を出す。**押されて呼ばれる** — ここまで来ればブラウザは断らない */
+    function unmute(): void {
+        silenced = false;
+        if (element === null) return;
+        element.muted = false;
+        void element.play().catch(() => {
+            /* 押したのに断られることはない */
+        });
     }
 
     function reset(): void {
@@ -76,6 +128,7 @@ export function livePlayer() {
         socket = null;
         buffer = null;
         source = null;
+        running = false;
         pending.length = 0;
     }
 
@@ -84,6 +137,7 @@ export function livePlayer() {
         state = 'connecting';
         message = '';
         tuned = target;
+        element = video;
         localStorage.setItem(LAST, JSON.stringify(target));
 
         /*
@@ -173,20 +227,22 @@ export function livePlayer() {
         }
         const media = new MediaSource();
         source = media;
+        running = false;
         video.src = URL.createObjectURL(media);
         media.addEventListener(
             'sourceopen',
             () => {
                 URL.revokeObjectURL(video.src);
                 buffer = media.addSourceBuffer(codecs);
-                buffer.mode = 'sequence';
+                /*
+                 * **並べ直させない** (`sequence` にしない)。焼いたものの時刻を
+                 * そのまま使う。並べ直しは「届いた順に詰める」動きなので、
+                 * 1つでも取りこぼすと以降ずっと映像と音声がずれる
+                 */
+                buffer.mode = 'segments';
                 buffer.addEventListener('updateend', () => {
                     drain();
-                    trim(video);
-                });
-                state = 'playing';
-                void video.play().catch(() => {
-                    /* 自動再生を止められた。押せば出る */
+                    pace(video);
                 });
                 drain();
             },
@@ -204,7 +260,12 @@ export function livePlayer() {
         get tuned() {
             return tuned;
         },
+        /** 音を止められているか。押して出してもらう */
+        get silenced() {
+            return silenced;
+        },
         tune,
+        unmute,
         stop: reset,
     };
 }

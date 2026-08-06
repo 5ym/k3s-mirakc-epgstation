@@ -38,9 +38,17 @@ import type { Connection } from './ws';
  *
  * - `-fflags nobuffer` `-flags low_delay` … 溜めない
  * - `-tune zerolatency` … B フレームを作らない (作ると必ず遅れる)
- * - `frag_every_frame` … フレームごとに moof/mdat を出す。これが無いと
- *   ffmpeg は数秒ぶん溜めてから出すので、その場でライブでなくなる
+ * - `-frag_duration` … 0.2秒ぶんずつ moof/mdat を出す。既定では ffmpeg が
+ *   数秒溜めてから出すので、その場でライブでなくなる
  * - `-copyts` … 元TSの90kHz PTS を保つ。第2段階で字幕と揃えるのに要る
+ *
+ * ## コマごとに切らない
+ *
+ * `frag_every_frame` にすると、**映像だけ・音声だけの塊が交互に並ぶ**。
+ * mp4 の多重化はトラックごとにコマの来る間隔が違うためで、受け側の MSE は
+ * その1つ1つを別の区切りとして扱う。結果、映像と音声が別々に並べ直されて、
+ * 絵は絶えず引っかかり、音はずれる。0.2秒で切れば1つの塊に両方入る。
+ * 遅れは 0.2 秒増えるが、見られる絵になるほうが先。
  *
  * **インタレ解除は録画と同じ判断で行う** (`encoder.deinterlace`)。放送は 1080i
  * なので、解かずにブラウザへ渡すと動きのある場面が櫛状になる。国内アニメだけ
@@ -85,7 +93,10 @@ function encodeArgs(smooth: boolean): string[] {
         '-f',
         'mp4',
         '-movflags',
-        '+empty_moov+frag_every_frame+default_base_moof',
+        '+empty_moov+default_base_moof',
+        // 0.2秒ぶんずつ。コマごとに切ると映像と音声が別々の塊になる (上の説明)
+        '-frag_duration',
+        '200000',
         '-flush_packets',
         '1',
         'pipe:1',
