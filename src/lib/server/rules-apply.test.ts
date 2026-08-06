@@ -28,7 +28,17 @@ const CLEAR = 'DELETE FROM reservations; DELETE FROM programs; DELETE FROM rules
  */
 afterAll(() => database().exec(CLEAR));
 
+/**
+ * 番組を置く基準の時刻。**`reset()` のたびに1回だけ読む。**
+ *
+ * 番組ごとに `now()` を読んでいた頃は、枝番の2本を続けて置いた拍子にミリ秒を
+ * 跨ぐと開始時刻が 1ms ずれ、**「同じ放送」に見えなくなって**いた。
+ * 寄せの判定が時刻ちょうどの一致なので、10回に1回ほど落ちる。
+ */
+let base = now();
+
 function reset(): void {
+    base = now();
     const db = database();
     db.exec(CLEAR);
     db.prepare(
@@ -39,7 +49,7 @@ function reset(): void {
 
 /** 番組を1つ置く。既定は3時間後から (猶予の外) */
 function program(id: number, name: string, startsIn = 3 * HOUR): void {
-    const start = now() + startsIn;
+    const start = base + startsIn;
     database()
         .prepare(
             `INSERT OR REPLACE INTO programs
@@ -260,7 +270,7 @@ describe('同じ放送は1本だけ', () => {
 
     /** 局を指定して番組を1つ置く */
     function on(serviceId: number, id: number, name: string, startsIn = 3 * HOUR): void {
-        const start = now() + startsIn;
+        const start = base + startsIn;
         database()
             .prepare(
                 `INSERT OR REPLACE INTO programs
