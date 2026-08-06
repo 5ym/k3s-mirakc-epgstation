@@ -22,7 +22,14 @@ export const PID_EIT = 0x0012;
 
 const TABLE_PF_ACTUAL = 0x4e;
 const SCHEDULE_ACTUAL_MIN = 0x50;
+/** 詳細 (extended) の表はここから。基本と同じ並びがもう一度始まる */
+const SCHEDULE_ACTUAL_EXTENDED = 0x58;
 const SCHEDULE_ACTUAL_MAX = 0x5f;
+
+/** セグメント1つが受け持つ時間。0:00 から3時間ずつ、1日8つ */
+const SEGMENT_SPAN = 3 * 3600_000;
+/** 1つの table_id が持つセグメントの数 (= 4日ぶん) */
+const SEGMENTS_PER_TABLE = 32;
 
 const DESC_SHORT_EVENT = 0x4d;
 const DESC_EXTENDED_EVENT = 0x4e;
@@ -281,8 +288,11 @@ export function parseEit(section: Uint8Array): EitSection | null {
  *
  * セクションは**8本ずつのセグメント**に分かれていて、セグメントの中で実際に
  * 使われている最後の番号が `segment_last_section_number`。使われていない番号は
- * 永久に来ないので、そこまで揃えばそのセグメントは終わり。空のセグメントでも
- * 先頭の1本 (8の倍数) は必ず流れてくるので、それを受け取れたかで判断できる。
+ * 永久に来ないので、そこまで揃えばそのセグメントは終わり。
+ *
+ * **過ぎた時間帯のセグメントは流れてこない** (`stale`)。空でも先頭の1本は必ず
+ * 来るものとして待っていた頃は、**どのチャンネルも例外なく上限まで
+ * 開きっぱなし**になっていた (実機14チャンネル、揃って離せたのは0本)。
  */
 export class ScheduleProgress {
     /** `table_id` → 受け取ったセクション番号 */
@@ -302,6 +312,12 @@ export class ScheduleProgress {
      * 二度と無いので、どのチャンネルも1本5分の上限まで開きっぱなしになる。
      */
     private readonly version = new Map<number, number>();
+
+    /**
+     * @param now いまの時刻。過ぎた時間帯を判断するのに使う。
+     *   時計を跨いで開いていることがあるので、値ではなく関数で受ける
+     */
+    constructor(private readonly now: () => number = Date.now) {}
 
     add(section: EitSection): void {
         // p/f は番組表の完成度とは関係ない (いつでも2番組しか無い)
@@ -356,6 +372,7 @@ export class ScheduleProgress {
         if (numbers === undefined || last === undefined) return false;
 
         for (let start = 0; start <= last; start += 8) {
+            if (this.stale(tableId, start)) continue;
             const segmentLast = this.segmentLast.get(`${tableId}:${start}`);
             // セグメントの先頭すら来ていない。まだ待つ
             if (segmentLast === undefined) return false;
@@ -364,6 +381,29 @@ export class ScheduleProgress {
             }
         }
         return true;
+    }
+
+    /**
+     * そのセグメントの時間帯がもう過ぎているか。**過ぎたものは待たない。**
+     *
+     * セグメントは 0:00 から3時間ずつの枠で、`table_id` と節番号から
+     * それがいつの枠なのかが決まる — 基本は `0x50` が当日 0:00 から4日ぶん、
+     * `0x51` がその次の4日ぶん。詳細 (`0x58`〜) も同じ並びをもう一度たどる。
+     *
+     * **終わった枠は放送に乗らない。** 「空でも先頭の1本は来る」として
+     * 待っていた頃は、実機で 0:00〜いまの枠がまるごと欠けたまま埋まらず、
+     * **14チャンネル全部が上限の600秒を使い切って**いた。1つも早く離せず、
+     * チューナーが常に番組表で埋まる。
+     *
+     * 過ぎた枠のぶんの番組は、そこが未来だった数日前に取り込んである。
+     */
+    private stale(tableId: number, start: number): boolean {
+        const base = tableId < SCHEDULE_ACTUAL_EXTENDED ? SCHEDULE_ACTUAL_MIN : SCHEDULE_ACTUAL_EXTENDED;
+        const segment = (tableId - base) * SEGMENTS_PER_TABLE + start / 8;
+        const now = this.now();
+        const offset = JST_OFFSET * 1000;
+        const midnight = Math.floor((now + offset) / 86400_000) * 86400_000 - offset;
+        return midnight + (segment + 1) * SEGMENT_SPAN <= now;
     }
 
     /**
@@ -386,6 +426,8 @@ export class ScheduleProgress {
             const last = this.lastSection.get(tableId) ?? 0;
             const holes: number[] = [];
             for (let start = 0; start <= last; start += 8) {
+                // 待っていないものを「足りない」と言わない。数え方と揃える
+                if (this.stale(tableId, start)) continue;
                 const segmentLast = this.segmentLast.get(`${tableId}:${start}`);
                 if (segmentLast === undefined) {
                     holes.push(start);
@@ -423,6 +465,9 @@ export class EpgReader {
     /** p/f で「いま流れている」と言われた番組。録画の延長追従はこれを見る */
     readonly present = new Map<number, EitEvent>();
 
+    /** @param now いまの時刻。局ごとの `ScheduleProgress` にそのまま渡す */
+    constructor(private readonly now: () => number = Date.now) {}
+
     /** 任意の長さのバイト列を食わせる。番組が1つでも増えたら true */
     feed(chunk: Uint8Array): boolean {
         let added = false;
@@ -431,7 +476,7 @@ export class EpgReader {
                 const section = parseEit(raw);
                 if (section === null) continue;
                 if (section.tableId >= SCHEDULE_ACTUAL_MIN) {
-                    const progress = this.progress.get(section.serviceId) ?? new ScheduleProgress();
+                    const progress = this.progress.get(section.serviceId) ?? new ScheduleProgress(this.now);
                     progress.add(section);
                     this.progress.set(section.serviceId, progress);
                 }

@@ -8,6 +8,13 @@ const SERVICE = 1024;
 
 /** 2026-08-03 12:00:00 JST */
 const NOON = Date.UTC(2026, 7, 3, 3, 0, 0);
+/**
+ * 2026-08-03 00:10 JST。**まだどの枠も過ぎていない時刻**。
+ *
+ * 過ぎた時間帯のセグメントは数に入れないので、時計を止めておかないと
+ * 走らせた時刻でテストの意味が変わる (昼に走らせると午前の枠が消える)
+ */
+const DAY_START = Date.UTC(2026, 7, 2, 15, 10, 0);
 
 function event(overrides: Partial<SynthEvent> = {}): SynthEvent {
     return {
@@ -101,6 +108,8 @@ describe('EIT の解析', () => {
 });
 
 describe('集まり具合', () => {
+    const progressAt = (now: number = DAY_START) => new ScheduleProgress(() => now);
+
     /** セクション1本ぶんの控えを組み立てる */
     const at = (tableId: number, sectionNumber: number, last: number, segmentLast = last) => ({
         tableId,
@@ -116,7 +125,7 @@ describe('集まり具合', () => {
     });
 
     test('使われているセクションが全部揃えば完了', () => {
-        const progress = new ScheduleProgress();
+        const progress = progressAt();
         expect(progress.complete).toBe(false);
         progress.add(at(0x50, 0, 1, 1));
         expect(progress.complete).toBe(false);
@@ -129,7 +138,7 @@ describe('集まり具合', () => {
      * 見ずに「0〜last_section_number が全部」で待つと、いつまでも終わらない
      */
     test('セグメントの中で使われていない番号は待たない', () => {
-        const progress = new ScheduleProgress();
+        const progress = progressAt();
         // 2つのセグメント。どちらも先頭1本しか使っていない
         progress.add(at(0x50, 0, 8, 0));
         progress.add(at(0x50, 8, 8, 8));
@@ -137,7 +146,7 @@ describe('集まり具合', () => {
     });
 
     test('last_table_id の先まで揃うまでは完了にしない', () => {
-        const progress = new ScheduleProgress();
+        const progress = progressAt();
         progress.add({ ...at(0x50, 0, 0), lastTableId: 0x51 });
         expect(progress.complete).toBe(false);
         progress.add({ ...at(0x51, 0, 0), lastTableId: 0x51 });
@@ -151,7 +160,7 @@ describe('集まり具合', () => {
      * **一度も揃わず**、5分の上限まで開きっぱなしになっていた
      */
     test('間の使われていない表は待たない', () => {
-        const progress = new ScheduleProgress();
+        const progress = progressAt();
         progress.add({ ...at(0x50, 0, 0), lastTableId: 0x59 });
         progress.add({ ...at(0x51, 0, 0), lastTableId: 0x59 });
         progress.add({ ...at(0x58, 0, 0), lastTableId: 0x59 });
@@ -162,7 +171,7 @@ describe('集まり具合', () => {
     });
 
     test('版が変わったら数え直す。古い版で揃ったことにしない', () => {
-        const progress = new ScheduleProgress();
+        const progress = progressAt();
         progress.add(at(0x50, 0, 0));
         expect(progress.complete).toBe(true);
         progress.add({ ...at(0x50, 0, 1, 1), version: 2 });
@@ -177,7 +186,7 @@ describe('集まり具合', () => {
      * どのチャンネルも1本5分の上限まで開きっぱなしになる
      */
     test('別の表の版が違っても、こちらの数えたものは捨てない', () => {
-        const progress = new ScheduleProgress();
+        const progress = progressAt();
         progress.add({ ...at(0x50, 0, 0), lastTableId: 0x58 });
         // 詳細の表は別の版で流れてくる。ここで基本のぶんを捨ててはいけない
         progress.add({ ...at(0x58, 0, 0), lastTableId: 0x58, version: 9 });
@@ -187,7 +196,7 @@ describe('集まり具合', () => {
     });
 
     test('同じ表の版が変わったときだけ、その表を数え直す', () => {
-        const progress = new ScheduleProgress();
+        const progress = progressAt();
         progress.add({ ...at(0x50, 0, 0), lastTableId: 0x58 });
         progress.add({ ...at(0x58, 0, 0), lastTableId: 0x58, version: 9 });
         expect(progress.complete).toBe(true);
@@ -207,24 +216,76 @@ describe('集まり具合', () => {
      * 直し方がまるで違うので、区別が付く形で残す
      */
     test('揃わなかった理由を言える', () => {
-        const empty = new ScheduleProgress();
+        const empty = progressAt();
         expect(empty.report()).toContain('1つも来ていない');
 
         // いちばん後ろの表が来ない (来ない表を待っている状態)
-        const waiting = new ScheduleProgress();
+        const waiting = progressAt();
         waiting.add({ ...at(0x50, 0, 0), lastTableId: 0x59 });
         expect(waiting.report()).toContain('0x59');
         expect(waiting.report()).toContain('一度も来ない');
 
         // 節が欠けている (電波が届いていない状態)
-        const holes = new ScheduleProgress();
+        const holes = progressAt();
         holes.add(at(0x50, 0, 3, 3));
         holes.add(at(0x50, 2, 3, 3));
         expect(holes.report()).toContain('0x50 の 1,3');
 
-        const done = new ScheduleProgress();
+        const done = progressAt();
         done.add(at(0x50, 0, 0));
         expect(done.report()).toBe('揃っている');
+    });
+
+    /*
+     * **過ぎた時間帯のセグメントは流れてこない。**
+     *
+     * セグメントは 0:00 から3時間ずつの枠で、終わった枠は放送に乗らない。
+     * 「空でも先頭の1本 (8の倍数) は来る」として待っていた頃は、**実機の
+     * 14チャンネルが1つ残らず上限の600秒を使い切って**いた — 揃って離せたのは
+     * 0本で、早く離す仕組みがまるごと働いていなかった。
+     *
+     * 実機の記録がそのまま出方を教えてくれた。16:59 に閉じた回はどの局も
+     * `0x50/0x58 の 0,8,16,24,32` (= 0:00〜15:00 の5枠)、18:19 に閉じた回は
+     * そこに `40` が増えていた。**時計が進むと欠けが1つ増える** — 電波の
+     * 欠けでは起きない動き方で、待ち方のほうが誤っていると分かる。
+     *
+     * 過ぎた枠のぶんの番組は、そこがまだ未来だった数日前に取り込んである。
+     */
+    test('もう過ぎた時間帯のセグメントは待たない', () => {
+        // 15:30 JST。0:00〜15:00 の5枠 (節 0,8,16,24,32) は終わっている
+        const afternoon = Date.UTC(2026, 7, 3, 6, 30, 0);
+        const progress = progressAt(afternoon);
+
+        // いま (15:00〜18:00) の枠から先だけが流れてくる
+        for (let start = 40; start <= 248; start += 8) progress.add(at(0x50, start, 255, start));
+        expect(progress.complete).toBe(true);
+        expect(progress.report()).toBe('揃っている');
+
+        // 過ぎていない枠が欠けているのは、これまで通り「足りない」
+        const missing = progressAt(afternoon);
+        for (let start = 40; start <= 248; start += 8) {
+            if (start !== 48) missing.add(at(0x50, start, 255, start));
+        }
+        expect(missing.complete).toBe(false);
+        expect(missing.report()).toContain('0x50 の 48');
+    });
+
+    /*
+     * 枠の位置は `table_id` でずれる。0x50 が当日 0:00 から4日ぶん (32枠) で、
+     * 0x51 はその次の4日ぶん。**先の表には過ぎた枠が1つも無い。**
+     *
+     * 「見えていない先頭は飛ばす」という時計を使わない直し方も採れたが、
+     * それだとカルーセルの途中から拾い始めた回に、まだ来ていないだけの先頭を
+     * 飛ばして 0x51 を揃ったことにしてしまう (4〜7日先が丸ごと落ちる)
+     */
+    test('先の日を持つ表では、どの枠も飛ばさない', () => {
+        const afternoon = Date.UTC(2026, 7, 3, 6, 30, 0);
+        const progress = progressAt(afternoon);
+        progress.add({ ...at(0x50, 40, 40), lastTableId: 0x51 });
+        // 0x51 は4日先から。先頭の枠もまだ過ぎていない
+        progress.add({ ...at(0x51, 8, 8), lastTableId: 0x51 });
+        expect(progress.complete).toBe(false);
+        expect(progress.report()).toContain('0x51 の 0');
     });
 });
 
@@ -305,7 +366,8 @@ describe('EpgReader', () => {
      * 先に揃ったほうで閉じると、残りが永久に埋まらない
      */
     test('乗っている局が全部揃うまで完了にしない', () => {
-        const reader = new EpgReader();
+        // 揃ったかどうかを見るので、枠が過ぎていない時刻で止めておく
+        const reader = new EpgReader(() => DAY_START);
         reader.feed(packets(section([event()])));
         expect(reader.complete).toBe(true);
         reader.feed(packets(section([event()], { serviceId: SERVICE + 1, lastSectionNumber: 1 })));
