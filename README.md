@@ -52,7 +52,8 @@ docker compose logs denpa | grep ベーシック認証
 
 **指しているのは `latest` で、これはリリースを作ったときだけ動きます。** main へ
 入ったぶんは `develop` に積み上がるので、作業中のものが勝手に降ってくることは
-ありません ([docs/architecture.md](docs/architecture.md#像のタグ))。
+ありません。**版を固定したいなら `0.1.0` のように書けます** (`0.1` と書くと
+その系列の最新に付いてきます) — [docs/architecture.md](docs/architecture.md#像のタグ)。
 
 ### Kubernetes なら
 

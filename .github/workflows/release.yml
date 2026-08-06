@@ -1,14 +1,29 @@
-name: Publish latest
+name: Publish release tags
 
-# **`latest` はリリースを作ったときだけ動きます。**
+# **版番号と `latest` は、リリースを作ったときだけ動きます。**
 #
-# main へ入れたぶんは `develop` に積み上がるだけで、`latest` は動きません
+# main へ入れたぶんは `develop` に積み上がるだけです
 # (compose.prod.yml が指しているのが `latest` なので、入れて使っている人の
 # ところで、こちらの作業中のものが勝手に動かないようにするため)。
 #
 # **焼き直しません。** リリースにしたコミットの中身から出るタグ
-# (`sha-…`) は main への push のときに焼いてあるので、その像に `latest` を
+# (`sha-…`) は main への push のときに焼いてあるので、その像に名前を
 # 貼り足すだけです。焼き直すと「試したものとリリースしたものが別」になります。
+#
+# 貼る名前は3つ。
+#
+# | 名前 | 例 | 動くか |
+# | --- | --- | --- |
+# | 版そのもの | `0.1.0` | **二度と動かない**。固定して使うのはこれ |
+# | 版の系列 | `0.1` | その系列の最新に動く (0.1.1 を出せばそちらへ) |
+# | `latest` | | リリースのたびに動く |
+#
+# **`v` は落とします** (`v0.1.0` → `0.1.0`)。git のタグには付けるのが習わしで、
+# 像のタグには付けないのが習わしなので、そのまま写さない。
+#
+# 版の名前を貼らずに `latest` だけ動かしていた頃は、**入れた人が版を固定できません
+# でした** — 「いま動いているもの」を指す名前しか無く、戻したいときの戻し先が
+# `sha-…` (中身を最後に変えたコミット) しか無かった。
 on:
   release:
     types: [published]
@@ -16,7 +31,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: 'latest を貼る先 (タグ名かコミット)'
+        description: '貼る先 (タグ名かコミット)'
         required: true
 
 permissions:
@@ -39,13 +54,34 @@ jobs:
           fetch-depth: 0
 
       # main の build-and-deploy と同じ出し方 (.github/image-tags.sh)。
-      # ここが食い違うと、焼いたものと違う像に latest が付く
+      # ここが食い違うと、焼いたものと違う像に名前が付く
       - name: Compute image tags
         id: tag
         run: |
           . .github/image-tags.sh
           echo "agent=$AGENT_TAG" >> "$GITHUB_OUTPUT"
           echo "denpa=$DENPA_TAG" >> "$GITHUB_OUTPUT"
+
+      # 貼る名前を決める。**x.y.z の形をしていないタグには版の名前を貼らない** —
+      # `nightly` のような名前をそのまま像に貼ると、版だと思って固定されてしまう。
+      #
+      # **試し版 (prerelease) には `latest` を貼りません。** compose.prod.yml が
+      # 指しているのがそれなので、貼ると入れて使っている人のところへ降ってしまう。
+      - name: Decide names
+        id: names
+        run: |
+          set -eu
+          tag="${{ github.event.release.tag_name || github.event.inputs.ref }}"
+          version="${tag#v}"
+          names=""
+          if printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            names="$version ${version%.*}"
+          fi
+          if [ "${{ github.event.release.prerelease || false }}" != "true" ]; then
+            names="$names latest"
+          fi
+          echo "list=$names" >> "$GITHUB_OUTPUT"
+          echo "貼る名前: ${names:-(無し)}"
 
       - name: Log in to GHCR
         uses: docker/login-action@v4
@@ -56,12 +92,23 @@ jobs:
 
       # `imagetools create` は像を引かずに、レジストリの中で名前を足すだけ。
       # 元の像が無ければここで落ちる (黙って古い latest が残るより、そのほうがいい)
-      - name: Point latest at this release
+      - name: Point the names at this release
         run: |
           set -eu
           base="${{ env.REGISTRY }}/${{ github.repository_owner }}"
-          docker buildx imagetools create \
-            --tag "${base}/denpa-agent:latest" "${base}/denpa-agent:${{ steps.tag.outputs.agent }}"
-          docker buildx imagetools create \
-            --tag "${base}/denpa:latest" "${base}/denpa:${{ steps.tag.outputs.denpa }}"
-          echo "latest → agent ${{ steps.tag.outputs.agent }} / denpa ${{ steps.tag.outputs.denpa }}"
+          names="${{ steps.names.outputs.list }}"
+          if [ -z "$names" ]; then
+            echo "貼る名前がありません (x.y.z ではなく、試し版でもない)" >&2
+            exit 1
+          fi
+          for image in "denpa-agent:${{ steps.tag.outputs.agent }}" "denpa:${{ steps.tag.outputs.denpa }}"; do
+            name="${image%%:*}"
+            args=""
+            for alias in $names; do
+              args="$args --tag ${base}/${name}:${alias}"
+            done
+            # 単語に割りたいので引用しない (中身は上で作った名前だけ)
+            # shellcheck disable=SC2086
+            docker buildx imagetools create $args "${base}/${image}"
+            echo "${name}: ${image#*:} → $names"
+          done
