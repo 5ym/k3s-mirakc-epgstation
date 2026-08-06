@@ -1,4 +1,5 @@
 import { mkdirSync } from 'node:fs';
+import { SOCKET_PATH } from '$lib/live';
 import { listen } from './agent-events';
 import { ensureBasicAuth } from './auth';
 import { config } from './config';
@@ -7,12 +8,15 @@ import { sync, syncServicesOnly } from './epg';
 import { collectOnce } from './epg-collect';
 import { emit } from './events';
 import { pruneHistory, reconcile } from './files';
+import { attend } from './live';
 import { reconcile as logoReconcile, ride, sweep } from './logo';
 import { sweep as learnSweep } from './logo-learn';
 import { activeRecordingIds, recoverOrphanedRecordings } from './recorder';
 import { tick } from './scheduler';
 import { prune as pruneSessions } from './session';
 import { beginDraining } from './shutdown';
+import { redeem } from './tickets';
+import { serve } from './ws';
 
 let started = false;
 const timers: ReturnType<typeof setInterval>[] = [];
@@ -49,6 +53,19 @@ export function start(): void {
      * 意味が無い
      */
     ensureBasicAuth();
+
+    /*
+     * **ライブ視聴の受け口を開ける。** ここは `DENPA_AUTOSTART=0` でも開ける —
+     * 押されたときだけ動くもので、勝手にチューナーを掴みはしない。
+     *
+     * 認証は使い捨ての札で見る。ブラウザは WebSocket の握手に `Authorization` を
+     * 付けてくれないので、画面が先に `/api/live/ticket` から取ってくる (`tickets.ts`)
+     */
+    serve(SOCKET_PATH, {
+        // **握手より前に見る。** ここで断れば普通の HTTP で理由を返せる
+        accept: (url) => redeem(url.searchParams.get('ticket')),
+        open: (connection) => attend(connection),
+    });
 
     const recovered = recoverOrphanedRecordings();
     const orphanedJobs = requeueOrphanedJobs();

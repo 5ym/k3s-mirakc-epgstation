@@ -182,6 +182,8 @@ COPY --from=jls /opt/jls /opt/jls
 COPY --from=build /app/build ./build
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/package.json ./package.json
+# ライブ視聴の WebSocket を受ける入口。中身の理由はファイルの頭に書いてある
+COPY --from=build /app/server.js ./server.js
 
 EXPOSE 3000
-CMD ["bun", "./build/index.js"]
+CMD ["bun", "./server.js"]

@@ -5,7 +5,7 @@
     "scripts": {
         "dev": "bunx --bun vite dev",
         "build": "bunx --bun vite build",
-        "start": "bun ./build/index.js",
+        "start": "bun ./server.js",
         "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
         "test": "bun run lint && bun run check && bun run test:unit && playwright test",
         "test:unit": "bun test src",

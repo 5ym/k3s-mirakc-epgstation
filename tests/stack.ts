@@ -139,7 +139,7 @@ async function boot(index: number): Promise<{ stack: Stack; shutdown: () => Prom
         });
         started.push(webhook);
 
-        const app = start(['bun', './build/index.js'], {
+        const app = start(['bun', './server.js'], {
             TZ: 'Asia/Tokyo',
             HOST: '127.0.0.1',
             PORT: String(appPort),
@@ -240,7 +240,7 @@ export async function bootOidc(
         started.push(idp);
         await waitFor(`${oidc.idpUrl}/.well-known/openid-configuration`, idp, '偽 IdP');
 
-        const app = start(['bun', './build/index.js'], {
+        const app = start(['bun', './server.js'], {
             TZ: 'Asia/Tokyo',
             HOST: '127.0.0.1',
             PORT: String(appPort),

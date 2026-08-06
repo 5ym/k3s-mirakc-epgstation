@@ -139,7 +139,12 @@ export async function putTuners(tuners: TunerConfig[]): Promise<void> {
  * **ASCII だけ**にしてある。番組名は入れず録画IDだけ渡して、読める言葉に直すのは
  * 画面側でやる (routes/tuners/+page.server.ts)。
  */
-export type StreamUse = `rec ${number}` | `logo ${string}` | `epg ${string}` | `scan ${string}`;
+export type StreamUse =
+    | `rec ${number}`
+    | `logo ${string}`
+    | `epg ${string}`
+    | `scan ${string}`
+    | `live ${string}`;
 
 /**
  * チューナーに空きが無い。**待って掛け直せば通る**ので、他の失敗と分ける。
