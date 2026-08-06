@@ -41,9 +41,22 @@ export function submitting(node: HTMLFormElement, submit?: SubmitFunction) {
  *
  * 少し動かしただけならクリック扱いにする(番組を開くため)。
  * それ以上動いたらドラッグとみなし、離したときのクリックは無効にする。
+ *
+ * **手を出すのはマウスのときだけ。** 指とペンは触った時点でブラウザが自分で
+ * 動かすので、こちらが `scrollLeft` を入れると**二重に動く**。そのうえ指は
+ * 必ず少しずれるので、押しただけのつもりでも「動かした」と読んで**タップを
+ * 食っていた** — スマホで番組表のマスを押しても詳細が出なかったのはこれ
+ * (実測: 6px ずれると開かない。指で6px は普通に起きる)。
  */
 export function dragScroll(node: HTMLElement) {
-    const THRESHOLD = 5;
+    /**
+     * ここを超えたら「動かした」とみなす。
+     *
+     * **5px では狭すぎた。** マウスでも、押した拍子に数px動くことはある。
+     * 動かしたぶんが 10px に満たないなら画面はほとんど動いていないので、
+     * 押したかったのだと読むほうが当たる
+     */
+    const THRESHOLD = 10;
     let active = false;
     let dragged = false;
     let startX = 0;
@@ -53,6 +66,8 @@ export function dragScroll(node: HTMLElement) {
 
     const down = (event: PointerEvent) => {
         if (event.button !== 0) return;
+        // 指とペンはブラウザに任せる (こちらが動かすと二重になる)
+        if (event.pointerType !== 'mouse') return;
         active = true;
         dragged = false;
         startX = event.clientX;

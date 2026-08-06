@@ -164,3 +164,85 @@ test.describe('予約の細かい指定', () => {
         ).toHaveCount(0);
     });
 });
+
+/**
+ * **押したつもりが「掴んで動かした」になっていた。**
+ *
+ * 番組表は掴んで動かせる (`dragScroll`)。動かしたあとのクリックで番組を開いては
+ * 困るので、動いていたら食う作りにしてある。その敷居が 5px しかなく、しかも指と
+ * ペンにも掛かっていたため、**スマホでマスを押しても詳細が出なかった** (実機)。
+ * 指は押しただけで数px ずれる。
+ *
+ * 指とペンはブラウザに任せ (こちらが動かすと二重に動く)、マウスの敷居も広げてある。
+ */
+test.describe('番組表のマスを押す', () => {
+    test.beforeEach(async ({ request }) => {
+        await syncEpg(request);
+    });
+
+    test('少しずれても開く。掴んで動かしたときだけ開かない', async ({ page }) => {
+        await goto(page, '/guide?type=GR');
+        const [target] = await upcoming(page);
+        const cell = cellOf(page, target.programId);
+        const box = (await cell.boundingBox()) ?? { x: 0, y: 0, width: 0, height: 0 };
+        const x = box.x + box.width / 2;
+        const y = box.y + box.height / 2;
+        const detail = page.getByTestId('program-detail');
+
+        // 押した拍子に少しずれた。開くのが正しい (直す前は 6px で開かなかった)
+        await page.mouse.move(x, y);
+        await page.mouse.down();
+        await page.mouse.move(x + 6, y);
+        await page.mouse.up();
+        await expect(detail).toBeVisible();
+        await page.getByTestId('detail-close').click();
+        await expect(detail).toHaveCount(0);
+
+        // はっきり掴んで動かしたときは開かない (動かした先の番組が開いてしまう)
+        const grid = page.getByTestId('guide-grid');
+        const before = await grid.evaluate((el) => el.scrollTop);
+        await page.mouse.move(x, y);
+        await page.mouse.down();
+        for (let i = 1; i <= 5; i++) await page.mouse.move(x, y - i * 20);
+        await page.mouse.up();
+        await expect(detail).toHaveCount(0);
+        expect(await grid.evaluate((el) => el.scrollTop), '掴んで動かせていない').toBeGreaterThan(before);
+    });
+
+    /*
+     * **指はブラウザに任せる。** これが実機で出ていたほう。
+     *
+     * 押しただけのつもりでも指は数px ずれるので、掴んで動かす仕掛けが
+     * タップを食っていた。`touchscreen.tap` はぴたりと押してしまい
+     * (ずれないので古い版でも通る)、ずれを作れないので、触った印を自分で流す。
+     */
+    test('指が少しずれても、タップを食わない', async ({ page }) => {
+        await goto(page, '/guide?type=GR');
+        const [target] = await upcoming(page);
+        const cell = cellOf(page, target.programId);
+        const box = (await cell.boundingBox()) ?? { x: 0, y: 0, width: 0, height: 0 };
+
+        await page.evaluate(
+            ([x, y]) => {
+                const at = (cx: number, cy: number) => ({
+                    pointerId: 1,
+                    pointerType: 'touch',
+                    isPrimary: true,
+                    bubbles: true,
+                    cancelable: true,
+                    clientX: cx,
+                    clientY: cy,
+                });
+                const target = document.elementFromPoint(x, y);
+                if (target === null) throw new Error('マスがそこに無い');
+                target.dispatchEvent(new PointerEvent('pointerdown', at(x, y)));
+                target.dispatchEvent(new PointerEvent('pointermove', at(x + 6, y)));
+                target.dispatchEvent(new PointerEvent('pointerup', at(x + 6, y)));
+                (target as HTMLElement).closest('button')?.click();
+            },
+            [box.x + box.width / 2, box.y + box.height / 2],
+        );
+
+        await expect(page.getByTestId('program-detail')).toBeVisible();
+    });
+});
