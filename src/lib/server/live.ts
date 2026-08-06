@@ -22,6 +22,8 @@
 import { CHANNEL, type Notice } from '$lib/live';
 import { Fmp4Splitter } from '$lib/ts/fmp4';
 import { config } from './config';
+import { queryOne } from './db';
+import { deinterlace, smoothMotionFor } from './encoder';
 import { chunks } from './stream';
 import { openChannelStream } from './tuner';
 import type { Connection } from './ws';
@@ -39,8 +41,15 @@ import type { Connection } from './ws';
  * - `frag_every_frame` … フレームごとに moof/mdat を出す。これが無いと
  *   ffmpeg は数秒ぶん溜めてから出すので、その場でライブでなくなる
  * - `-copyts` … 元TSの90kHz PTS を保つ。第2段階で字幕と揃えるのに要る
+ *
+ * **インタレ解除は録画と同じ判断で行う** (`encoder.deinterlace`)。放送は 1080i
+ * なので、解かずにブラウザへ渡すと動きのある場面が櫛状になる。国内アニメだけ
+ * コマ数を倍にしないのも録画と揃える — 元が毎秒24コマ前後なので、倍にしても
+ * 同じ絵が並ぶだけで、CPU だけ倍かかる。
+ *
+ * @param smooth 60コマ/秒で出すか。国内アニメだけ false
  */
-function encodeArgs(): string[] {
+function encodeArgs(smooth: boolean): string[] {
     return [
         '-hide_banner',
         '-loglevel',
@@ -52,6 +61,9 @@ function encodeArgs(): string[] {
         '-copyts',
         '-i',
         'pipe:0',
+        // インタレ解除。放送は 1080i なので、解かずに渡すと動きが櫛状になる
+        '-vf',
+        deinterlace(smooth),
         '-map',
         '0:v:0',
         '-c:v',
@@ -107,6 +119,8 @@ class Session {
     constructor(
         readonly channelType: string,
         readonly channel: string,
+        /** 60コマ/秒で出すか。国内アニメだけ false */
+        readonly smooth: boolean,
     ) {}
 
     get empty(): boolean {
@@ -147,7 +161,7 @@ class Session {
                 config.priority.live,
             );
 
-            const proc = Bun.spawn([config.ffmpeg, ...encodeArgs()], {
+            const proc = Bun.spawn([config.ffmpeg, ...encodeArgs(this.smooth)], {
                 stdin: 'pipe',
                 stdout: 'pipe',
                 stderr: 'pipe',
@@ -228,19 +242,27 @@ class Session {
         this.stopped = true;
         this.aborter.abort();
         this.proc?.kill();
-        sessions.delete(key(this.channelType, this.channel));
+        sessions.delete(key(this.channelType, this.channel, this.smooth));
     }
 }
 
-const key = (type: string, channel: string) => `${type}:${channel}`;
+/**
+ * 焼いているものの目印。**コマ数まで含める。**
+ *
+ * 同じチャンネルでも、国内アニメを見ている人と実写を見ている人ではコマ数が
+ * 違う (1本の物理チャンネルに複数の局が乗っているため、同時に起こりうる)。
+ * 混ぜると片方が意図しないコマ数で見ることになる。チューナーはエージェント側で
+ * 相乗りになるので、増えるのは ffmpeg だけ。
+ */
+const key = (type: string, channel: string, smooth: boolean) => `${type}:${channel}:${smooth ? 60 : 30}`;
 const sessions = new Map<string, Session>();
 
-/** 見に行く。既に誰かが見ているチャンネルなら相乗りする */
-function watch(channelType: string, channel: string, viewer: Viewer): Session {
-    const id = key(channelType, channel);
+/** 見に行く。既に同じものを焼いていれば相乗りする */
+function watch(channelType: string, channel: string, smooth: boolean, viewer: Viewer): Session {
+    const id = key(channelType, channel, smooth);
     let session = sessions.get(id);
     if (session === undefined) {
-        session = new Session(channelType, channel);
+        session = new Session(channelType, channel, smooth);
         sessions.set(id, session);
         // 畳むのは見ている人が居なくなったとき。ここでは待たない
         void session.run();
@@ -271,8 +293,18 @@ export function attend(connection: Connection): void {
         if (message.type !== 'tune') return;
         const channelType = typeof message.channelType === 'string' ? message.channelType : '';
         const channel = typeof message.channel === 'string' ? message.channel : '';
+        const serviceId = Number(message.serviceId);
         if (channelType === '' || channel === '') return;
-        if (current !== null && current.channelType === channelType && current.channel === channel) return;
+
+        const smooth = smoothMotion(serviceId);
+        if (
+            current !== null &&
+            current.channelType === channelType &&
+            current.channel === channel &&
+            current.smooth === smooth
+        ) {
+            return;
+        }
 
         leave();
 
@@ -289,10 +321,28 @@ export function attend(connection: Connection): void {
         viewer.ready = false;
         const notice: Notice = { type: 'tuned', channelType, channel, codecs: CODECS };
         connection.send(CHANNEL.control, 0n, new TextEncoder().encode(JSON.stringify(notice)));
-        current = watch(channelType, channel, viewer);
+        current = watch(channelType, channel, smooth, viewer);
     };
 
     connection.onclose = leave;
+}
+
+/**
+ * いま流れている番組から、60コマ/秒で出すかを決める。
+ *
+ * **分からなければ実写として扱う** (録画と同じ。`smoothMotionFor`)。放送の
+ * 大半は実写で、アニメを実写扱いにしても絵は変わらないが、逆は動きが落ちる。
+ */
+function smoothMotion(serviceId: number): boolean {
+    if (!Number.isFinite(serviceId)) return true;
+    const at = Date.now();
+    const program = queryOne<{ genre_detail: string | null }>(
+        `SELECT genre_detail FROM programs WHERE service_id = ? AND start_at <= ? AND end_at > ?`,
+        serviceId,
+        at,
+        at,
+    );
+    return smoothMotionFor(program?.genre_detail ?? null);
 }
 
 /** テスト用。掴んだままのものを残さない */

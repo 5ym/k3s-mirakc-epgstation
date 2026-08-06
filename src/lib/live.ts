@@ -35,8 +35,14 @@ export type Notice =
     | { type: 'tuned'; channelType: string; channel: string; codecs: string }
     | { type: 'error'; message: string };
 
-/** ブラウザ→サーバの指示 */
-export type Command = { type: 'tune'; channelType: string; channel: string };
+/**
+ * ブラウザ→サーバの指示。
+ *
+ * **局まで渡す。** 物理チャンネルだけでは、いま流れている番組が引けない
+ * (1本の中に複数の局が乗っている)。番組が引けないと、インタレ解除で
+ * コマ数を倍にするかどうかを決められない (国内アニメだけ倍にしない)。
+ */
+export type Command = { type: 'tune'; channelType: string; channel: string; serviceId: number };
 
 /** WebSocket の宛先 */
 export const SOCKET_PATH = '/api/live/socket';

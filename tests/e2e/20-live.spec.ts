@@ -31,6 +31,39 @@ test.describe('ライブ視聴', () => {
     });
 
     /*
+     * **映像を見ながら選ぶ画面なので、ページごと動かさない。** 動くと絵が
+     * 画面から出ていく。動くのは右の一覧だけ
+     */
+    test('広い画面ではページごとスクロールしない', async ({ page }) => {
+        // **低めの画面で見る。** 高いと直す前の作りでも収まってしまい、判別できない
+        await page.setViewportSize({ width: 1440, height: 700 });
+        await goto(page, '/live');
+        await expect(page.getByTestId('live-channel').first()).toBeVisible();
+
+        const doc = await page.evaluate(() => ({
+            scrollH: document.documentElement.scrollHeight,
+            clientH: document.documentElement.clientHeight,
+        }));
+        expect(doc.scrollH).toBeLessThanOrEqual(doc.clientH + 1);
+    });
+
+    /*
+     * **一覧は残りの高さをぜんぶ使う。** 決め打ちで切っていた頃は、画面の下に
+     * 余白があるのに一覧のほうが先に終わっていた
+     */
+    test('チャンネル一覧は表示領域いっぱいまで伸びる', async ({ page }) => {
+        await page.setViewportSize({ width: 1440, height: 700 });
+        await goto(page, '/live');
+        const list = page.getByTestId('live-channels');
+        await expect(list).toBeVisible();
+
+        const box = (await list.boundingBox())!;
+        const viewport = page.viewportSize()!;
+        // 下端まで、余白ぶん (24px) 以上は空けない
+        expect(viewport.height - (box.y + box.height)).toBeLessThanOrEqual(28);
+    });
+
+    /*
      * **繋がったことは、掴んだチューナーで分かる。** 画面に絵が出ないので、
      * 「押したら何かが起きた」をこちらで見る。用途に `live` と出るのは
      * ライブ視聴だけなので、これが出ていれば経路は通っている

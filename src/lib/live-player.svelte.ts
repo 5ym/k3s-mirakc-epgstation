@@ -16,6 +16,8 @@ const LAST = 'denpa:live:last';
 export interface Tuned {
     channelType: string;
     channel: string;
+    /** どの局を選んだか。いま流れている番組からコマ数を決めるのに要る */
+    serviceId: number;
 }
 
 /** 前回見ていたチャンネル。**初手はここから開く** */
@@ -23,9 +25,9 @@ export function lastChannel(): Tuned | null {
     try {
         const saved: unknown = JSON.parse(localStorage.getItem(LAST) ?? 'null');
         if (typeof saved !== 'object' || saved === null) return null;
-        const { channelType, channel } = saved as Record<string, unknown>;
+        const { channelType, channel, serviceId } = saved as Record<string, unknown>;
         if (typeof channelType !== 'string' || typeof channel !== 'string') return null;
-        return { channelType, channel };
+        return { channelType, channel, serviceId: Number(serviceId) };
     } catch {
         return null;
     }
@@ -109,6 +111,7 @@ export function livePlayer() {
                 type: 'tune',
                 channelType: target.channelType,
                 channel: target.channel,
+                serviceId: target.serviceId,
             };
             ws.send(JSON.stringify(command));
         };

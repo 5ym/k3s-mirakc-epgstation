@@ -25,7 +25,11 @@
                 : channels.find((c) => c.type === saved.channelType && c.channel === saved.channel);
         const target = found ?? channels[0];
         if (target !== undefined) {
-            void player.tune(video, { channelType: target.type, channel: target.channel });
+            void player.tune(video, {
+                channelType: target.type,
+                channel: target.channel,
+                serviceId: target.id,
+            });
         }
         return () => player.stop();
     });
@@ -36,17 +40,27 @@
     );
 
     function select(channel: LiveChannel): void {
-        void player.tune(video, { channelType: channel.type, channel: channel.channel });
+        void player.tune(video, {
+            channelType: channel.type,
+            channel: channel.channel,
+            serviceId: channel.id,
+        });
     }
 </script>
 
 <!--
     **映像を左、局を右。** 動画を見ながら次を選べる並びで、YouTube の再生画面と
-    同じ形。畳まれる幅では縦に積む (横に並べると映像が切手大になる)
+    同じ形。畳まれる幅では縦に積む (横に並べると映像が切手大になる)。
+
+    **広い画面ではページごとスクロールさせない** (`+layout.svelte` の `fill`)。
+    映像を見ながら選ぶものなので、ページが動くと絵が画面から出ていく。
+    動くのは右の一覧だけ。`min-h-0` が要る — 付けないと flex の子は中身の高さで
+    突っ張って、外側の `overflow` が効かない
 -->
-<div class="flex flex-col gap-4 lg:flex-row" data-testid="live">
-    <div class="min-w-0 flex-1">
-        <div class="bg-base-300 relative aspect-video overflow-hidden rounded-lg">
+<div class="flex flex-col gap-4 lg:h-full lg:min-h-0 lg:flex-row" data-testid="live">
+    <div class="flex min-w-0 flex-1 flex-col lg:min-h-0">
+        <!-- 映像は高さのほうを上限にする。横幅いっぱいにすると縦がはみ出す -->
+        <div class="bg-base-300 relative aspect-video max-h-full overflow-hidden rounded-lg">
             <!-- svelte-ignore a11y_media_has_caption -->
             <!-- 字幕は第2段階。放送の字幕は canvas に重ねる (docs/stream.md §5.2) -->
             <video
@@ -101,11 +115,14 @@
     <!--
         **右の列。** 幅は固定にして、映像側だけ伸ばす。番組表と同じ並び
         (リモコン番号順、持たない局は物理チャンネル順) にしてあるので、
-        番組表で見つけた局をここでも同じ位置で探せる
+        番組表で見つけた局をここでも同じ位置で探せる。
+
+        **高さは残りぜんぶ。** `max-h-[70vh]` で切っていた頃は、画面の下に
+        余白があるのに一覧のほうが先に終わっていた
     -->
-    <aside class="lg:w-80 lg:shrink-0">
+    <aside class="flex flex-col lg:min-h-0 lg:w-80 lg:shrink-0">
         <h2 class="mb-2 text-sm font-medium">チャンネル</h2>
-        <ul class="max-h-[70vh] space-y-1 overflow-y-auto" data-testid="live-channels">
+        <ul class="flex-1 space-y-1 overflow-y-auto lg:min-h-0" data-testid="live-channels">
             {#each channels as channel (channel.id)}
                 <li>
                     <button

@@ -45,7 +45,7 @@ export function isVideoCodec(value: unknown): value is VideoCodec {
  * プルダウンして60フィールドに乗せているだけなので、フィールドごとにコマを
  * 起こしても同じ絵が並ぶだけになる。滑らかさは1つも増えず、時間とサイズだけ倍になる。
  */
-function deinterlace(smooth: boolean): string {
+export function deinterlace(smooth: boolean): string {
     return smooth ? 'bwdif' : 'bwdif=mode=send_frame';
 }
 
