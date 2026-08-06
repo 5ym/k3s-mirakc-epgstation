@@ -363,7 +363,8 @@
                                                     ルールの 2 が番組表の 3 に負けるように見えていた。
                                                     録画は必ず 10 で掴むので、そうはならない
                                                 -->
-                                                {#each tuner.users as user (user.use)}
+                                                <!-- 目印は番号で。同じ用途が2つ乗ることはあり、字を目印にすると落ちる -->
+                                                {#each tuner.users as user, i (i)}
                                                     <div class="truncate" data-testid="tuner-user">
                                                         {user.label}
                                                         <span class="text-base-content/60">
@@ -399,7 +400,8 @@
                             {card.ok ? 'OK' : 'NG'}
                         </span>
                         <span class="text-base-content/60 w-full text-xs">{card.message}</span>
-                        {#each card.readers as reader (reader)}
+                        <!-- 同じ型のリーダーを2つ挿すと名前が並ぶ。目印は番号で -->
+                        {#each card.readers as reader, i (i)}
                             <span class="text-base-content/60 w-full font-mono text-xs break-all">
                                 {reader}
                             </span>

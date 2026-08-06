@@ -33,8 +33,18 @@ test.describe('操作したときの反応', () => {
         const detail = page.getByTestId('program-detail');
         await expect(detail).toBeVisible();
 
-        // EPG の符号はそのままでは読めないので、言葉に直して出す
-        await expect(detail.getByTestId('detail-genre')).toHaveText('アニメ／特撮 > 国内アニメ');
+        /*
+         * EPG の符号はそのままでは読めないので、言葉に直して出す。
+         *
+         * **同じ分類が2つ来ても1つにまとめる。** 偽の放送は本物と同じく
+         * `[アニメ, 拡張, 拡張]` を積んである (0xE は分類ではなく局が自分で決めた
+         * 符号を載せる枠なので、同じものが並ぶ)。札の字を一覧の目印にしていた頃は、
+         * **同じ札が2つあると Svelte が落ちて詳細が開かなかった**
+         * (実機の高校野球中継。押しても何も起きない出方をする)
+         */
+        await expect(detail.getByTestId('detail-genre')).toHaveCount(2);
+        await expect(detail.getByTestId('detail-genre').first()).toHaveText('アニメ／特撮 > 国内アニメ');
+        await expect(detail.getByTestId('detail-genre').nth(1)).toHaveText('拡張');
         await expect(detail.getByTestId('detail-video')).toHaveText('1080i MPEG-2');
         await expect(detail.getByTestId('detail-audio')).toHaveText('ステレオ (日本語)');
         // どの局のものかは詳細だけ見ても分かるようにする。

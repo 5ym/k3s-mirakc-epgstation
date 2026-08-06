@@ -44,11 +44,26 @@
         }
     }
 
-    const genres = $derived(
-        jsonArray<Genre>(program.genre_detail)
-            .map(genreLabel)
-            .filter((label) => label !== ''),
-    );
+    /**
+     * ジャンルの札。**同じものは1つにまとめる。**
+     *
+     * 放送は同じ分類を何度も入れてくる。実機の NHK の高校野球中継が
+     * `[スポーツ, 拡張, 拡張]` で、**「拡張」の札が2つ**になっていた
+     * (0xE は分類ではなく、局が自分で決めた符号を載せる枠なので中身は同じ)。
+     *
+     * まとめる理由は見た目だけではない。**同じ札が2つ並ぶと Svelte が落ちる** —
+     * 一覧の目印を札の字にしていたので、字が同じものが2つあると
+     * `each_key_duplicate` で描画ごと死に、**その番組だけ詳細が開かなかった**
+     * (実機。押しても何も起きないので、原因の見当が付かない出方をする)。
+     * 目印は番号にしてあるが、そもそも重なるものを渡さない。
+     */
+    const genres = $derived([
+        ...new Set(
+            jsonArray<Genre>(program.genre_detail)
+                .map(genreLabel)
+                .filter((label) => label !== ''),
+        ),
+    ]);
     const audios = $derived(jsonArray<Audio>(program.audios).map(audioLabel));
     const video = $derived(videoLabel(program.video_resolution, program.video_type));
 </script>
@@ -76,7 +91,8 @@
 
         <!-- EPG が持っている符号は、そのままでは読めないので言葉に直して出す -->
         <div class="mt-2 flex flex-wrap gap-1" data-testid="detail-badges">
-            {#each genres as label (label)}
+            <!-- 目印は番号で。字を目印にすると、同じ札が2つ来たときに落ちる -->
+            {#each genres as label, i (i)}
                 <span class="badge badge-sm badge-ghost" data-testid="detail-genre">{label}</span>
             {/each}
             {#if video}
