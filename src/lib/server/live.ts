@@ -36,7 +36,7 @@ import type { Connection } from './ws';
  * ソフトウェアの AV1 は賭けになる。設計書も「コーデックは段階ではなく設定」と
  * 書いているので、まず確実に出るほうで経路を通す。
  *
- * - `-fflags nobuffer` `-flags low_delay` … 溜めない
+ * - `-fflags nobuffer` … 読む側で溜めない
  * - `-tune zerolatency` … B フレームを作らない (作ると必ず遅れる)
  * - `-frag_duration` … 0.2秒ぶんずつ moof/mdat を出す。既定では ffmpeg が
  *   数秒溜めてから出すので、その場でライブでなくなる
@@ -50,6 +50,16 @@ import type { Connection } from './ws';
  * 絵は絶えず引っかかり、音はずれる。0.2秒で切れば1つの塊に両方入る。
  * 遅れは 0.2 秒増えるが、見られる絵になるほうが先。
  *
+ * ## `-flags low_delay` は付けない
+ *
+ * `-i` より前に書くと**エンコーダではなくデコーダに効く**。放送の MPEG-2 には
+ * B フレームがあるので、この指定を受けたデコーダは表示順ではなく**復号順**で
+ * 絵を出す。結果、1枚進んでは戻るように見える。
+ *
+ * 実測 (NHK総合の高校野球・本物の 60i): 隣り合うコマの差が交互に大小し、
+ * その比は 2.17。外すと 1.11 に落ち、元の素材のフィールドを直に測った
+ * 値 (1.02) に並ぶ。エンコーダ側の遅れは `-tune zerolatency` が見ている。
+ *
  * **インタレ解除は録画と同じ判断で行う** (`encoder.deinterlace`)。放送は 1080i
  * なので、解かずにブラウザへ渡すと動きのある場面が櫛状になる。国内アニメだけ
  * コマ数を倍にしないのも録画と揃える — 元が毎秒24コマ前後なので、倍にしても
@@ -57,15 +67,13 @@ import type { Connection } from './ws';
  *
  * @param smooth 60コマ/秒で出すか。国内アニメだけ false
  */
-function encodeArgs(smooth: boolean): string[] {
+export function encodeArgs(smooth: boolean): string[] {
     return [
         '-hide_banner',
         '-loglevel',
         'error',
         '-fflags',
         'nobuffer',
-        '-flags',
-        'low_delay',
         '-copyts',
         '-i',
         'pipe:0',
