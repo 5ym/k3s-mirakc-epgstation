@@ -365,7 +365,46 @@ export class ScheduleProgress {
         }
         return true;
     }
+
+    /**
+     * 何が足りないか。**上限まで開いても揃わなかったときに出す。**
+     *
+     * 揃ったかどうかしか分からなかった頃は、上限まで開きっぱなしになっている局を
+     * 見つけても**その先を追えなかった** — 電波が弱くて欠けているのか、
+     * こちらが来ない表を待っているのかで、直し方がまるで違う。
+     */
+    report(): string {
+        if (this.seen.size === 0) return 'EIT[schedule] が1つも来ていない';
+        if (!this.seen.has(this.lastTableId)) {
+            const seen = [...this.seen.keys()].map(hex).join(',');
+            return `最後の表 ${hex(this.lastTableId)} が一度も来ない (来たのは ${seen})`;
+        }
+
+        const missing: string[] = [];
+        for (const tableId of this.seen.keys()) {
+            const numbers = this.seen.get(tableId) ?? new Set<number>();
+            const last = this.lastSection.get(tableId) ?? 0;
+            const holes: number[] = [];
+            for (let start = 0; start <= last; start += 8) {
+                const segmentLast = this.segmentLast.get(`${tableId}:${start}`);
+                if (segmentLast === undefined) {
+                    holes.push(start);
+                    continue;
+                }
+                for (let n = start; n <= segmentLast; n++) if (!numbers.has(n)) holes.push(n);
+            }
+            if (holes.length > 0) {
+                const head = holes.slice(0, 8).join(',');
+                missing.push(
+                    `${hex(tableId)} の ${head}${holes.length > 8 ? ` ほか${holes.length - 8}` : ''}`,
+                );
+            }
+        }
+        return missing.length === 0 ? '揃っている' : `来ていない節: ${missing.join(' / ')}`;
+    }
 }
+
+const hex = (value: number) => `0x${value.toString(16)}`;
 
 /**
  * 流れてくる TS を食べて番組を溜める。
@@ -484,5 +523,19 @@ export class EpgReader {
             if (!progress.complete) return false;
         }
         return true;
+    }
+
+    /**
+     * 揃っていない局と、その理由。**上限まで開いてしまったときに出す。**
+     *
+     * 1局でも揃わなければチャンネルごと上限まで開き続けるので、
+     * 「どの局のせいか」が分からないと直しようがない。
+     */
+    shortfall(): string[] {
+        const out: string[] = [];
+        for (const [serviceId, progress] of this.progress) {
+            if (!progress.complete) out.push(`局 ${serviceId}: ${progress.report()}`);
+        }
+        return out;
     }
 }

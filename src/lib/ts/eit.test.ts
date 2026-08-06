@@ -198,6 +198,34 @@ describe('集まり具合', () => {
         progress.add({ ...at(0x58, 1, 1, 1), lastTableId: 0x58, version: 10 });
         expect(progress.complete).toBe(true);
     });
+
+    /*
+     * **揃わなかったときは、何が足りないかを言う。**
+     *
+     * 実測でチューナーを1本 600秒 (上限ちょうど) 掴んでいるのを見つけたが、
+     * 電波が欠けていたのか、来ない表を待っていたのかは記録が無くて追えなかった。
+     * 直し方がまるで違うので、区別が付く形で残す
+     */
+    test('揃わなかった理由を言える', () => {
+        const empty = new ScheduleProgress();
+        expect(empty.report()).toContain('1つも来ていない');
+
+        // いちばん後ろの表が来ない (来ない表を待っている状態)
+        const waiting = new ScheduleProgress();
+        waiting.add({ ...at(0x50, 0, 0), lastTableId: 0x59 });
+        expect(waiting.report()).toContain('0x59');
+        expect(waiting.report()).toContain('一度も来ない');
+
+        // 節が欠けている (電波が届いていない状態)
+        const holes = new ScheduleProgress();
+        holes.add(at(0x50, 0, 3, 3));
+        holes.add(at(0x50, 2, 3, 3));
+        expect(holes.report()).toContain('0x50 の 1,3');
+
+        const done = new ScheduleProgress();
+        done.add(at(0x50, 0, 0));
+        expect(done.report()).toBe('揃っている');
+    });
 });
 
 describe('EpgReader', () => {

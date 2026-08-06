@@ -201,6 +201,7 @@ async function collectChannel(channel: AgentChannel): Promise<number> {
     timer.unref?.();
 
     const label = key(channel);
+    const startedAt = Date.now();
     update({ active: [...state.active, label] });
     /**
      * 開けたか。**掴めなかった回は「行った」ことにしない** — 録画に譲って
@@ -230,6 +231,27 @@ async function collectChannel(channel: AgentChannel): Promise<number> {
         clearTimeout(timer);
         controller.abort();
         update({ active: state.active.filter((name) => name !== label) });
+    }
+
+    /*
+     * **どれだけ掴んでいたかと、なぜ離したかを残す。**
+     *
+     * 揃えば早く離すのは denpa だけがやっていることなので (よそは時間で
+     * 打ち切る)、そこが効いていないと**黙って1本10分ずつ占有し続ける**。
+     * 実測でチューナーを1本 600 秒 (上限ちょうど) 掴んでいるのを見つけたが、
+     * 揃わなかったのか電波が欠けていたのかは記録が無くて追えなかった。
+     */
+    if (opened) {
+        const secs = Math.round((Date.now() - startedAt) / 1000);
+        if (reader.complete) {
+            console.log(`[epg] ${label}: 揃ったので ${secs}秒で離しました`);
+        } else {
+            const why = reader.shortfall();
+            console.warn(
+                `[epg] ${label}: 揃わないまま ${secs}秒で離しました` +
+                    `${why.length === 0 ? '' : ` (${why.slice(0, 4).join(' / ')})`}`,
+            );
+        }
     }
 
     /*
