@@ -120,6 +120,16 @@ app.MapGet("/denpa/stream", async (HttpContext http) =>
     // 溜めない。数パケット届いたらそのまま流す (64KB 貯めると 25ms 積み上がる)
     http.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
 
+    /**
+     * 1バイトでも送ったか。**送る前に落ちたなら、まだ理由を返せる。**
+     *
+     * 落ちた回をどれも接続を壊して知らせていた頃は、選局が始まった直後に
+     * 落ちると**本文どころか状態行すら送っていない**のに接続だけ切れていて、
+     * 呼んだ側には `socket connection was closed unexpectedly` としか届かず、
+     * 電波なのか掴み損ねなのか設定なのかが分からなかった。
+     */
+    var sent = false;
+
     try
     {
         await foreach (var chunk in sink.Reader.ReadAllAsync(http.RequestAborted))
@@ -127,6 +137,7 @@ app.MapGet("/denpa/stream", async (HttpContext http) =>
             await http.Response.Body.WriteAsync(chunk, http.RequestAborted);
             await http.Response.Body.FlushAsync(http.RequestAborted);
             sink.Consumed(chunk.Length);
+            sent = true;
         }
 
         /*
@@ -139,7 +150,8 @@ app.MapGet("/denpa/stream", async (HttpContext http) =>
         if (sink.FailedWith is not null)
         {
             Log.Write($"{channel} ({use}): {sink.FailedWith}");
-            http.Abort();
+            if (sent) http.Abort();
+            else await Respond.Write(http, new JsonObject { ["error"] = sink.FailedWith }, 500);
         }
     }
     catch (OperationCanceledException)

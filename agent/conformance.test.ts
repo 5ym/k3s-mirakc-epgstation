@@ -307,6 +307,26 @@ describe('チューナー', () => {
         strong.close();
     });
 
+    /**
+     * **1バイトも送っていないうちに落ちたなら、まだ理由を返せる。**
+     *
+     * 落ちた回をどれも接続を壊して知らせていた頃は、状態行すら送る前に
+     * 落ちても接続だけ切れていて、呼んだ側に届くのは
+     * `socket connection was closed unexpectedly` だけだった。実機で
+     * 番組表集めが同じ数チャンネルを毎周落とし続けていたが、
+     * **電波なのか掴み損ねなのか設定なのかが記録から分からなかった。**
+     *
+     * 送り始めたあとは今まで通り壊す (上のテスト) — 途中まで書いた本文を
+     * きれいに閉じると「録り終えた」ように届いてしまうため。
+     */
+    test('送る前に選局が落ちたら、理由を付けて 500 で返す', async () => {
+        // 偽の放送に居ないチャンネル。選局コマンドがすぐ 1 で終わる
+        const res = await get('/denpa/stream?type=GR&channel=T99&use=epg%20T99&priority=3');
+        expect(res.status).toBe(500);
+        const body = (await res.json()) as { error?: string };
+        expect(body.error ?? '').toContain('no signal');
+    });
+
     test('自分より強い相手しか居なければ 409 で断る', async () => {
         const strong = await open('type=GR&channel=T16&use=rec%201&priority=10');
         await strong.reader?.read();

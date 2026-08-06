@@ -89,10 +89,54 @@ internal sealed unsafe class DeviceStream(SafeFileHandle handle) : Stream
 
     private const short PollIn = 1;
 
+    /// <summary>まだ来ていないだけ</summary>
+    private const int EAgain = 11;
+
+    /// <summary>割り込まれただけ</summary>
+    private const int EIntr = 4;
+
+    /// <summary>
+    /// **読むのが追いつかず、ドライバの環が溢れた。**
+    ///
+    /// <para>
+    /// 溢れたぶんは戻らないが、**選局はそのまま生きている** — 読み続ければ
+    /// 続きが来る。これを終わりとして畳んでいた頃は、番組表を4本まとめて
+    /// 開いた直後に1〜2本が落ち、呼んだ側には理由の分からない
+    /// 「socket connection was closed unexpectedly」だけが届いていた。
+    /// </para>
+    /// </summary>
+    private const int EOverflow = 75;
+
     private volatile bool _closed;
+
+    private int _overflows;
+
+    /// <summary>
+    /// 前に聞かれてから環が溢れた回数。**聞いたら 0 に戻る。**
+    ///
+    /// <para>
+    /// デバイスは選局を跨いで開きっぱなしなので、溜めっぱなしにすると
+    /// どの選局のときに溢れたのか分からなくなる。
+    /// </para>
+    /// </summary>
+    public int TakeOverflows()
+    {
+        var count = _overflows;
+        _overflows = 0;
+        return count;
+    }
 
     public void Stop() => _closed = true;
 
+    /// <summary>
+    /// **理由の分かる終わり方をする。**
+    ///
+    /// <para>
+    /// どの失敗も 0 (= 終わり) にして返していた頃は、選局が落ちた記録に
+    /// 理由が1文字も残らなかった (<c>選局が終了しました</c> とだけ出る)。
+    /// 戻らない失敗は投げて、呼んだ側が何が起きたか言えるようにする。
+    /// </para>
+    /// </summary>
     public override int Read(byte[] buffer, int offset, int count)
     {
         var fd = (int)handle.DangerousGetHandle();
@@ -105,16 +149,29 @@ internal sealed unsafe class DeviceStream(SafeFileHandle handle) : Stream
             *(short*)(descriptor + 6) = 0;
 
             var ready = Sys.Poll(descriptor, 1, WakeMs);
-            if (ready < 0) return 0;
+            if (ready < 0)
+            {
+                var failure = Marshal.GetLastPInvokeError();
+                if (failure is EIntr or EAgain) continue;
+                throw new IOException($"待てません ({Marshal.GetLastPInvokeErrorMessage()})");
+            }
             if (ready == 0) continue;
 
             fixed (byte* target = &buffer[offset])
             {
                 var read = Sys.ReadFd(fd, target, (nuint)count);
                 if (read > 0) return (int)read;
-                // EAGAIN。まだ来ていないだけなので待ち直す
-                if (read < 0 && Marshal.GetLastPInvokeError() == 11) continue;
-                return 0;
+                // 本当に何も無くなった
+                if (read == 0) return 0;
+
+                var failure = Marshal.GetLastPInvokeError();
+                if (failure is EAgain or EIntr) continue;
+                if (failure == EOverflow)
+                {
+                    _overflows++;
+                    continue;
+                }
+                throw new IOException($"読めません ({Marshal.GetLastPInvokeErrorMessage()})");
             }
         }
         return 0;

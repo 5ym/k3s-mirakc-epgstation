@@ -603,6 +603,15 @@ internal sealed class Lease(int tuner, string type, string channel)
             {
                 Error = error.Message;
             }
+            /*
+             * **溢れたことは残す。** 溢れても選局は生きているので畳まないが、
+             * 溢れっぱなしなら読む側が遅い (番組表を一度に開きすぎ・B25 が重い)。
+             * 黙って捨てると、あとから「なぜ番組表に穴があるのか」を追えない。
+             */
+            if (tuner.Output is DeviceStream ring && ring.TakeOverflows() is > 0 and var overflows)
+            {
+                Log.Write($"[{Tuner}] {Channel}: 環が {overflows} 回溢れました (読むのが追いつきません)");
+            }
             // 畳めと言われて終わったのなら、それは失敗ではない
             if (!_stopped) onExit();
         });
