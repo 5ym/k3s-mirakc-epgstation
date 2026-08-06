@@ -239,6 +239,30 @@
 {/snippet}
 
 <!--
+    **何でこの1本が立ったのか。** 予約にも録画にも同じ形で出す。
+
+    録画の側に出していなかった頃は、録れたものを見ても「どのルールが拾ったのか」が
+    分からなかった。要らないものが混ざっていたときに、直す先 (どのルールの条件か)
+    を探すのに番組名からルールを推し量るしかなかった。
+
+    ルール名をそのまま入口にする。行にボタンを足すと窮屈になる
+-->
+{#snippet source(ruleId: number | null, ruleName: string | null, manual: boolean)}
+    <div class="text-base-content/60 mt-0.5 text-xs" data-testid="rule-name">
+        {#if manual}
+            手動予約
+        {:else}
+            ルール:
+            {#if ruleId !== null}
+                <a class="link" href="/rules?edit={ruleId}">{ruleName}</a>
+            {:else}
+                (削除済み)
+            {/if}
+        {/if}
+    </div>
+{/snippet}
+
+<!--
     広い画面では2つの一覧を横に並べ、画面の残りを丁度使い切る。
     高さをJSで測って入れていた頃は、測る前の当ての値で一度描かれるので
     読み込むたびに一覧が縮んだ状態から伸びて見えた。ここは全部 CSS で決める。
@@ -302,22 +326,13 @@
                                     {#if res.conflict_reason}
                                         <div class="text-error mt-0.5 text-sm">{res.conflict_reason}</div>
                                     {/if}
-                                    <!-- 手動なら何も出さない。既定と違うときだけ言う -->
+                                    <!--
+                                        手動なら何も出さない。既定と違うときだけ言う。
+                                        **録画の側では手動とも書く** — 録れたものは後から
+                                        見返すので、「ルールではない」ことにも意味がある
+                                    -->
                                     {#if !res.manual}
-                                        <!-- ルール名をそのまま入口にする。行にボタンを足すと窮屈になる -->
-                                        <div
-                                            class="text-base-content/60 mt-0.5 text-xs"
-                                            data-testid="rule-name"
-                                        >
-                                            ルール:
-                                            {#if res.rule_id !== null}
-                                                <a class="link" href="/rules?edit={res.rule_id}">
-                                                    {res.rule_name}
-                                                </a>
-                                            {:else}
-                                                (削除済み)
-                                            {/if}
-                                        </div>
+                                        {@render source(res.rule_id, res.rule_name, false)}
                                     {/if}
                                     <!--
                                         **焼き方の札は出さない。**
@@ -460,6 +475,14 @@
                                             : `${size(rec.ts_size)} (生TS ${size(rec.raw_size)})`,
                                         rec.deleted_at !== null ? `${date(rec.deleted_at)} に削除` : '',
                                     ])}
+                                    <!--
+                                        何で録れた1本か。**予約から来たものだけ**。
+                                        取り込んだ録画 (EPGStation から引き継いだもの) には
+                                        予約が無いので、何も出さない
+                                    -->
+                                    {#if rec.from_manual !== null}
+                                        {@render source(rec.rule_id, rec.rule_name, rec.from_manual === 1)}
+                                    {/if}
                                     <!--
                                         失敗や削除の理由は行に出さない。生のエラーは数行あって、
                                         1行がその高さを占めると他の録画が画面から押し出される。

@@ -88,6 +88,14 @@ test.describe('録画とエンコード', () => {
         // 再生ボタンは置いていない (行そのものを押すと再生する)
         await expect(recording.getByTestId('play-hint')).toBeVisible();
 
+        /*
+         * 何で録れた1本かを出していること。**録画の側では手動とも書く** —
+         * 予約は「ルールでないなら黙る」が、録れたものは後から見返すので、
+         * 「ルールではない」ことにも意味がある (どのルールを直せばいいのか、を
+         * 探し始める前に打ち切れる)
+         */
+        await expect(recording.getByTestId('rule-name')).toHaveText('手動予約');
+
         // 行を押すと番組表と同じ詳細が出る
         await recording.getByTestId('detail-button').click();
         const detail = page.getByTestId('program-detail');

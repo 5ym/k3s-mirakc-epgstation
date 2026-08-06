@@ -31,6 +31,17 @@ interface RecordingRow extends Recording {
      * 空くのか」が画面から分からなかった
      */
     raw_size: number | null;
+    /**
+     * どこから来た1本か。**予約の行から引く** (録画には写さない)。
+     *
+     * 写していないので、ルールの条件を変えても「何で録れたか」は変わらない。
+     * ルールごと消えたときだけ `rule_id` が NULL になり (rules の delete が外す)、
+     * 「(削除済み)」として残る
+     */
+    rule_id: number | null;
+    rule_name: string | null;
+    /** 手動予約なら 1。取り込んだ録画のように予約が無いものは null */
+    from_manual: number | null;
 }
 
 interface ReservationRow extends Reservation {
@@ -116,9 +127,13 @@ export function load({ url, request }) {
              ) AS encode_error,
              j.id AS job_id, j.state AS job_state, j.phase AS job_phase,
              j.percent AS job_percent, j.eta_ms AS job_eta_ms, j.log AS job_log,
-             s.logo_area AS logo_area
+             s.logo_area AS logo_area,
+             -- 何で録れた1本か。予約とルールから引く (録画には持たせない)
+             res.rule_id AS rule_id, res.manual AS from_manual, rules.name AS rule_name
              FROM recordings r
              LEFT JOIN services s ON s.id = r.service_id
+             LEFT JOIN reservations res ON res.id = r.reservation_id
+             LEFT JOIN rules ON rules.id = res.rule_id
              -- 動いているエンコードは録画1本につき高々1つ (encoder.enqueue が重複を弾く)
              LEFT JOIN encode_jobs j ON j.id = (
                  SELECT id FROM encode_jobs

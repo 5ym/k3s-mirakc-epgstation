@@ -115,4 +115,50 @@ test.describe('ルールで立った予約', () => {
         await expect(page.getByRole('heading', { level: 2 }).first()).toContainText('ルールを編集');
         await expect(page.getByTestId('rule-keyword')).toHaveValue('テストアニメ');
     });
+
+    /*
+     * **録れたあとも、どのルールが拾ったのかが分かる。**
+     *
+     * 予約の側にしか出していなかった頃は、録画一覧に要らないものが混ざっていても
+     * 直す先 (どのルールの条件か) が画面から辿れなかった。予約は録り終えると
+     * 一覧から消えるので、番組名からルールを推し量るしかない。
+     *
+     * ルールを消したあとも録画そのものは履歴として残る。紐付けだけ外れるので
+     * 「(削除済み)」になる (rules の delete がそうしている)
+     */
+    test('録れたあとも、どのルールで録れたかが残る', async ({ page }) => {
+        test.setTimeout(180_000);
+        await goto(page, '/');
+        /*
+         * **一番前**を取る。並びは放送が近い順で、待つのはこれから録れるものなので、
+         * 後ろのものを選ぶと放送そのものが数分先になる (偽の番組表は10分ぶんある)
+         */
+        const reservation = page
+            .getByTestId('reservation-row')
+            .filter({ hasText: 'テストアニメ' })
+            .filter({ has: page.getByTestId('rule-name') })
+            .first();
+        await expect(reservation).toBeVisible();
+        // 番組で辿る。同じ名前の録画は他のテストも残すので、名前では絞れない
+        const programId = await reservation.getAttribute('data-program-id');
+
+        const recording = page.locator(`[data-testid="recording-row"][data-program-id="${programId}"]`);
+        await expect(async () => {
+            await goto(page, '/');
+            await expect(recording).toHaveCount(1);
+        }).toPass({ timeout: 120_000 });
+        await expect(recording.getByTestId('rule-name')).toContainText('テストアニメ');
+        // ルール名はそのまま編集への入口。予約の行と同じ形
+        await expect(recording.getByTestId('rule-name').getByRole('link')).toHaveAttribute(
+            'href',
+            /\/rules\?edit=\d+$/,
+        );
+
+        await goto(page, '/rules');
+        await page.getByTestId('rule-row').first().getByTestId('rule-delete').click();
+        await expect(page.getByTestId('rule-row')).toHaveCount(0);
+
+        await goto(page, '/');
+        await expect(recording.getByTestId('rule-name')).toContainText('(削除済み)');
+    });
 });
