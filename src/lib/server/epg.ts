@@ -109,17 +109,16 @@ export function syncServices(channels: AgentChannel[]): number {
                 count++;
             }
         }
-        // 以前の取り込みで入ってしまったデータ放送やワンセグを片付ける。
-        // 残っていると番組表に並び続け、ルールが引っかけて録画が失敗する
+        /*
+         * 以前の取り込みで入ってしまったデータ放送やワンセグを片付ける。
+         * 残っていると番組表に並び続け、ルールが引っかけて録画が失敗する。
+         *
+         * **ここだけは局の行ごと消す。** 選局できなくなった局 (`forgetMissing`)
+         * とは違って、そもそも映像が無く**録画も予約も1つも紐付いていない**ので、
+         * 辿れなくなるものが無い
+         */
         for (const id of dropped) {
-            database()
-                .prepare(
-                    // 録り始めたものは触らない。取り消しても録画は戻らない
-                    `UPDATE reservations SET state = 'canceled', updated_at = ?
-                     WHERE service_id = ? AND state IN ('scheduled', 'conflict') AND started_at IS NULL`,
-                )
-                .run(at, id);
-            database().prepare('DELETE FROM programs WHERE service_id = ?').run(id);
+            clearBelongings(at, id);
             database().prepare('DELETE FROM services WHERE id = ?').run(id);
         }
         // この回で見かけなかった局の持ち物を片付ける
@@ -130,6 +129,28 @@ export function syncServices(channels: AgentChannel[]): number {
     // 取り消した予約は一覧に出ている。同じものを見ている端末が食い違わないように
     if (canceled > 0) emit('reservations');
     return count;
+}
+
+/**
+ * その局の持ち物 — 番組表と、**まだ始めていない**予約 — を片付ける。
+ *
+ * 片付ける場面が2つある (もう選局できない局と、映像の無い局を落としたとき)。
+ * 写していた頃は、片方だけ「録り始めたものは触らない」を書き忘れれば、
+ * 録画中の予約まで取り消される作りになっていた。
+ *
+ * **局の行そのものには触らない。** 消すかどうかは呼ぶ側が決める
+ * (消すと、その局で録った録画や過去の予約が辿れなくなる)。
+ */
+function clearBelongings(at: number, serviceId: number): { programs: number; reservations: number } {
+    const reservations = database()
+        .prepare(
+            // 録り始めたものは触らない。取り消しても録画は戻らない
+            `UPDATE reservations SET state = 'canceled', updated_at = ?
+             WHERE service_id = ? AND state IN ('scheduled', 'conflict') AND started_at IS NULL`,
+        )
+        .run(at, serviceId).changes;
+    const programs = database().prepare('DELETE FROM programs WHERE service_id = ?').run(serviceId).changes;
+    return { programs, reservations };
 }
 
 /**
@@ -161,21 +182,14 @@ function forgetMissing(at: number, seen: Set<number>): number {
     ).filter((service) => !seen.has(service.id) && at - service.updated_at >= config.serviceForgetAfter);
     if (stale.length === 0) return 0;
 
-    const dropPrograms = database().prepare('DELETE FROM programs WHERE service_id = ?');
-    const cancel = database().prepare(
-        // 録り始めたものは触らない。取り消しても録画は戻らない
-        `UPDATE reservations SET state = 'canceled', updated_at = ?
-         WHERE service_id = ? AND state IN ('scheduled', 'conflict') AND started_at IS NULL`,
-    );
     let programs = 0;
     let reservations = 0;
     const names: string[] = [];
     for (const service of stale) {
-        const dropped = dropPrograms.run(service.id).changes;
-        const canceled = cancel.run(at, service.id).changes;
-        programs += dropped;
-        reservations += canceled;
-        if (dropped > 0 || canceled > 0) names.push(service.name);
+        const cleared = clearBelongings(at, service.id);
+        programs += cleared.programs;
+        reservations += cleared.reservations;
+        if (cleared.programs > 0 || cleared.reservations > 0) names.push(service.name);
     }
     if (programs === 0 && reservations === 0) return 0;
     console.log(

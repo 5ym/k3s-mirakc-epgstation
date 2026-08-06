@@ -25,29 +25,73 @@ interface Row extends Rule {
 const PENDING = "(state IN ('scheduled', 'conflict') AND started_at IS NULL)";
 
 /**
+ * 条件の読み取り口。**画面から来る道が2つある** — 「この条件で何が録れるか」は
+ * URL のクエリで、保存はフォームの POST で来る。どちらも `get` / `getAll` を持つ。
+ */
+interface Fields {
+    get(key: string): unknown;
+    getAll(key: string): unknown[];
+}
+
+/** 保存する形に直した条件。JSON 配列にするところまでがここの仕事 */
+interface Conditions {
+    keyword: string;
+    ignoreKeyword: string;
+    searchFields: string;
+    serviceIds: string | null;
+    serviceTypes: string | null;
+    genres: string | null;
+    /** 何も入っていない。全番組に当たってディスクを埋めるので、保存はさせない */
+    empty: boolean;
+}
+
+/**
+ * 入力を条件として読む。**プレビューも保存もここを通る。**
+ *
+ * 別々に読んでいた頃は、同じ読み取りが2つあった (プレビューは URL から、
+ * 保存はフォームから)。**画面に出ている結果と保存されるものがズレる**のは、
+ * 片方だけ直したときに必ず起きる。
+ */
+function conditionsOf(fields: Fields): Conditions {
+    const text = (key: string) => String(fields.get(key) ?? '').trim();
+    const list = (key: string) => fields.getAll(key).map(String).filter(Boolean);
+    const json = (values: unknown[]) => (values.length === 0 ? null : JSON.stringify(values));
+
+    const keyword = text('keyword');
+    const ids = list('serviceIds').map(Number).filter(Number.isFinite);
+    const types = list('serviceTypes');
+    const genres = list('genres');
+    return {
+        keyword,
+        ignoreKeyword: text('ignoreKeyword'),
+        // 番組表から来たときは指定が無い。既定 (番組名だけ) に戻る
+        searchFields: parseSearchFields(list('searchFields').join(',')).join(','),
+        serviceIds: json(ids),
+        serviceTypes: json(types),
+        genres: json(genres),
+        empty: keyword === '' && ids.length === 0 && types.length === 0 && genres.length === 0,
+    };
+}
+
+/**
  * 入力中の条件を、保存していないルールとして組み立てる。
  *
  * 条件を編集する場所はこの画面1つに寄せてある。番組表にも検索欄を置いていた頃は
  * 判定が二重にあってズレたので、フォームの値がそのまま「何が録れるか」になるようにした。
  */
 function conditionsFrom(params: URLSearchParams): Rule | null {
-    const get = (key: string) => String(params.get(key) ?? '').trim();
-    const numbers = params.getAll('serviceIds').map(Number).filter(Number.isFinite);
-    const types = params.getAll('serviceTypes').map(String).filter(Boolean);
-    const genres = params.getAll('genres').map(String).filter(Boolean);
-    const keyword = get('keyword');
-    if (keyword === '' && numbers.length === 0 && types.length === 0 && genres.length === 0) return null;
+    const conditions = conditionsOf(params);
+    if (conditions.empty) return null;
 
     return {
         id: 0,
         name: '',
-        keyword,
-        ignore_keyword: get('ignoreKeyword'),
-        // 番組表から来たときは指定が無い。既定 (番組名だけ) になる
-        search_fields: parseSearchFields(params.getAll('searchFields').join(',')).join(','),
-        service_ids: numbers.length === 0 ? null : JSON.stringify(numbers),
-        service_types: types.length === 0 ? null : JSON.stringify(types),
-        genres: genres.length === 0 ? null : JSON.stringify(genres),
+        keyword: conditions.keyword,
+        ignore_keyword: conditions.ignoreKeyword,
+        search_fields: conditions.searchFields,
+        service_ids: conditions.serviceIds,
+        service_types: conditions.serviceTypes,
+        genres: conditions.genres,
         // 無料放送の扱いは**全体設定**。ルールごとには持たない (誰も読まない列)
         enabled: 1,
         priority: 1,
@@ -286,33 +330,6 @@ export async function load({ url }) {
     return { rules, services, editing: editing ?? null, seed: conditions, preview, defaults };
 }
 
-/** 選択されたチャンネルを JSON 配列に。未選択(=全チャンネル)は NULL で表す */
-function serviceIds(form: FormData): string | null {
-    const ids = form
-        .getAll('serviceIds')
-        .map((v) => Number(v))
-        .filter((n) => Number.isFinite(n));
-    return ids.length === 0 ? null : JSON.stringify(ids);
-}
-
-/** ジャンル大分類の指定。未選択(=全ジャンル)は NULL で表す */
-function genres(form: FormData): string | null {
-    // "7" は大分類だけ、"7-0" は中分類まで
-    const values = form.getAll('genres').map(String).filter(Boolean);
-    return values.length === 0 ? null : JSON.stringify(values);
-}
-
-/** 地上波/BS/CS 単位の指定 */
-function serviceTypes(form: FormData): string | null {
-    const types = form.getAll('serviceTypes').map(String).filter(Boolean);
-    return types.length === 0 ? null : JSON.stringify(types);
-}
-
-/** キーワードを当てる範囲。全部外れていたら番組名だけに戻す */
-function searchFields(form: FormData): string {
-    return parseSearchFields(form.getAll('searchFields').join(',')).join(',');
-}
-
 /**
  * 予約どうしを比べる数。**0 も受ける。**
  *
@@ -331,20 +348,22 @@ const TYPE_LABEL: Record<string, string> = { GR: '地上波', BS: 'BS', CS: 'CS'
  * ルール名はキーワードから決める。別で名前を付けさせても、結局キーワードと
  * 同じものを打ち込むだけになるため。キーワードが無いときは対象の局で表す。
  */
-function ruleName(
-    keyword: string,
-    types: string | null,
-    ids: string | null,
-    genreIds: string | null,
-    services: Service[],
-): string {
-    if (keyword !== '') return keyword;
+function ruleName(conditions: Conditions): string {
+    if (conditions.keyword !== '') return conditions.keyword;
+
+    const services = queryAll<Service>('SELECT * FROM services');
     const parts: string[] = [];
-    if (genreIds !== null) parts.push(...(JSON.parse(genreIds) as string[]).map(genreName));
-    if (types !== null) parts.push(...(JSON.parse(types) as string[]).map((t) => TYPE_LABEL[t] ?? t));
-    if (ids !== null) {
+    if (conditions.genres !== null) {
+        parts.push(...(JSON.parse(conditions.genres) as string[]).map(genreName));
+    }
+    if (conditions.serviceTypes !== null) {
         parts.push(
-            ...(JSON.parse(ids) as number[]).map(
+            ...(JSON.parse(conditions.serviceTypes) as string[]).map((type) => TYPE_LABEL[type] ?? type),
+        );
+    }
+    if (conditions.serviceIds !== null) {
+        parts.push(
+            ...(JSON.parse(conditions.serviceIds) as number[]).map(
                 (id) => services.find((s) => s.id === id)?.name ?? String(id),
             ),
         );
@@ -376,18 +395,13 @@ async function reapply(rule?: number): Promise<number> {
 export const actions = {
     create: async ({ request }) => {
         const form = await request.formData();
-        const keyword = String(form.get('keyword') ?? '').trim();
-        const ids = serviceIds(form);
-        const types = serviceTypes(form);
-        const genreIds = genres(form);
-        if (keyword === '' && ids === null && types === null && genreIds === null) {
-            // 条件が空だと全番組にマッチしてディスクを埋めるので作らせない
+        const conditions = conditionsOf(form);
+        // 条件が空だと全番組にマッチしてディスクを埋めるので作らせない
+        if (conditions.empty) {
             return fail(400, {
                 message: 'キーワード・チャンネル・ジャンルのどれかは指定してください',
             });
         }
-        const services = queryAll<Service>('SELECT * FROM services');
-        const name = ruleName(keyword, types, ids, genreIds, services);
 
         const created = database()
             .prepare(
@@ -397,13 +411,13 @@ export const actions = {
              VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
             )
             .run(
-                name,
-                keyword,
-                String(form.get('ignoreKeyword') ?? '').trim(),
-                searchFields(form),
-                ids,
-                types,
-                genreIds,
+                ruleName(conditions),
+                conditions.keyword,
+                conditions.ignoreKeyword,
+                conditions.searchFields,
+                conditions.serviceIds,
+                conditions.serviceTypes,
+                conditions.genres,
                 rulePriority(form),
                 now(),
             );
@@ -418,17 +432,13 @@ export const actions = {
         const id = Number(form.get('id'));
         if (!Number.isFinite(id)) return fail(400, { message: 'ルールIDが不正です' });
 
-        const keyword = String(form.get('keyword') ?? '').trim();
-        const ids = serviceIds(form);
-        const types = serviceTypes(form);
-        const genreIds = genres(form);
-        if (keyword === '' && ids === null && types === null && genreIds === null) {
+        const conditions = conditionsOf(form);
+        if (conditions.empty) {
             return fail(400, {
                 message: 'キーワード・チャンネル・ジャンルのどれかは指定してください',
             });
         }
 
-        const services = queryAll<Service>('SELECT * FROM services');
         database()
             .prepare(
                 // 焼き方は触らない。エンコードもCMも全体設定で、焼くときに読む
@@ -436,13 +446,13 @@ export const actions = {
                  service_types = ?, genres = ?, priority = ? WHERE id = ?`,
             )
             .run(
-                ruleName(keyword, types, ids, genreIds, services),
-                keyword,
-                String(form.get('ignoreKeyword') ?? '').trim(),
-                searchFields(form),
-                ids,
-                types,
-                genreIds,
+                ruleName(conditions),
+                conditions.keyword,
+                conditions.ignoreKeyword,
+                conditions.searchFields,
+                conditions.serviceIds,
+                conditions.serviceTypes,
+                conditions.genres,
                 rulePriority(form),
                 id,
             );

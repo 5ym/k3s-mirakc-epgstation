@@ -33,6 +33,41 @@
         area?: string | null;
     } = $props();
 
+    /**
+     * 絵を1枚取ってきて、`objectURL` にして渡す。**片付けまで持つ。**
+     *
+     * `$effect` の後始末として返す。この画面は絵を2種類出していて (録画のコマと、
+     * logoframe が覚えているロゴ)、どちらも「中断できて・使い終わったら
+     * `revokeObjectURL` する」が要る。写していた頃は、片方だけ revoke を
+     * 書き忘れれば**開き直すたびに絵が1枚ずつ残る**作りだった。
+     *
+     * `<img src>` で直に読まないのは、応答の見出しも要るため (記録されている
+     * コマの大きさ・いつ覚えたか)。
+     */
+    function fetchImage(
+        request: string,
+        apply: (url: string, res: Response) => void,
+        fail: (aborted: boolean) => void,
+    ): () => void {
+        const controller = new AbortController();
+        let created: string | null = null;
+        void (async () => {
+            try {
+                const res = await fetch(request, { signal: controller.signal });
+                if (!res.ok) throw new Error(String(res.status));
+                created = URL.createObjectURL(await res.blob());
+                // 待っている間に離れていたら渡さない (片付けはこのあと走る)
+                if (!controller.signal.aborted) apply(created, res);
+            } catch {
+                fail(controller.signal.aborted);
+            }
+        })();
+        return () => {
+            controller.abort();
+            if (created !== null) URL.revokeObjectURL(created);
+        };
+    }
+
     /** どのコマを見るか。ロゴが出ている場面まで送れるようにする */
     let at = $state(300);
     /** 画像の実寸。拡大すると変わるので、座標の戻し計算はこれを見る */
@@ -74,33 +109,22 @@
     $effect(() => {
         // 畳んでいる間は取り出さない。1コマ出すのに録画を頭から読ませることになる
         if (!open || recordingId === null) return;
-        const position = at;
-        const controller = new AbortController();
-        let url: string | null = null;
-        void (async () => {
-            try {
-                const res = await fetch(`/api/recordings/${recordingId}/frame?at=${position}`, {
-                    signal: controller.signal,
-                });
-                if (!res.ok) throw new Error(String(res.status));
-                const blob = await res.blob();
-                url = URL.createObjectURL(blob);
+        return fetchImage(
+            `/api/recordings/${recordingId}/frame?at=${at}`,
+            (url, res) => {
                 frame = {
                     url,
                     width: Number(res.headers.get('X-Source-Width')) || 0,
                     height: Number(res.headers.get('X-Source-Height')) || 0,
                 };
                 failed = false;
-            } catch {
-                if (controller.signal.aborted) return;
+            },
+            (aborted) => {
+                if (aborted) return;
                 frame = null;
                 failed = true;
-            }
-        })();
-        return () => {
-            controller.abort();
-            if (url !== null) URL.revokeObjectURL(url);
-        };
+            },
+        );
     });
 
     /**
@@ -116,28 +140,18 @@
     $effect(() => {
         // 位置を教え直すと覚えているものは捨てられる。保存後に消えるのが正しい
         void area;
-        const controller = new AbortController();
-        let url: string | null = null;
-        void (async () => {
-            try {
-                const res = await fetch(`/api/services/${serviceId}/logo-data`, {
-                    signal: controller.signal,
-                });
-                if (!res.ok) throw new Error(String(res.status));
-                const blob = await res.blob();
-                url = URL.createObjectURL(blob);
+        return fetchImage(
+            `/api/services/${serviceId}/logo-data`,
+            (url, res) => {
                 learned = { url, learnedAt: Number(res.headers.get('X-Logo-Learned-At')) };
-            } catch {
+                checked = true;
+            },
+            (aborted) => {
                 // まだ1本も録っていない局。覚えているものが無いのは普通のこと
                 learned = null;
-            } finally {
-                if (!controller.signal.aborted) checked = true;
-            }
-        })();
-        return () => {
-            controller.abort();
-            if (url !== null) URL.revokeObjectURL(url);
-        };
+                if (!aborted) checked = true;
+            },
+        );
     });
 
     /**
