@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { CHANNEL } from '$lib/live';
-import { CANVAS, captionArgs, frame, PngSplitter, readInfo, TrackList } from './captions';
+import { CANVAS, captionArgs, frame, PngSplitter, TrackList } from './captions';
 
 /**
  * PNG 1枚ぶん。**かたまりの形まで真似る** — 切れ目を `IEND` で見つけるので、
@@ -56,11 +56,11 @@ describe('字幕の取り出し方', () => {
 
     /** 局を名指しする。1本の物理チャンネルに複数の局が乗っている (映像と同じ) */
     test('選んだ局の字幕を採る', () => {
-        expect(captionArgs(1032).join(' ')).toContain('[0:p:1032:s:0]showinfo');
+        expect(captionArgs(1032).join(' ')).toContain('[0:p:1032:s:0]null');
     });
 
     test('局が分からなければ最初に見つけた字幕', () => {
-        expect(captionArgs(0).join(' ')).toContain('[0:s:0]showinfo');
+        expect(captionArgs(0).join(' ')).toContain('[0:s:0]null');
     });
 
     /** 出てきた枚をそのまま出す。詰め直させると時刻がずれる */
@@ -68,30 +68,18 @@ describe('字幕の取り出し方', () => {
         const args = captionArgs(1024);
         expect(args[args.indexOf('-fps_mode') + 1]).toBe('passthrough');
     });
-});
 
-/**
- * **空かどうかは showinfo に喋らせる。** `mean:` の最後がアルファの平均で、
- * 0 なら1画素も描かれていない。PNG を解いて確かめる必要が無い。
- */
-describe('readInfo', () => {
-    const line =
-        '[Parsed_showinfo_0 @ 0x1] n:0 pts:1482504240 pts_time:16472.3 duration:1 fmt:rgba ' +
-        'sar:0/1 s:1920x1080 i:P iskey:1 type:I checksum:AABBCCDD ' +
-        'plane_checksum:[AABBCCDD] mean:[0 0 0 12] stdev:[0.0 0.0 0.0 3.4]';
-
-    test('時刻を読む', () => {
-        expect(readInfo(line)?.at).toBe(16472.3);
-    });
-
-    test('アルファの平均が 0 なら空', () => {
-        expect(readInfo(line)?.blank).toBe(false);
-        expect(readInfo(line.replace('mean:[0 0 0 12]', 'mean:[0 0 0 0]'))?.blank).toBe(true);
-    });
-
-    test('字幕の行でなければ何も返さない', () => {
-        expect(readInfo('[mpeg2video @ 0x1] Invalid frame dimensions 0x0.')).toBeNull();
-        expect(readInfo('')).toBeNull();
+    /*
+     * **showinfo には喋らせない。**
+     *
+     * 時刻と「空かどうか」を標準エラーに喋らせて、標準出力の PNG と来た順に
+     * 組にしていた。**数が合わない** — 実機の日テレで70秒測ると PNG 77枚に対し
+     * showinfo 79行で、余ったぶんだけ以降ずっと1つずれる。ずれると字幕の出た枚に
+     * 1つ前の「空」が当たって「消す」に化け、**字幕が遅れて出て、消えるのも
+     * 遅れる**。いまは絵だけを見るので、組にするものが無い
+     */
+    test('別の口に喋らせない', () => {
+        expect(captionArgs(1024)).not.toContain('showinfo');
     });
 });
 
@@ -220,7 +208,7 @@ describe('TrackList', () => {
 describe('frame', () => {
     test('絵は種別 0x20 で、頭に置き場所が付く', () => {
         const data = png(0x11);
-        const out = frame({ at: 100, data });
+        const out = frame({ data });
         expect(out.kind).toBe(CHANNEL.subtitle);
         const view = new DataView(out.data.buffer, out.data.byteOffset);
         expect([view.getUint16(0), view.getUint16(2), view.getUint16(4), view.getUint16(6)]).toEqual([
@@ -232,30 +220,17 @@ describe('frame', () => {
         expect(out.data.subarray(8)).toEqual(data);
     });
 
-    test('消すのは種別 0x21。中身は無い', () => {
-        const out = frame({ at: 100, data: null });
-        expect(out.kind).toBe(CHANNEL.subtitleClear);
-        expect(out.data.length).toBe(0);
-    });
-
     /*
      * **いつ出すかは添えない。** 絶対の時刻で合わせる道は2回外している —
      * mp4 の 0 は多重化器の都合で決まる (probe の間に溜まった音声に合う。実機で
      * 2.4秒ずれた) し、「焼いている絵より何秒前か」を送る道もフィルタが符号器より
-     * 先を走るぶんずれた (実機で5秒)。受け側は**届いた時点の再生位置**に置く
+     * 先を走るぶんずれた (実機で5秒)。受け側は**届いた時点の再生位置**に置く。
+     *
+     * 放送の時刻を添えるのもやめた。読むには `showinfo` を別の口で喋らせる
+     * ことになり、**その行と絵の数が合わずに字幕が遅れていた** (captions.ts)
      */
     test('いつ出すかは添えない', () => {
-        expect(frame({ at: 100, data: png(0x11) }).data.length).toBe(8 + png(0x11).length);
-        expect(frame({ at: 100, data: null }).data.length).toBe(0);
-    });
-
-    /** 時刻そのものは載せておく。記録から追うときと、データ放送 (第3段階) に要る */
-    test('時刻は 90kHz で載せる', () => {
-        expect(frame({ at: 16472.3, data: null }).pts).toBe(1482507000n);
-    });
-
-    /** 負の時刻は持てない。放送の頭より前を指すことがある */
-    test('負の時刻は 0 に詰める', () => {
-        expect(frame({ at: -5, data: null }).pts).toBe(0n);
+        expect(frame({ data: png(0x11) }).pts).toBe(0n);
+        expect(frame({ data: png(0x11) }).data.length).toBe(8 + png(0x11).length);
     });
 });

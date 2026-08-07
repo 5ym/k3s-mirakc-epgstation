@@ -34,9 +34,26 @@
  * 毎秒 57KB、変わったときだけなら毎秒 8.3KB。宅外から見ることを考えると、
  * ここは落とす価値がある。
  *
- * 中身が空 (全部透明) の枚は「消す」に置き換える。**空かどうかは showinfo に
- * 喋らせる** — `mean:` の最後がアルファの平均で、0 なら1画素も描かれていない。
- * PNG を解いて確かめる必要が無い。
+ * ## 出てきた絵だけを頼りにする
+ *
+ * 以前は `showinfo` に時刻と「空かどうか」を喋らせ、**標準エラーの行と標準出力の
+ * PNG を来た順に組にして**いた。**数が合わない。** 実機の日テレで70秒測ると
+ * PNG 77枚に対して showinfo は79行で、余った2行のぶんだけ**以降ずっと1つずれる**
+ * (一度ずれたら戻らない)。ずれると、字幕が出た枚に1つ前の「空」が当たって
+ * **消す**に化け、その字幕は次の出し直しまで出ない。**字幕が1秒ほど遅れて出て、
+ * 消えるのも遅れる**という、報告そのままの出方をする。
+ *
+ * 余りが出るのは、フィルタを通った枚がそのまま出てくるとは限らないため
+ * (同じ時刻の枚は多重化のところで落ちる)。**別々の口から来るものを位置で
+ * 突き合わせている限り、ずれ得る。**
+ *
+ * いまは `showinfo` を外し、**PNG だけを見る**。空の枚も、そのまま送って
+ * 受け側に描かせる — 全部透明な絵を重ねるのは「消す」と同じ結果になる。
+ * 空の1枚は 10.6KB で、実機の頻度 (毎分9回くらい) なら毎秒 1.6KB ぶん増える。
+ * **ずれ得ない作りのほうが、その 1.6KB より価値がある。**
+ *
+ * 外したぶん ffmpeg の標準エラーも静かになった (40秒で 383行 → 109行)。
+ * 入口の見出しは残るので、選べる字幕は今までどおり分かる (`TrackList`)。
  *
  * ## 局ごとに1本。**音声の選び方では分けない**
  *
@@ -63,10 +80,6 @@ export const CANVAS = { width: 1920, height: 1080 };
 /** 字幕に使う字。録画と同じものを使う (見た目を揃えるため) */
 const FONTS = 'Rounded M+ 1m for ARIB';
 
-/** showinfo の1行から読むもの */
-const PTS_TIME = /pts_time:\s*(-?[\d.]+)/;
-const MEAN = /mean:\[([\d\s]+)\]/;
-
 /** PNG の署名。塊の切れ目を見つけるのに使う */
 const SIGNATURE = [0x89, 0x50, 0x4e, 0x47];
 
@@ -82,7 +95,9 @@ export const TROUBLE = /error|Error|failed|Failed|Cannot|Unable|No such|Invalid 
  *   数え直す基準になる映像がこちら側に無いため)
  * - `-sub_type bitmap` … 文字ではなく絵で受け取る。描くのは libaribcaption
  * - `-canvas_size` … 上の説明。無いと 1440x1080 とみなされる
- * - `showinfo` … 時刻と、空かどうか (`mean:`) を標準エラーに喋らせる
+ * - `null` … **何もしないフィルタ。** 字幕をフィルタに通すこと自体が目的で
+ *   (それで sub2video が働く)、通す先は何でもよい。ここが `showinfo` だった
+ *   頃は、その行と PNG を組にしていて**ずれていた** (上の説明)
  * - `-fps_mode passthrough` … 出てきた枚をそのまま出す。詰め直させない
  * - `image2pipe` + `png` … **PNG まで ffmpeg に組ませる** (上の説明)
  *
@@ -97,10 +112,10 @@ export function captionArgs(program: number, track = 0): string[] {
         '-hide_banner',
         '-nostats',
         /*
-         * **`-loglevel` を下げない。** `showinfo` は info で喋るので、`error` に
-         * 絞ると時刻が1行も来なくなる — 絵だけ出てきて、いつ出すか分からないまま
-         * 捨てることになる (実機で字幕が1枚も出ず、ここで詰まった)。
-         * 騒がしいぶんは読む側で落とす (`watch`)
+         * **`-loglevel` を下げない。** 選べる字幕は**入口の見出し**から拾って
+         * いて (`TrackList`)、あれは info で出る。`error` に絞ると、字幕を
+         * 持っている放送でも切り替えが出せなくなる。騒がしいぶんは読む側で
+         * 落とす (`watch`)
          */
         '-copyts',
         '-sub_type',
@@ -118,7 +133,7 @@ export function captionArgs(program: number, track = 0): string[] {
         'pipe:0',
         // 字幕をフィルタに通すと1枚ずつ映像フレームになる (sub2video)
         '-filter_complex',
-        `[${from}]showinfo[v]`,
+        `[${from}]null[v]`,
         '-map',
         '[v]',
         '-fps_mode',
@@ -133,33 +148,22 @@ export function captionArgs(program: number, track = 0): string[] {
     ];
 }
 
-/** 字幕1枚。`data` が null なら「消す」 */
+/**
+ * 字幕1枚。
+ *
+ * **いつ出すかは持たない。** 受け側は届いた時点の再生位置に置くので
+ * (`live-player.svelte.ts`)、放送の時刻を添えても使い道が無い。時刻を
+ * 添えるために `showinfo` を読んでいた頃は、その行と絵がずれて字幕が遅れた
+ * (上の説明)
+ */
 export interface Caption {
-    /** 放送の時刻 (秒)。映像の再生位置と同じ物差し (`-copyts`) */
-    at: number;
     /** パレットではない RGBA の PNG。画面まるごとの大きさ */
-    data: Uint8Array | null;
+    data: Uint8Array;
 }
 
 export type CaptionListener = (caption: Caption) => void;
 /** 選べる字幕が分かったときに呼ばれる。**1枚も来ていなくても分かる** */
 export type TrackListener = (tracks: CaptionTrack[]) => void;
-
-/**
- * showinfo が喋った1行を読む。**字幕の行でなければ null。**
- *
- * `mean:` は面ごとの平均で、rgba なら最後がアルファ。0 は1画素も描かれて
- * いないということなので、その枚は「消す」に置き換える
- */
-export function readInfo(line: string): { at: number; blank: boolean } | null {
-    const time = line.match(PTS_TIME);
-    if (time === null) return null;
-    const at = Number(time[1]);
-    if (!Number.isFinite(at)) return null;
-    const mean = line.match(MEAN);
-    const alpha = mean === null ? null : Number(mean[1].trim().split(/\s+/).at(-1));
-    return { at, blank: alpha === 0 };
-}
 
 /**
  * 繋がったバイト列から PNG を1枚ずつ取り出す。
@@ -311,8 +315,6 @@ class Captions {
     private readonly splitter = new PngSplitter();
     private readonly aborter = new AbortController();
     private proc: ReturnType<typeof Bun.spawn> | null = null;
-    /** 出てきた順に待たせる時刻。絵は別の口から来るので突き合わせる */
-    private readonly stamps: { at: number; blank: boolean }[] = [];
     /**
      * いま出ている1枚。**途中から入ってきた人に真っ先に渡す。**
      *
@@ -402,7 +404,7 @@ class Captions {
         }
     }
 
-    /** 出てきた PNG を、showinfo が喋った時刻と突き合わせて配る */
+    /** 出てきた PNG を配る。**組にするものは無い** (上の説明) */
     private async drain(proc: ReturnType<typeof Bun.spawn>): Promise<void> {
         for await (const chunk of chunks(proc.stdout as ReadableStream<Uint8Array>)) {
             for (const png of this.splitter.feed(chunk)) this.deliver(png);
@@ -410,19 +412,14 @@ class Captions {
     }
 
     /**
-     * 時刻と空かどうかは標準エラーから来る。
+     * 標準エラーから、選べる字幕と失敗を拾う。
      *
-     * **`-loglevel` を下げられない**ので (showinfo が info で喋る)、入り口の
-     * ストリーム一覧まで流れてくる。**残すのは失敗だけ** — 全部出すと、
-     * 選局のたびに数十行が記録に積まれて読めなくなる
+     * **`-loglevel` を下げられない**ので (入口の見出しが info)、要らない行も
+     * 流れてくる。**残すのは失敗だけ** — 全部出すと、選局のたびに数十行が
+     * 記録に積まれて読めなくなる
      */
     private async watch(proc: ReturnType<typeof Bun.spawn>): Promise<void> {
         for await (const line of lines(proc.stderr as ReadableStream<Uint8Array>)) {
-            const info = readInfo(line);
-            if (info !== null) {
-                this.stamps.push(info);
-                continue;
-            }
             /*
              * **選べる字幕は入口の見出しに出ている。** 1枚も来ていなくても
              * 分かるので、画面は待たずに切り替えを出せる (間隔の空く番組で
@@ -438,27 +435,20 @@ class Captions {
         }
     }
 
+    /**
+     * 1枚配る。**同じ絵は配り直さない。**
+     *
+     * sub2video は同じものを何度も出すので (実機で毎分98枚のうち中身が変わるのは
+     * 18回)、そのまま流すと帯域が7倍になる。
+     *
+     * **空の枚も配る。** 全部透明な絵を重ねるのは「消す」と同じ結果になる。
+     * 空かどうかを別の口 (showinfo) から聞きに行くと組がずれる (上の説明)
+     */
     private deliver(png: Uint8Array): void {
-        const stamp = this.stamps.shift();
-        if (stamp === undefined) return;
-
-        // 空の枚は「消す」に。PNG を解かずに済ませるために showinfo に喋らせている
-        if (stamp.blank) {
-            if (this.last === null) return;
-            this.last = null;
-            this.hand({ at: stamp.at, data: null });
-            return;
-        }
-
-        /*
-         * **同じ絵は配り直さない。** sub2video は同じものを何度も出すので
-         * (実機で毎分98枚のうち中身が変わるのは18回)、そのまま流すと
-         * 帯域が7倍になる
-         */
         const key = Bun.hash(png).toString(36);
         if (key === this.last) return;
         this.last = key;
-        this.hand({ at: stamp.at, data: png });
+        this.hand({ data: png });
     }
 
     private hand(caption: Caption): void {
@@ -517,18 +507,17 @@ export function watchCaptions(
  * いまは画面まるごとを送るので x,y は 0 だが、**あとで切り抜くようにしても
  * 受け側を変えずに済む**ように持たせてある。
  *
- * **いつ出すかは添えない。** 絶対の時刻 (放送の PTS) は頭の8バイトに乗るが、
- * 受け側はそれを使わない — mp4 は必ず 0 から始まり、その 0 がどの放送時刻に
- * あたるかは多重化器の都合で決まるので、物差しが違う。**届いた時点の再生位置に
- * 置く**のが結局いちばん合う (`live-player.svelte.ts`)。「いま焼いている絵より
- * 何ms前か」を添えていたこともあるが、フィルタは符号器より先を走るので
- * 実機で5秒ずれた
+ * **いつ出すかは添えない** (時刻は 0 で置く)。絶対の時刻 (放送の PTS) を
+ * 乗せる枠は取り決めにあるが、受け側はそれを使わない — mp4 は必ず 0 から
+ * 始まり、その 0 がどの放送時刻にあたるかは多重化器の都合で決まるので、
+ * 物差しが違う。**届いた時点の再生位置に置く**のが結局いちばん合う
+ * (`live-player.svelte.ts`)。「いま焼いている絵より何ms前か」を添えていた
+ * こともあるが、フィルタは符号器より先を走るので実機で5秒ずれた。
+ *
+ * **消すための別の種別も使わない。** 全部透明な絵を重ねれば消えるので、
+ * 空かどうかを見分ける必要そのものが無い (上の説明)
  */
 export function frame(caption: Caption): { kind: number; pts: bigint; data: Uint8Array } {
-    const pts = BigInt(Math.max(0, Math.round(caption.at * 90000)));
-
-    if (caption.data === null) return { kind: CHANNEL.subtitleClear, pts, data: new Uint8Array(0) };
-
     const out = new Uint8Array(8 + caption.data.length);
     const view = new DataView(out.buffer);
     view.setUint16(0, 0);
@@ -536,7 +525,7 @@ export function frame(caption: Caption): { kind: number; pts: bigint; data: Uint
     view.setUint16(4, CANVAS.width);
     view.setUint16(6, CANVAS.height);
     out.set(caption.data, 8);
-    return { kind: CHANNEL.subtitle, pts, data: out };
+    return { kind: CHANNEL.subtitle, pts: 0n, data: out };
 }
 
 /** テスト用。掴んだままのものを残さない */
