@@ -154,7 +154,8 @@ public sealed class TunerPool(
                 if (open.Type == type && open.Channel == channel) return Join(open, priority, use);
             }
 
-            index = Pick(type, priority) ?? throw new TunerBusyException($"{type} のチューナーに空きがありません");
+            index = Pick(type, channel, priority)
+                ?? throw new TunerBusyException($"{type} のチューナーに空きがありません");
 
             // 蹴る相手が居れば先に片付ける。同じチューナーを2つの選局が掴まないように
             if (_leases.TryGetValue(index, out var victim)) Release(victim, "優先度の高い要求に譲りました");
@@ -340,17 +341,43 @@ public sealed class TunerPool(
     /// どのチューナーを使うか決める。
     ///
     /// <list type="number">
+    /// <item>**もうそのチャンネルに合っているもの**。選局し直さずに済む</item>
     /// <item>空いているもの</item>
     /// <item>誰も読んでいないもの (畳むのを待っているだけ)</item>
     /// <item>自分より弱い相手が掴んでいるもの。いちばん弱いところから取る</item>
     /// </list>
+    ///
+    /// <para>
+    /// **1番目が無いと、戻るたびに選局し直しになる。** 実機で測ると選局し直しは
+    /// 約 600ms、合っているものを使えば 10ms。ライブ視聴でチャンネルを行き来
+    /// すると毎回そのぶん待たされていた。合っているかどうかは
+    /// <see cref="Held.Channel"/> が覚えている (実体はアダプタごとに開いたまま)。
+    /// </para>
     /// </summary>
-    private int? Pick(string type, int priority)
+    private int? Pick(string type, string channel, int priority)
     {
         var usable = Enumerable.Range(0, Tuners.Count)
             .Where(index => !Tuners[index].Disabled && Tuners[index].Types.Contains(type))
             .ToList();
 
+        /*
+         * **既に合っているものを先に採る。** ただし誰かが読んでいる最中のものは
+         * 除く — 同じチャンネルなら相乗りできるが、それは呼ぶ側 (`Open`) の
+         * 別の道で、ここへは来ない
+         */
+        foreach (var index in usable)
+        {
+            if (_leases.ContainsKey(index)) continue;
+            /*
+             * 錠の順は `_gate` → `_deviceGate`。`CloseAll` も同じ向きなので
+             * 噛み合わない。`Channel` を `held.Gate` 無しで読むのは承知の上で、
+             * 外れても「選局し直しが1回増える」だけ
+             */
+            lock (_deviceGate)
+            {
+                if (_held.TryGetValue(index, out var open) && open.Channel == channel) return index;
+            }
+        }
         foreach (var index in usable)
         {
             if (!_leases.ContainsKey(index)) return index;

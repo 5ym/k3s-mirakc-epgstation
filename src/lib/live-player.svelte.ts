@@ -23,6 +23,14 @@ const LAST = 'denpa:live:last';
 const KEEP = 300;
 /** 貯める量を決め直す間隔 (ms)。塊は毎秒20個来るので、そのたびには回さない */
 const SETTLE_EVERY = 5_000;
+/**
+ * 選局や跳んだ直後、詰まりを数えない間 (ms)。
+ *
+ * **自分で起こした詰まりで貯める量を増やさない。** 器を作り直せば必ず
+ * `waiting` が上がるし、跳べば読み込み直しになる。宅外で本当に届かない
+ * のとは別ものなので、混ぜると遅延が伸びたまま戻らない
+ */
+const GRACE = 3_000;
 
 export interface Tuned {
     channelType: string;
@@ -86,6 +94,14 @@ export function livePlayer() {
     /** 最後に `nextTarget` を回した時刻 */
     let lastSettled = 0;
     /**
+     * この時刻まで、詰まっても数えない。**自分で起こした詰まりを数えないため。**
+     *
+     * 選局した直後と、跳んだ直後は必ず `waiting` が上がる。数えていた頃は
+     * それだけで貯める量が増え、遅延が伸びたまま戻らなかった (縮むのは
+     * 45秒に 0.15 秒ずつなので、1回増えると分単位で残る)。
+     */
+    let quiet = 0;
+    /**
      * 追加待ちの列。**`appendBuffer` は1つずつしか受け付けない** —
      * 前のが終わる前に呼ぶと `InvalidStateError` で止まる
      */
@@ -147,7 +163,10 @@ export function livePlayer() {
             target,
         });
 
-        if (next.seek !== null) video.currentTime = next.seek;
+        if (next.seek !== null) {
+            video.currentTime = next.seek;
+            quiet = Date.now() + GRACE;
+        }
         if (next.rate !== null) video.playbackRate = next.rate;
         if (next.play && !running) {
             running = true;
@@ -247,6 +266,7 @@ export function livePlayer() {
         if (element === null || buffer === null || buffer.buffered.length === 0) return;
         const end = buffer.buffered.end(buffer.buffered.length - 1);
         element.currentTime = Math.max(buffer.buffered.start(0), end - target);
+        quiet = Date.now() + GRACE;
         if (paused) toggle();
     }
 
@@ -256,6 +276,7 @@ export function livePlayer() {
         const start = buffer.buffered.start(0);
         const end = buffer.buffered.end(buffer.buffered.length - 1);
         element.currentTime = Math.min(end, Math.max(start, to));
+        quiet = Date.now() + GRACE;
     }
 
     function reset(): void {
@@ -279,6 +300,7 @@ export function livePlayer() {
         message = '';
         tuned = target;
         element = video;
+        quiet = Date.now() + GRACE;
         localStorage.setItem(LAST, JSON.stringify(target));
 
         /*
@@ -400,7 +422,7 @@ export function livePlayer() {
                  * 実際に止まったかどうかで決める (`nextTarget`)
                  */
                 video.addEventListener('waiting', () => {
-                    if (paused) return;
+                    if (paused || Date.now() < quiet) return;
                     stalled = true;
                     lastStall = Date.now();
                 });
