@@ -22,16 +22,13 @@
 import { type Audio, type AudioTrack, audioTracks, pickTrack } from '$lib/arib';
 import { CHANNEL, type Notice } from '$lib/live';
 import { Fmp4Splitter } from '$lib/ts/fmp4';
-import { frame, readInfo, TROUBLE, watchCaptions } from './captions';
+import { frame, TROUBLE, watchCaptions } from './captions';
 import { config } from './config';
 import { queryOne } from './db';
 import { deinterlace, smoothMotionFor } from './encoder';
 import { chunks, lines } from './stream';
 import { openChannelStream } from './tuner';
 import type { Connection } from './ws';
-
-/** `showinfo` の行。原点を拾ったあとは読み飛ばす (コマごとに来る) */
-const SHOWINFO = /Parsed_showinfo/;
 
 /**
  * 焼き方。**第1段階は H.264 + AAC。**
@@ -89,22 +86,21 @@ const SHOWINFO = /Parsed_showinfo/;
  * コマ数を倍にしないのも録画と揃える — 元が毎秒24コマ前後なので、倍にしても
  * 同じ絵が並ぶだけで、CPU だけ倍かかる。
  *
- * ## 字幕を合わせる物差し
+ * ## 字幕とは時刻を突き合わせない
  *
- * **mp4 は必ず 0 から始まる。** `-copyts` で放送の時刻を保っているのは
+ * **絶対の時刻では合わせられない。** `-copyts` で放送の時刻を保っているのは
  * ffmpeg の中までで、mp4 の多重化器は最初のパケットを 0 に詰め直す
  * (`-avoid_negative_ts disabled` も `-muxdelay 0` も効かない。実機で確認)。
- * 一方**字幕は放送の時刻で来る** (`captions.ts`) ので、そのまま比べると
- * 2万秒ずれる。
+ * しかもその「最初のパケット」は**音声**のことが多い — 焼かれた1コマ目の
+ * 放送時刻を引く手を採ったときは、実機で 2.4 秒ずれた。
  *
- * **「焼かれた1コマ目の放送時刻」を引く手は外した。** その時刻と mp4 の 0 は
- * 一致しない — 多重化器が 0 に合わせるのは**いちばん早いパケット**で、
- * 音声のほうが先に溜まっているため。実機で 2.4 秒ずれ、字幕がそのぶん遅れた。
+ * 「いま焼いている絵より何秒前か」を添える手も外した。フィルタは符号器より
+ * 先を走るので、実機で 5 秒ずれた。**どちらもこちらの都合で動く量**だった。
  *
- * 代わりに**「いま焼いている絵より何秒前のものか」**を字幕に添えて送る
- * (`latest`)。画面は自分が持っている端からその秒数だけ戻した所に置くので、
- * mp4 の 0 がどこであっても関係ない。ずれは2本の ffmpeg の進み具合の差だけで、
- * 実機で ±0.1 秒に収まっている。
+ * いまは**届いた時点の再生位置に置いている** (`live-player.svelte.ts`)。
+ * 字幕と映像は別の ffmpeg だが同じ電波を同じ速さで読んでいるので、出てくる
+ * 時刻は揃う (1本の中に両方入れて測ると ±0.1 秒)。**こちらから添えるものは
+ * 何も無い** — そのため `showinfo` も要らない。
  *
  * ## 局を名指しで選ぶ
  *
@@ -144,9 +140,12 @@ export function encodeArgs(program: number, smooth: boolean, audio: AudioTrack):
     return [
         '-hide_banner',
         /*
-         * **`-loglevel` を下げない。** 下の `showinfo` は info で喋る。
-         * 騒がしいぶんは読む側で落とす (`Session.watch`)
+         * **失敗だけ残す。** 入口の見出しも進み具合も要らない (見ているのは
+         * 焼けない理由だけ)。字幕側は `showinfo` が info で喋るぶん下げられないが、
+         * こちらは喋らせるものが無い
          */
+        '-loglevel',
+        'error',
         '-fflags',
         'nobuffer',
         // 立ち上がりの、削れる部分。これ以上小さくしても縮まない (上の説明)
@@ -155,14 +154,9 @@ export function encodeArgs(program: number, smooth: boolean, audio: AudioTrack):
         '-copyts',
         '-i',
         'pipe:0',
-        /*
-         * インタレ解除。放送は 1080i なので、解かずに渡すと動きが櫛状になる。
-         *
-         * **`showinfo` は字幕を合わせるために足してある。** 焼かれる1コマ目の
-         * 放送時刻が要る (下の「時間軸の原点」)。使うのは1行目だけ
-         */
+        // インタレ解除。放送は 1080i なので、解かずに渡すと動きが櫛状になる
         '-vf',
-        `${deinterlace(smooth)},showinfo`,
+        deinterlace(smooth),
         '-map',
         `${from}:v:0`,
         '-c:v',
@@ -218,13 +212,6 @@ class Session {
     private proc: ReturnType<typeof Bun.spawn> | null = null;
     /** 最後に流した init。途中から入ってきた人に真っ先に渡す */
     private init: Uint8Array | null = null;
-    /**
-     * いま焼いている絵の放送時刻 (秒)。**字幕を合わせるのに要る** (上の説明)。
-     *
-     * `showinfo` がコマごとに喋るので、そのたびに入れ直す。字幕を配るときに
-     * 「これより何秒前のものか」を出すためだけに使う
-     */
-    latest: number | null = null;
     private stopped = false;
 
     constructor(
@@ -337,22 +324,16 @@ class Session {
     }
 
     /**
-     * ffmpeg の言い分から**時間軸の原点**を拾い、失敗だけ残す。
+     * ffmpeg の言い分から失敗だけ残す。
      *
      * 焼けない理由 (音声が無い・解像度が変わった) はここにしか出ない。
      * 捨てていると「映像が出ない」としか分からなくなる。
      *
-     * **`showinfo` はコマごとに喋る。** その時刻を持っておくのが `latest` で、
-     * 字幕を「いま焼いている絵より何秒前か」に直すのに使う。残す行は失敗だけ
-     * (`-loglevel` を下げられないぶん、そのまま出すと記録が読めなくなる)
+     * `-loglevel error` にしてあってもなお、復号器は直せた程度のことまで
+     * 喋る (放送の欠けは日常的にある)。**残すのは本当に失敗した行だけ**
      */
     private async watch(proc: ReturnType<typeof Bun.spawn>): Promise<void> {
         for await (const line of lines(proc.stderr as ReadableStream<Uint8Array>)) {
-            if (SHOWINFO.test(line)) {
-                const info = readInfo(line);
-                if (info !== null) this.latest = info.at;
-                continue;
-            }
             if (TROUBLE.test(line)) {
                 console.warn(`[live] ${this.channelType}:${this.channel} ffmpeg: ${line.trim()}`);
             }
@@ -458,8 +439,7 @@ export function attend(connection: Connection): void {
             program,
             track,
             (caption) => {
-                // 「いま焼いている絵より何秒前か」を添える (`frame` の説明)
-                const { kind, pts, data } = frame(caption, current?.latest ?? null);
+                const { kind, pts, data } = frame(caption);
                 connection.send(kind, pts, data);
             },
             // 選べる字幕。**1枚も届いていなくても分かる** (入口の見出しに出ている)

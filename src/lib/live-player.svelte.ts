@@ -698,14 +698,8 @@ export function livePlayer() {
             }
 
             /*
-             * **字幕。** 中身の頭は
-             * `[4: いま焼いている絵より何ミリ秒前か][2:x][2:y][2:w][2:h][PNG...]`
+             * **字幕。** 中身の頭は `[2:x][2:y][2:w][2:h][PNG...]`
              * ([stream.md](../../docs/stream.md) §5.3)。
-             *
-             * **絶対の時刻では合わせられない。** mp4 は必ず 0 から始まり、その 0 が
-             * どの放送時刻にあたるかは多重化器の都合で決まる (音声のほうが先に
-             * 溜まっていると、そちらに合う)。**いま持っている端から戻す**ほうが、
-             * 器の都合に左右されない。
              *
              * 置き場所 (x,y,w,h) はいま使わない — 画面まるごとが来るため。
              * **あとで切り抜くようにしてもここを変えずに済む**ように読んでおく
@@ -736,7 +730,7 @@ export function livePlayer() {
                  * あるので、そのときは捨てる (`generation`)
                  */
                 const mine = generation;
-                const png = new Uint8Array(data, 9 + 12);
+                const png = new Uint8Array(data, 9 + 8);
                 void createImageBitmap(new Blob([png as BlobPart], { type: 'image/png' }))
                     .then((bitmap) => {
                         if (mine !== generation) {

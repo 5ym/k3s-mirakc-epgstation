@@ -218,53 +218,44 @@ describe('TrackList', () => {
  * x,y は 0 だが、**あとで切り抜くようにしても受け側を変えずに済む**。
  */
 describe('frame', () => {
-    test('絵は種別 0x20 で、頭に差と置き場所が付く', () => {
+    test('絵は種別 0x20 で、頭に置き場所が付く', () => {
         const data = png(0x11);
-        const out = frame({ at: 100, data }, 100.5);
+        const out = frame({ at: 100, data });
         expect(out.kind).toBe(CHANNEL.subtitle);
         const view = new DataView(out.data.buffer, out.data.byteOffset);
-        expect(view.getInt32(0)).toBe(500);
-        expect([view.getUint16(4), view.getUint16(6), view.getUint16(8), view.getUint16(10)]).toEqual([
+        expect([view.getUint16(0), view.getUint16(2), view.getUint16(4), view.getUint16(6)]).toEqual([
             0,
             0,
             CANVAS.width,
             CANVAS.height,
         ]);
-        expect(out.data.subarray(12)).toEqual(data);
+        expect(out.data.subarray(8)).toEqual(data);
     });
 
-    test('消すのは種別 0x21。差だけ載せる', () => {
-        const out = frame({ at: 100, data: null }, 100.5);
+    test('消すのは種別 0x21。中身は無い', () => {
+        const out = frame({ at: 100, data: null });
         expect(out.kind).toBe(CHANNEL.subtitleClear);
-        expect(new DataView(out.data.buffer, out.data.byteOffset).getInt32(0)).toBe(500);
+        expect(out.data.length).toBe(0);
     });
 
     /*
-     * **絶対の時刻では合わせられない。** mp4 は必ず 0 から始まり、その 0 が
-     * どの放送時刻にあたるかは多重化器の都合で決まる — 音声のほうが先に
-     * 溜まっているとそちらに合う。実機で 2.4 秒ずれ、字幕がそのぶん遅れた。
-     *
-     * 代わりに「いま焼いている絵より何秒前か」を送る。**字幕のほうが先を
-     * 走っていれば負**になるので、符号付きで載せる
+     * **いつ出すかは添えない。** 絶対の時刻で合わせる道は2回外している —
+     * mp4 の 0 は多重化器の都合で決まる (probe の間に溜まった音声に合う。実機で
+     * 2.4秒ずれた) し、「焼いている絵より何秒前か」を送る道もフィルタが符号器より
+     * 先を走るぶんずれた (実機で5秒)。受け側は**届いた時点の再生位置**に置く
      */
-    test('字幕が映像より先なら負になる', () => {
-        const out = frame({ at: 100.4, data: null }, 100);
-        expect(new DataView(out.data.buffer, out.data.byteOffset).getInt32(0)).toBe(-400);
+    test('いつ出すかは添えない', () => {
+        expect(frame({ at: 100, data: png(0x11) }).data.length).toBe(8 + png(0x11).length);
+        expect(frame({ at: 100, data: null }).data.length).toBe(0);
     });
 
-    /** まだ1コマも焼けていないとき。次の字幕からは合う */
-    test('焼いている絵が分からなければ 0', () => {
-        const out = frame({ at: 100, data: null }, null);
-        expect(new DataView(out.data.buffer, out.data.byteOffset).getInt32(0)).toBe(0);
-    });
-
-    /** 時刻そのものも載せておく。記録から追うときに要る */
+    /** 時刻そのものは載せておく。記録から追うときと、データ放送 (第3段階) に要る */
     test('時刻は 90kHz で載せる', () => {
-        expect(frame({ at: 16472.3, data: null }, null).pts).toBe(1482507000n);
+        expect(frame({ at: 16472.3, data: null }).pts).toBe(1482507000n);
     });
 
     /** 負の時刻は持てない。放送の頭より前を指すことがある */
     test('負の時刻は 0 に詰める', () => {
-        expect(frame({ at: -5, data: null }, null).pts).toBe(0n);
+        expect(frame({ at: -5, data: null }).pts).toBe(0n);
     });
 });
