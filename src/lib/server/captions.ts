@@ -517,17 +517,36 @@ export function watchCaptions(
  * いまは画面まるごとを送るので x,y は 0 だが、**あとで切り抜くようにしても
  * 受け側を変えずに済む**ように持たせてある。
  */
-export function frame(caption: Caption): { kind: number; pts: bigint; data: Uint8Array } {
+export function frame(
+    caption: Caption,
+    /**
+     * いま焼いている絵の放送時刻 (`Session.latest`)。分からなければ null。
+     *
+     * **これとの差を添えて送る。** 絶対の時刻をそのまま送っても、受け側の
+     * 再生位置とは物差しが違う (mp4 は必ず 0 から始まり、その 0 がどの放送時刻に
+     * あたるかは多重化器の都合で決まる)。**「いま焼いている絵より何秒前か」**
+     * なら、受け側は自分の持っている端から戻すだけでよい
+     */
+    latest: number | null,
+): { kind: number; pts: bigint; data: Uint8Array } {
     const pts = BigInt(Math.max(0, Math.round(caption.at * 90000)));
-    if (caption.data === null) return { kind: CHANNEL.subtitleClear, pts, data: new Uint8Array(0) };
+    // 分からないうちは 0 (=いまの端) に置く。次の字幕からは合う
+    const behind = latest === null ? 0 : Math.round((latest - caption.at) * 1000);
 
-    const out = new Uint8Array(8 + caption.data.length);
+    if (caption.data === null) {
+        const only = new Uint8Array(4);
+        new DataView(only.buffer).setInt32(0, behind);
+        return { kind: CHANNEL.subtitleClear, pts, data: only };
+    }
+
+    const out = new Uint8Array(4 + 8 + caption.data.length);
     const view = new DataView(out.buffer);
-    view.setUint16(0, 0);
-    view.setUint16(2, 0);
-    view.setUint16(4, CANVAS.width);
-    view.setUint16(6, CANVAS.height);
-    out.set(caption.data, 8);
+    view.setInt32(0, behind);
+    view.setUint16(4, 0);
+    view.setUint16(6, 0);
+    view.setUint16(8, CANVAS.width);
+    view.setUint16(10, CANVAS.height);
+    out.set(caption.data, 12);
     return { kind: CHANNEL.subtitle, pts, data: out };
 }
 

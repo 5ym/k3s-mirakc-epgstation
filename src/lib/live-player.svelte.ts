@@ -149,17 +149,6 @@ export function livePlayer() {
     /** いま重ねている1枚。同じものを描き直さない */
     let shown: Cue | null = null;
     /**
-     * 時間軸の原点 (放送の時刻、秒)。**字幕を映像に合わせるのに要る。**
-     *
-     * mp4 は必ず 0 から始まるので、`currentTime` は「焼き始めてから何秒か」で
-     * しかない。字幕は放送の時刻で来るので、引いて同じ物差しに乗せる。
-     * サーバが焼かれた1コマ目の時刻を送ってくる (`Notice` の `origin`)。
-     *
-     * **分かるまでは字幕を出さない。** 置く場所が決まらないので、出すと
-     * 合っていない時刻に出ることになる
-     */
-    let origin: number | null = null;
-    /**
      * 選局の代。**絵にし終わる頃には局が変わっていることがある。**
      *
      * PNG を `ImageBitmap` にするのは非同期なので、その間に選び直されると
@@ -250,7 +239,7 @@ export function livePlayer() {
     function paint(at: number): boolean {
         if (overlay === null) return false;
         // 原点が分かるまでは置き場所が決まらない。出すと合っていない時刻に出る
-        const next = captions && origin !== null ? currentCue(cues, at + origin) : null;
+        const next = captions ? currentCue(cues, at) : null;
         if (next === shown) return false;
         shown = next;
 
@@ -272,8 +261,7 @@ export function livePlayer() {
 
     /** 待たせているぶんを片付ける。**いま出している1枚は残す** (出しっぱなしのため) */
     function sweep(at: number): void {
-        if (origin === null) return;
-        const kept = trimCues(cues, at + origin);
+        const kept = trimCues(cues, at);
         if (kept.length === cues.length) return;
         for (const cue of cues) {
             if (kept.includes(cue) || cue === shown) continue;
@@ -527,12 +515,6 @@ export function livePlayer() {
         // 局や音声を選び直したら、追っかけていた場所はもう無い
         chasing = false;
         speed = 1;
-        /*
-         * **器を作り直すと原点も変わる。** 音声を選び直しただけでも ffmpeg は
-         * 起こし直しになるので、新しい `origin` が来るまで字幕は出さない
-         * (古いままだと、合っていない時刻に出る)
-         */
-        origin = null;
         oldest = 0;
         newest = 0;
         position = 0;
@@ -676,9 +658,6 @@ export function livePlayer() {
                 const notice = JSON.parse(new TextDecoder().decode(body)) as Notice;
                 if (notice.type === 'error') {
                     fail(notice.message);
-                } else if (notice.type === 'origin') {
-                    // これが来るまで字幕は出せない (置く場所が決まらない)
-                    origin = notice.at;
                 } else if (notice.type === 'captions') {
                     /*
                      * **1枚も届いていなくても、あることは分かる。** 届いてから
@@ -719,15 +698,23 @@ export function livePlayer() {
             }
 
             /*
-             * **字幕。** 頭の8バイトは置き場所 ([stream.md](../../docs/stream.md) §5.3)。
-             * いまは画面まるごとが来るので使わないが、**あとで切り抜くようにしても
-             * ここを変えずに済む**ように読んでおく。
+             * **字幕。** 中身の頭は
+             * `[4: いま焼いている絵より何ミリ秒前か][2:x][2:y][2:w][2:h][PNG...]`
+             * ([stream.md](../../docs/stream.md) §5.3)。
              *
-             * 時刻は多重化の頭 (90kHz) に載っている。元TSの時刻そのままなので
-             * (`-copyts`)、再生位置と直に比べられる
+             * **絶対の時刻では合わせられない。** mp4 は必ず 0 から始まり、その 0 が
+             * どの放送時刻にあたるかは多重化器の都合で決まる (音声のほうが先に
+             * 溜まっていると、そちらに合う)。**いま持っている端から戻す**ほうが、
+             * 器の都合に左右されない。
+             *
+             * 置き場所 (x,y,w,h) はいま使わない — 画面まるごとが来るため。
+             * **あとで切り抜くようにしてもここを変えずに済む**ように読んでおく
              */
             if (kind === CHANNEL.subtitle || kind === CHANNEL.subtitleClear) {
-                const at = Number(new DataView(data).getBigUint64(1)) / 90000;
+                if (buffer === null || buffer.buffered.length === 0) return;
+                const behind = new DataView(data).getInt32(9) / 1000;
+                const at = buffer.buffered.end(buffer.buffered.length - 1) - behind;
+
                 if (kind === CHANNEL.subtitleClear) {
                     cues = insertCue(cues, { at, bitmap: null });
                     return;
@@ -737,7 +724,7 @@ export function livePlayer() {
                  * あるので、そのときは捨てる (`generation`)
                  */
                 const mine = generation;
-                const png = new Uint8Array(data, 9 + 8);
+                const png = new Uint8Array(data, 9 + 12);
                 void createImageBitmap(new Blob([png as BlobPart], { type: 'image/png' }))
                     .then((bitmap) => {
                         if (mine !== generation) {

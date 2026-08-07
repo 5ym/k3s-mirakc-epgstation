@@ -89,19 +89,22 @@ const SHOWINFO = /Parsed_showinfo/;
  * コマ数を倍にしないのも録画と揃える — 元が毎秒24コマ前後なので、倍にしても
  * 同じ絵が並ぶだけで、CPU だけ倍かかる。
  *
- * ## 時間軸の原点
+ * ## 字幕を合わせる物差し
  *
  * **mp4 は必ず 0 から始まる。** `-copyts` で放送の時刻を保っているのは
  * ffmpeg の中までで、mp4 の多重化器は最初のパケットを 0 に詰め直す
  * (`-avoid_negative_ts disabled` も `-muxdelay 0` も効かない。実機で確認)。
  * 一方**字幕は放送の時刻で来る** (`captions.ts`) ので、そのまま比べると
- * 2万秒ずれる — 実機で字幕が1枚も出ず、ここで詰まった。
+ * 2万秒ずれる。
  *
- * そこで `showinfo` を挟んで、**焼かれる1コマ目の放送時刻**を拾い、画面へ送る
- * (`origin`)。画面はこれを引いて、再生位置と同じ物差しに乗せる。
+ * **「焼かれた1コマ目の放送時刻」を引く手は外した。** その時刻と mp4 の 0 は
+ * 一致しない — 多重化器が 0 に合わせるのは**いちばん早いパケット**で、
+ * 音声のほうが先に溜まっているため。実機で 2.4 秒ずれ、字幕がそのぶん遅れた。
  *
- * 入口の見出しに出る `start:` では足りない。実測で 19870.63 に対し、実際に
- * 焼かれた1コマ目は 19871.08 だった — **0.46 秒ずれる**ので、字幕が早く出る。
+ * 代わりに**「いま焼いている絵より何秒前のものか」**を字幕に添えて送る
+ * (`latest`)。画面は自分が持っている端からその秒数だけ戻した所に置くので、
+ * mp4 の 0 がどこであっても関係ない。ずれは2本の ffmpeg の進み具合の差だけで、
+ * 実機で ±0.1 秒に収まっている。
  *
  * ## 局を名指しで選ぶ
  *
@@ -216,11 +219,12 @@ class Session {
     /** 最後に流した init。途中から入ってきた人に真っ先に渡す */
     private init: Uint8Array | null = null;
     /**
-     * 焼かれた1コマ目の放送時刻 (秒)。**字幕を合わせるのに要る** (上の説明)。
+     * いま焼いている絵の放送時刻 (秒)。**字幕を合わせるのに要る** (上の説明)。
      *
-     * 途中から入ってきた人にも渡す — これが無いと字幕を置く場所が決まらない
+     * `showinfo` がコマごとに喋るので、そのたびに入れ直す。字幕を配るときに
+     * 「これより何秒前のものか」を出すためだけに使う
      */
-    private origin: number | null = null;
+    latest: number | null = null;
     private stopped = false;
 
     constructor(
@@ -242,7 +246,6 @@ class Session {
 
     add(viewer: Viewer): void {
         this.viewers.add(viewer);
-        if (this.origin !== null) this.tellOne(viewer, { type: 'origin', at: this.origin });
         if (this.init !== null) this.hand(viewer, CHANNEL.videoInit, this.init);
     }
 
@@ -339,19 +342,15 @@ class Session {
      * 焼けない理由 (音声が無い・解像度が変わった) はここにしか出ない。
      * 捨てていると「映像が出ない」としか分からなくなる。
      *
-     * **原点は1行目だけ。** `showinfo` はコマごとに喋るので、拾ったら以降は見ない
-     * (`-loglevel` を下げられないぶん、残すのは失敗の行だけにする)
+     * **`showinfo` はコマごとに喋る。** その時刻を持っておくのが `latest` で、
+     * 字幕を「いま焼いている絵より何秒前か」に直すのに使う。残す行は失敗だけ
+     * (`-loglevel` を下げられないぶん、そのまま出すと記録が読めなくなる)
      */
     private async watch(proc: ReturnType<typeof Bun.spawn>): Promise<void> {
         for await (const line of lines(proc.stderr as ReadableStream<Uint8Array>)) {
-            if (this.origin === null) {
+            if (SHOWINFO.test(line)) {
                 const info = readInfo(line);
-                if (info !== null) {
-                    this.origin = info.at;
-                    this.tell({ type: 'origin', at: info.at });
-                    continue;
-                }
-            } else if (SHOWINFO.test(line)) {
+                if (info !== null) this.latest = info.at;
                 continue;
             }
             if (TROUBLE.test(line)) {
@@ -459,7 +458,8 @@ export function attend(connection: Connection): void {
             program,
             track,
             (caption) => {
-                const { kind, pts, data } = frame(caption);
+                // 「いま焼いている絵より何秒前か」を添える (`frame` の説明)
+                const { kind, pts, data } = frame(caption, current?.latest ?? null);
                 connection.send(kind, pts, data);
             },
             // 選べる字幕。**1枚も届いていなくても分かる** (入口の見出しに出ている)
