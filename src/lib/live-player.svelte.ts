@@ -711,9 +711,21 @@ export function livePlayer() {
              * **あとで切り抜くようにしてもここを変えずに済む**ように読んでおく
              */
             if (kind === CHANNEL.subtitle || kind === CHANNEL.subtitleClear) {
-                if (buffer === null || buffer.buffered.length === 0) return;
-                const behind = new DataView(data).getInt32(9) / 1000;
-                const at = buffer.buffered.end(buffer.buffered.length - 1) - behind;
+                if (element === null) return;
+                /*
+                 * **届いた時点の再生位置に置く。**
+                 *
+                 * 字幕と映像は別の ffmpeg だが、同じ電波を同じ速さで読んでいるので
+                 * **出てくる時刻はほぼ揃う** (1本の中に両方入れて測ると ±0.1秒)。
+                 * だから「届いた = いま映っている絵のもの」で足りる。
+                 *
+                 * 絶対の時刻で合わせる道は2回外した。mp4 の 0 は多重化器の都合で
+                 * 決まる (音声のほうが先に溜まっているとそちらに合う) し、
+                 * 焼いている絵の時刻を送る道も、フィルタが符号器より先を走るぶん
+                 * ずれた (実機で 2.4秒 と 5秒)。**どちらもこちらの都合で動く量**で、
+                 * 頼る先として間違っていた
+                 */
+                const at = element.currentTime;
 
                 if (kind === CHANNEL.subtitleClear) {
                     cues = insertCue(cues, { at, bitmap: null });
