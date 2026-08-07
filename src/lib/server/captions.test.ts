@@ -1,11 +1,24 @@
 import { describe, expect, test } from 'bun:test';
 import { CHANNEL } from '$lib/live';
-import { CANVAS, captionArgs, frame, PngSplitter, readInfo } from './captions';
+import { CANVAS, captionArgs, frame, PngSplitter, readInfo, TrackList } from './captions';
 
-/** PNG 1枚ぶんの形だけ真似る (中身は問わない。切れ目を見つけられるかだけ見る) */
-const png = (fill: number, size = 20) => {
-    const out = new Uint8Array(size).fill(fill);
+/**
+ * PNG 1枚ぶん。**かたまりの形まで真似る** — 切れ目を `IEND` で見つけるので、
+ * 署名だけの偽物では確かめられない。
+ *
+ *     [8バイトの署名][4:長さ][4:種別][中身][4:CRC] … [0][IEND][CRC]
+ */
+const png = (fill: number, body = 8) => {
+    const out = new Uint8Array(8 + 12 + body + 12);
     out.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+    const view = new DataView(out.buffer);
+    // IDAT のつもりのかたまり1つ
+    view.setUint32(8, body);
+    out.set([0x49, 0x44, 0x41, 0x54], 12);
+    out.fill(fill, 16, 16 + body);
+    // IEND
+    view.setUint32(8 + 12 + body, 0);
+    out.set([0x49, 0x45, 0x4e, 0x44], 8 + 12 + body + 4);
     return out;
 };
 
@@ -83,33 +96,42 @@ describe('readInfo', () => {
 });
 
 /**
- * PNG は署名で切る。**次の署名が来るまで1枚は完成しない**ので、
- * 最後の1枚は流れが終わってから取り出す。
+ * PNG は `IEND` で切る。
+ *
+ * **次の署名を待ってはいけない。** 待っていた頃は1枚が次の1枚に足止めされ、
+ * 字幕が次に変わるまで前の字幕が出なかった — 間隔の空く番組ほど遅れる
+ * (実機で「字幕が遅い」として出た)。
  */
 describe('PngSplitter', () => {
-    test('署名で切って1枚ずつ出す', () => {
+    /** ここが遅れの分かれ目。**1枚届いたら、その場で出す** */
+    test('1枚そろったら、次を待たずに出す', () => {
+        const splitter = new PngSplitter();
+        const a = png(0x11);
+        const out = splitter.feed(a);
+        expect(out).toHaveLength(1);
+        expect(out[0]).toEqual(a);
+    });
+
+    test('続けて来たぶんも順に出す', () => {
         const splitter = new PngSplitter();
         const a = png(0x11);
         const b = png(0x22);
         const joined = new Uint8Array(a.length + b.length);
         joined.set(a);
         joined.set(b, a.length);
-
-        // 2枚ぶん食わせても、完成するのは1枚目だけ (2枚目の終わりが分からない)
         const out = splitter.feed(joined);
-        expect(out).toHaveLength(1);
+        expect(out).toHaveLength(2);
         expect(out[0]).toEqual(a);
-        expect(splitter.flush()).toEqual(b);
+        expect(out[1]).toEqual(b);
     });
 
-    /** パイプなので、箱の切れ目で届くとは限らない */
+    /** パイプなので、かたまりの切れ目で届くとは限らない */
     test('途中で切れて届いても組み直す', () => {
         const splitter = new PngSplitter();
-        const a = png(0x11, 30);
-        const b = png(0x22, 30);
+        const a = png(0x11, 40);
         expect(splitter.feed(a.subarray(0, 5))).toHaveLength(0);
-        expect(splitter.feed(a.subarray(5))).toHaveLength(0);
-        const out = splitter.feed(b);
+        expect(splitter.feed(a.subarray(5, 30))).toHaveLength(0);
+        const out = splitter.feed(a.subarray(30));
         expect(out).toHaveLength(1);
         expect(out[0]).toEqual(a);
     });
@@ -121,8 +143,73 @@ describe('PngSplitter', () => {
         const joined = new Uint8Array(junk.length + a.length);
         joined.set(junk);
         joined.set(a, junk.length);
-        expect(splitter.feed(joined)).toHaveLength(0);
-        expect(splitter.flush()).toEqual(a);
+        const out = splitter.feed(joined);
+        expect(out).toHaveLength(1);
+        expect(out[0]).toEqual(a);
+    });
+});
+
+/**
+ * **放送が字幕を持っているかは、1枚も来ていなくても分かる。**
+ *
+ * ffmpeg が入口で読んだストリーム一覧に出ている。届いてから画面に切り替えを
+ * 出していた頃は、間隔の空く番組を開くとボタンが出なかった (実機の
+ * 「みんなの手話」。番組表には [字] と出ているのに)。
+ */
+describe('TrackList', () => {
+    /** 実機の T26 (Eテレ) がそのまま出したもの */
+    const etv = [
+        '  Program 1032 ',
+        '  Stream #0:0[0x100]: Video: mpeg2video (Main), 1440x1080, 29.97 fps',
+        '  Stream #0:1[0x110]: Audio: aac (LC), 48000 Hz, stereo',
+        '  Stream #0:2[0x130]: Subtitle: arib_caption (libaribcaption) (Profile A), 1920x1080',
+        '  Stream #0:3[0x138]: Data: bin_data',
+        '  Program 1033 ',
+        '  Stream #0:4[0x101]: Video: mpeg2video (Main), 1440x1080, 29.97 fps',
+        '  Stream #0:5[0x131]: Subtitle: arib_caption (libaribcaption) (Profile A), 1920x1080',
+    ];
+
+    test('選んだ局の字幕だけ数える', () => {
+        const list = new TrackList(1032);
+        for (const line of etv) list.feed(line);
+        expect(list.tracks).toHaveLength(1);
+        expect(list.tracks[0]).toMatchObject({ index: 0, label: '字幕' });
+    });
+
+    /** ほかの局の字幕を数えると、選べないものが一覧に並ぶ */
+    test('別の局の字幕は数えない', () => {
+        const list = new TrackList(1033);
+        for (const line of etv) list.feed(line);
+        expect(list.tracks).toHaveLength(1);
+    });
+
+    /** **言語が複数ある放送はたまにある。** そのときは2本以上になる */
+    test('言語が複数あれば、その数だけ出す', () => {
+        const list = new TrackList(1024);
+        for (const line of [
+            '  Program 1024 ',
+            '  Stream #0:1[0x110](jpn): Audio: aac (LC), 48000 Hz, stereo',
+            '  Stream #0:2[0x130](jpn): Subtitle: arib_caption (Profile A), 1920x1080',
+            '  Stream #0:3[0x131](eng): Subtitle: arib_caption (Profile A), 1920x1080',
+        ]) {
+            list.feed(line);
+        }
+        expect(list.tracks.map((t) => t.label)).toEqual(['字幕 (日本語)', '字幕2 (英語)']);
+        expect(list.tracks.map((t) => t.index)).toEqual([0, 1]);
+    });
+
+    test('字幕を持たない局では空', () => {
+        const list = new TrackList(1416);
+        for (const line of etv) list.feed(line);
+        expect(list.tracks).toHaveLength(0);
+    });
+
+    /** 増えたときだけ true。毎行で知らせると画面が無駄に描き直される */
+    test('増えたときだけ知らせる', () => {
+        const list = new TrackList(1032);
+        expect(list.feed('  Program 1032 ')).toBe(false);
+        expect(list.feed('  Stream #0:0[0x100]: Video: mpeg2video (Main)')).toBe(false);
+        expect(list.feed('  Stream #0:2[0x130]: Subtitle: arib_caption (Profile A)')).toBe(true);
     });
 });
 

@@ -7,7 +7,7 @@
  */
 
 import type { AudioTrack } from '$lib/arib';
-import { CHANNEL, type Command, type Notice, SOCKET_PATH } from '$lib/live';
+import { type CaptionTrack, CHANNEL, type Command, type Notice, SOCKET_PATH } from '$lib/live';
 import { type Cue, currentCue, insertCue, trimCues } from '$lib/ts/captions';
 import { FLOOR, nextTarget, pacing } from '$lib/ts/pacing';
 
@@ -117,8 +117,16 @@ export function livePlayer() {
     let holding = $state(false);
     /** 字幕を出すか。**押して切り替えられる** (テレビの字幕ボタン) */
     let captions = $state(true);
-    /** 字幕が流れてきているか。来ていない番組では切り替えを出さない */
-    let hasCaptions = $state(false);
+    /**
+     * 選べる字幕。**1枚も届いていなくても分かる。**
+     *
+     * 届いてから切り替えを出していた頃は、**間隔の空く番組を開くとボタンが
+     * 出なかった** (実機の「みんなの手話」。番組表には [字] と出ているのに)。
+     * 放送が字幕を持っているかどうかはサーバが入口で読んでいる
+     */
+    let captionTracks = $state<CaptionTrack[]>([]);
+    /** いま出している字幕 (`CaptionTrack.index`) */
+    let captionTrack = $state(0);
 
     let socket: WebSocket | null = null;
     let source: MediaSource | null = null;
@@ -461,6 +469,20 @@ export function livePlayer() {
     }
 
     /**
+     * 字幕を選び直す。**言語が複数ある放送はたまにある。**
+     *
+     * 音声と違って**映像は焼き直しにならない** — 字幕は別の ffmpeg なので、
+     * そちらだけ入れ替わる。待たせているぶんは捨てる (別の言語なので使えない)
+     */
+    function setCaptionTrack(index: number): void {
+        if (tuned === null || index === captionTrack) return;
+        captionTrack = index;
+        clearCaptions();
+        const command: Command = { type: 'tune', ...tuned, caption: index };
+        if (socket !== null && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(command));
+    }
+
+    /**
      * 追っかけの速さを選ぶ。**追っかけている間だけ効く。**
      *
      * ライブに張り付いているときに速められては困る (放送より先は無い) ので、
@@ -521,6 +543,9 @@ export function livePlayer() {
         socket?.close();
         socket = null;
         clearCaptions();
+        // 局が変われば、持っている字幕も変わる (字幕そのものが無い局もある)
+        captionTracks = [];
+        captionTrack = 0;
         clear();
     }
 
@@ -537,7 +562,6 @@ export function livePlayer() {
         for (const cue of cues) cue.bitmap?.close();
         cues = [];
         shown = null;
-        hasCaptions = false;
         const ctx = overlay?.getContext('2d');
         if (ctx !== null && ctx !== undefined && overlay !== null) {
             ctx.clearRect(0, 0, overlay.width, overlay.height);
@@ -655,6 +679,13 @@ export function livePlayer() {
                 } else if (notice.type === 'origin') {
                     // これが来るまで字幕は出せない (置く場所が決まらない)
                     origin = notice.at;
+                } else if (notice.type === 'captions') {
+                    /*
+                     * **1枚も届いていなくても、あることは分かる。** 届いてから
+                     * 切り替えを出していた頃は、間隔の空く番組でボタンが出なかった
+                     */
+                    captionTracks = notice.tracks;
+                    captionTrack = notice.track;
                 } else if (notice.type === 'tuned') {
                     /*
                      * **選べる音声はここで初めて分かる。** どれが選べるかは
@@ -696,7 +727,6 @@ export function livePlayer() {
              * (`-copyts`)、再生位置と直に比べられる
              */
             if (kind === CHANNEL.subtitle || kind === CHANNEL.subtitleClear) {
-                if (!hasCaptions) hasCaptions = true;
                 const at = Number(new DataView(data).getBigUint64(1)) / 90000;
                 if (kind === CHANNEL.subtitleClear) {
                     cues = insertCue(cues, { at, bitmap: null });
@@ -845,10 +875,19 @@ export function livePlayer() {
         get captions() {
             return captions;
         },
-        /** 字幕が流れてきているか。来ていない番組では切り替えを出さない */
+        /** 放送が字幕を持っているか。**1枚も届いていなくても分かる** */
         get hasCaptions() {
-            return hasCaptions;
+            return captionTracks.length > 0;
         },
+        /** 選べる字幕。2本以上あれば画面は選び直しを出す */
+        get captionTracks() {
+            return captionTracks;
+        },
+        /** いま出している字幕 (`CaptionTrack.index`) */
+        get captionTrack() {
+            return captionTrack;
+        },
+        setCaptionTrack,
         /** 字幕の出し入れ。テレビの字幕ボタンと同じ */
         toggleCaptions() {
             captions = !captions;

@@ -12,6 +12,19 @@
 
 import type { AudioTrack } from './arib';
 
+/**
+ * 選べる字幕1つぶん。**取り決めなので、ここに置く** — 組み立てるのは
+ * サーバ (`server/captions.ts` の `TrackList`) だが、画面も同じ形で読む
+ */
+export interface CaptionTrack {
+    /** その局の中で何本目か。ffmpeg の `0:p:<局>:s:<これ>` に渡す */
+    index: number;
+    /** ISO 639-2。放送が名乗っていなければ null */
+    lang: string | null;
+    /** 「字幕 (日本語)」「字幕2 (英語)」 */
+    label: string;
+}
+
 /** 多重化の種別。番号は stream.md §5.3 の表そのまま */
 export const CHANNEL = {
     /** 映像の init セグメント (ftyp + moov) */
@@ -63,6 +76,20 @@ export type Notice =
           /** 秒 */
           at: number;
       }
+    | {
+          /**
+           * 選べる字幕。**1枚も届いていなくても分かる。**
+           *
+           * 放送が字幕を持っているかどうかは、ffmpeg が入口で読んだ
+           * ストリーム一覧に出ている (`captions.ts` の `TrackList`)。届いてから
+           * 出していた頃は、**間隔の空く番組を開くと切り替えが出なかった**。
+           * 言語が複数ある放送はここが2本以上になる
+           */
+          type: 'captions';
+          tracks: CaptionTrack[];
+          /** いま出しているもの (`CaptionTrack.index`) */
+          track: number;
+      }
     | { type: 'error'; message: string };
 
 /**
@@ -89,6 +116,13 @@ export type Command = {
      * 決めてしまえば、どのブラウザでも同じように鳴る
      */
     audio?: string;
+    /**
+     * どの字幕を出すか (`CaptionTrack.index`)。省くと1本目。
+     *
+     * **言語が複数ある放送はたまにある。** 音声と違い、こちらを選び直しても
+     * 映像は焼き直しにならない (字幕は別の ffmpeg なので、そちらだけ入れ替わる)
+     */
+    caption?: number;
 };
 
 /** WebSocket の宛先 */

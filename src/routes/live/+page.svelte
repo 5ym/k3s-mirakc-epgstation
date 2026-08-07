@@ -293,6 +293,51 @@
                     {/if}
 
                     <!--
+                        **字幕の選び直し。言語が2つ以上あるときだけ出す。**
+
+                        音声と違って映像は焼き直しにならない (字幕は別の ffmpeg
+                        なので、そちらだけ入れ替わる)
+                    -->
+                    {#if player.captions && player.captionTracks.length > 1}
+                        <div class="dropdown dropdown-top">
+                            <button
+                                class="btn btn-sm {OVERLAY}"
+                                aria-label="字幕を選ぶ"
+                                data-testid="live-caption-track"
+                            >
+                                <span class="max-w-28 truncate">
+                                    {player.captionTracks.find((t) => t.index === player.captionTrack)
+                                        ?.label ?? '字幕'}
+                                </span>
+                            </button>
+                            <ul
+                                class="dropdown-content menu bg-base-100 text-base-content rounded-box
+                                       z-10 mb-1 w-52 p-2 shadow-lg"
+                                data-testid="live-caption-menu"
+                            >
+                                {#each player.captionTracks as track (track.index)}
+                                    <li>
+                                        <button
+                                            class={track.index === player.captionTrack ? 'menu-active' : ''}
+                                            onclick={(event) => {
+                                                player.setCaptionTrack(track.index);
+                                                event.currentTarget.blur();
+                                            }}
+                                            data-testid="live-caption-option"
+                                            data-track={track.index}
+                                            aria-current={track.index === player.captionTrack
+                                                ? 'true'
+                                                : undefined}
+                                        >
+                                            {track.label}
+                                        </button>
+                                    </li>
+                                {/each}
+                            </ul>
+                        </div>
+                    {/if}
+
+                    <!--
                         **音声の選び直し。選べるものが2つ以上あるときだけ出す。**
 
                         二カ国語 (1本の中に主/副が左右で入っている) と、音声が

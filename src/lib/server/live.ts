@@ -439,15 +439,32 @@ export function attend(connection: Connection): void {
      * 切ると ffmpeg を起こし直すことになり、次の字幕が出るまで数十秒あく
      * (字幕は次が来るまで出しっぱなしのものなので、途切れがそのまま見える)
      */
-    const followCaptions = (channelType: string, channel: string, serviceId: number, program: number) => {
-        const id = `${channelType}:${channel}:${serviceId}`;
+    const followCaptions = (
+        channelType: string,
+        channel: string,
+        serviceId: number,
+        program: number,
+        track: number,
+    ) => {
+        const id = `${channelType}:${channel}:${serviceId}:${track}`;
         if (id === captionKey) return;
         dropCaptions?.();
         captionKey = id;
-        dropCaptions = watchCaptions(channelType, channel, serviceId, program, (caption) => {
-            const { kind, pts, data } = frame(caption);
-            connection.send(kind, pts, data);
-        });
+        const tell = (notice: Notice) =>
+            connection.send(CHANNEL.control, 0n, new TextEncoder().encode(JSON.stringify(notice)));
+        dropCaptions = watchCaptions(
+            channelType,
+            channel,
+            serviceId,
+            program,
+            track,
+            (caption) => {
+                const { kind, pts, data } = frame(caption);
+                connection.send(kind, pts, data);
+            },
+            // 選べる字幕。**1枚も届いていなくても分かる** (入口の見出しに出ている)
+            (tracks) => tell({ type: 'captions', tracks, track }),
+        );
     };
 
     connection.onmessage = (message) => {
@@ -456,9 +473,19 @@ export function attend(connection: Connection): void {
         const channel = typeof message.channel === 'string' ? message.channel : '';
         const serviceId = Number(message.serviceId);
         const audio = typeof message.audio === 'string' ? message.audio : undefined;
+        // 字幕は映像とは別の ffmpeg なので、選び直しても映像は焼き直しにならない
+        const caption = Number.isInteger(message.caption) ? Math.max(0, Number(message.caption)) : 0;
         if (channelType === '' || channel === '') return;
 
         const now = nowPlaying(serviceId, audio);
+
+        /*
+         * **字幕は先に面倒をみる。** 映像とは別建てなので、焼き方が同じでも
+         * (=下の早戻りに掛かっても) 字幕だけ選び直せる。局が同じなら
+         * `followCaptions` の中で何もしない
+         */
+        followCaptions(channelType, channel, serviceId, now.program, caption);
+
         if (
             current !== null &&
             current.channelType === channelType &&
@@ -493,8 +520,6 @@ export function attend(connection: Connection): void {
         };
         connection.send(CHANNEL.control, 0n, new TextEncoder().encode(JSON.stringify(notice)));
         current = watch(channelType, channel, serviceId, now, viewer);
-        // 字幕は局で決まる。焼き方が変わっただけなら切らない
-        followCaptions(channelType, channel, serviceId, now.program);
     };
 
     connection.onclose = () => {

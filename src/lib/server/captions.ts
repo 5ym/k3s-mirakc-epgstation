@@ -45,7 +45,7 @@
  * **局までで足りる**。音声を選び直しても字幕は途切れない。
  */
 
-import { CHANNEL } from '$lib/live';
+import { type CaptionTrack, CHANNEL } from '$lib/live';
 import { config } from './config';
 import { chunks, lines } from './stream';
 import { openChannelStream } from './tuner';
@@ -88,9 +88,11 @@ export const TROUBLE = /error|Error|failed|Failed|Cannot|Unable|No such|Invalid 
  *
  * @param program 放送が名乗っている番号 (`live.ts` の `NowPlaying.program`)。
  *   0以下なら最初に見つけた字幕
+ * @param track その局の中で何本目の字幕を出すか。**言語が複数ある放送**では
+ *   2本以上乗っている (`TrackList`)
  */
-export function captionArgs(program: number): string[] {
-    const from = Number.isFinite(program) && program > 0 ? `0:p:${program}:s:0` : '0:s:0';
+export function captionArgs(program: number, track = 0): string[] {
+    const from = Number.isFinite(program) && program > 0 ? `0:p:${program}:s:${track}` : `0:s:${track}`;
     return [
         '-hide_banner',
         '-nostats',
@@ -140,6 +142,8 @@ export interface Caption {
 }
 
 export type CaptionListener = (caption: Caption) => void;
+/** 選べる字幕が分かったときに呼ばれる。**1枚も来ていなくても分かる** */
+export type TrackListener = (tracks: CaptionTrack[]) => void;
 
 /**
  * showinfo が喋った1行を読む。**字幕の行でなければ null。**
@@ -160,14 +164,15 @@ export function readInfo(line: string): { at: number; blank: boolean } | null {
 /**
  * 繋がったバイト列から PNG を1枚ずつ取り出す。
  *
- * 署名で切る。**次の署名が来るまで1枚は完成しない**ので、最後の1枚は
- * 持ち越す (`flush` で取り出す)。IEND を探して切る手もあるが、
- * 署名のほうが1つの決まりで済む。
+ * **`IEND` まで来たらその場で出す。** 次の署名を待って切っていた頃は、
+ * **1枚が次の1枚に足止めされていた** — 字幕が次に変わるまで前の字幕が出ない
+ * ので、間隔の空く番組ほど遅れる (実機で「字幕が遅い」として出た)。
+ *
+ * PNG は `[8バイトの署名][かたまり…]` で、かたまりは
+ * `[4バイトの長さ][4バイトの種別][中身][4バイトの CRC]`。`IEND` が終わりの印。
  */
 export class PngSplitter {
     private buffer = new Uint8Array(0);
-    /** 1枚目の署名を跨いだか。跨ぐまでは切り出すものが無い */
-    private started = false;
 
     feed(chunk: Uint8Array): Uint8Array[] {
         const joined = new Uint8Array(this.buffer.length + chunk.length);
@@ -177,26 +182,28 @@ export class PngSplitter {
 
         const out: Uint8Array[] = [];
         for (;;) {
-            const at = this.find(this.started ? 1 : 0);
-            if (at < 0) break;
-            if (this.started) out.push(this.buffer.slice(0, at));
-            this.buffer = this.buffer.slice(at);
-            this.started = true;
+            // 署名の前に来たごみは捨てる
+            const head = this.find();
+            if (head < 0) {
+                // 署名の一部が末尾に掛かっているかもしれないぶんだけ残す
+                if (this.buffer.length > SIGNATURE.length) {
+                    this.buffer = this.buffer.slice(this.buffer.length - SIGNATURE.length + 1);
+                }
+                break;
+            }
+            if (head > 0) this.buffer = this.buffer.slice(head);
+
+            const end = this.end();
+            if (end < 0) break;
+            out.push(this.buffer.slice(0, end));
+            this.buffer = this.buffer.slice(end);
         }
         return out;
     }
 
-    /** 最後の1枚。**流れが終わったときだけ呼ぶ** */
-    flush(): Uint8Array | null {
-        if (!this.started || this.buffer.length === 0) return null;
-        const out = this.buffer;
-        this.buffer = new Uint8Array(0);
-        this.started = false;
-        return out;
-    }
-
-    private find(from: number): number {
-        for (let i = from; i + SIGNATURE.length <= this.buffer.length; i++) {
+    /** 先頭の署名の位置。無ければ -1 */
+    private find(): number {
+        for (let i = 0; i + SIGNATURE.length <= this.buffer.length; i++) {
             if (
                 this.buffer[i] === SIGNATURE[0] &&
                 this.buffer[i + 1] === SIGNATURE[1] &&
@@ -208,6 +215,88 @@ export class PngSplitter {
         }
         return -1;
     }
+
+    /** 先頭の PNG の終わり (`IEND` の後ろ)。まだ揃っていなければ -1 */
+    private end(): number {
+        const view = new DataView(this.buffer.buffer, this.buffer.byteOffset);
+        let at = 8;
+        for (;;) {
+            // 長さ4 + 種別4 + CRC4
+            if (at + 12 > this.buffer.length) return -1;
+            const size = view.getUint32(at);
+            const type = String.fromCharCode(
+                this.buffer[at + 4],
+                this.buffer[at + 5],
+                this.buffer[at + 6],
+                this.buffer[at + 7],
+            );
+            const next = at + 12 + size;
+            if (next > this.buffer.length) return -1;
+            if (type === 'IEND') return next;
+            at = next;
+        }
+    }
+}
+
+/** ffmpeg が入口の見出しに書く行 */
+const PROGRAM = /^\s*Program (\d+)/;
+const STREAM = /^\s*Stream #0:(\d+)\[0x[0-9a-f]+\](?:\((\w+)\))?: (\w+):/;
+
+/**
+ * ffmpeg の入口の見出しから、その局の字幕ストリームを拾う。
+ *
+ * **字幕が1枚も来ていなくても、あることは分かる。** 届いてから画面に
+ * 切り替えを出していた頃は、**間隔の空く番組を開くとボタンが出なかった**
+ * (実機の「みんなの手話」。番組表には [字] と出ているのに出ない)。
+ *
+ * ついでに**何本あるか**も分かる。言語が複数ある放送はここで2本になる。
+ */
+export class TrackList {
+    private inProgram = false;
+    private readonly found: CaptionTrack[] = [];
+
+    /** @param program 放送が名乗っている番号。0以下なら最初に見つけた1本 */
+    constructor(private readonly program: number) {}
+
+    /** 1行食わせる。**中身が増えたら true** */
+    feed(line: string): boolean {
+        const program = line.match(PROGRAM);
+        if (program !== null) {
+            this.inProgram = Number(program[1]) === this.program;
+            return false;
+        }
+        const stream = line.match(STREAM);
+        if (stream === null || stream[3] !== 'Subtitle') return false;
+        // 局を名指ししないときは、最初に見つけた1本だけ
+        if (this.program > 0 ? !this.inProgram : this.found.length > 0) return false;
+
+        const lang = stream[2] ?? null;
+        const index = this.found.length;
+        this.found.push({ index, lang, label: label(index, lang) });
+        return true;
+    }
+
+    get tracks(): CaptionTrack[] {
+        return this.found;
+    }
+}
+
+/** ISO 639-2 のうち字幕で出てくるもの。`arib.ts` の表と揃えてある */
+const LANGUAGE: Record<string, string> = {
+    jpn: '日本語',
+    eng: '英語',
+    kor: '韓国語',
+    zho: '中国語',
+    spa: 'スペイン語',
+    por: 'ポルトガル語',
+    fra: 'フランス語',
+    deu: 'ドイツ語',
+};
+
+function label(index: number, lang: string | null): string {
+    const head = index === 0 ? '字幕' : `字幕${index + 1}`;
+    if (lang === null) return head;
+    return `${head} (${LANGUAGE[lang] ?? lang})`;
 }
 
 /**
@@ -218,6 +307,7 @@ export class PngSplitter {
  */
 class Captions {
     private readonly listeners = new Set<CaptionListener>();
+    private readonly watchers = new Set<TrackListener>();
     private readonly splitter = new PngSplitter();
     private readonly aborter = new AbortController();
     private proc: ReturnType<typeof Bun.spawn> | null = null;
@@ -234,24 +324,34 @@ class Captions {
     private last: string | null = null;
     private stopped = false;
 
+    /** 入口の見出しから拾った、選べる字幕 */
+    private readonly list: TrackList;
+
     constructor(
         readonly channelType: string,
         readonly channel: string,
         readonly serviceId: number,
         readonly program: number,
-    ) {}
+        /** その局の中で何本目を出すか */
+        readonly track: number,
+    ) {
+        this.list = new TrackList(program);
+    }
 
     get empty(): boolean {
         return this.listeners.size === 0;
     }
 
-    add(listener: CaptionListener): void {
+    add(listener: CaptionListener, onTracks: TrackListener): void {
         this.listeners.add(listener);
+        this.watchers.add(onTracks);
+        if (this.list.tracks.length > 0) onTracks(this.list.tracks);
         if (this.showing !== null) listener(this.showing);
     }
 
-    remove(listener: CaptionListener): void {
+    remove(listener: CaptionListener, onTracks: TrackListener): void {
         this.listeners.delete(listener);
+        this.watchers.delete(onTracks);
     }
 
     async run(): Promise<void> {
@@ -263,7 +363,7 @@ class Captions {
                 `live ${this.channelType}/${this.channel} 字幕`,
                 config.priority.live,
             );
-            const proc = Bun.spawn([config.ffmpeg, ...captionArgs(this.program)], {
+            const proc = Bun.spawn([config.ffmpeg, ...captionArgs(this.program, this.track)], {
                 stdin: 'pipe',
                 stdout: 'pipe',
                 stderr: 'pipe',
@@ -307,8 +407,6 @@ class Captions {
         for await (const chunk of chunks(proc.stdout as ReadableStream<Uint8Array>)) {
             for (const png of this.splitter.feed(chunk)) this.deliver(png);
         }
-        const tail = this.splitter.flush();
-        if (tail !== null) this.deliver(tail);
     }
 
     /**
@@ -323,6 +421,15 @@ class Captions {
             const info = readInfo(line);
             if (info !== null) {
                 this.stamps.push(info);
+                continue;
+            }
+            /*
+             * **選べる字幕は入口の見出しに出ている。** 1枚も来ていなくても
+             * 分かるので、画面は待たずに切り替えを出せる (間隔の空く番組で
+             * ボタンが出なかったのはこれを見ていなかったため)
+             */
+            if (this.list.feed(line)) {
+                for (const watcher of this.watchers) watcher(this.list.tracks);
                 continue;
             }
             if (TROUBLE.test(line)) {
@@ -364,11 +471,12 @@ class Captions {
         this.stopped = true;
         this.aborter.abort();
         this.proc?.kill();
-        running.delete(key(this.channelType, this.channel, this.serviceId));
+        running.delete(key(this.channelType, this.channel, this.serviceId, this.track));
     }
 }
 
-const key = (type: string, channel: string, serviceId: number) => `${type}:${channel}:${serviceId}`;
+const key = (type: string, channel: string, serviceId: number, track: number) =>
+    `${type}:${channel}:${serviceId}:${track}`;
 const running = new Map<string, Captions>();
 
 /**
@@ -381,20 +489,22 @@ export function watchCaptions(
     channel: string,
     serviceId: number,
     program: number,
+    track: number,
     listener: CaptionListener,
+    onTracks: TrackListener,
 ): () => void {
-    const id = key(channelType, channel, serviceId);
+    const id = key(channelType, channel, serviceId, track);
     let captions = running.get(id);
     if (captions === undefined) {
-        captions = new Captions(channelType, channel, serviceId, program);
+        captions = new Captions(channelType, channel, serviceId, program, track);
         running.set(id, captions);
         void captions.run();
     }
-    captions.add(listener);
+    captions.add(listener, onTracks);
 
     const held = captions;
     return () => {
-        held.remove(listener);
+        held.remove(listener, onTracks);
         if (held.empty) held.stop();
     };
 }
