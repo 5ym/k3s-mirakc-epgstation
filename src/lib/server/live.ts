@@ -192,12 +192,7 @@ export function encodeArgs(
         '-map',
         `${from}:a:${audio.stream}`,
         ...(pan === null ? [] : ['-af', pan]),
-        '-c:a',
-        'aac',
-        '-b:a',
-        '192k',
-        '-ac',
-        '2',
+        ...audioArgs(codec),
         '-f',
         'mp4',
         '-movflags',
@@ -225,11 +220,19 @@ export function encodeArgs(
  * (`ffmpeg -hwaccels` が空) が、**44スレッドあるので間に合う**。同じ電波を
  * 40秒ずつ通した実測 (1080i を解いて60コマ/秒):
  *
- *     x264 veryfast   1バイト目 729ms   焼けた尺 38.5秒/41秒   3.3 Mbit/s
- *     AV1 preset 12   1バイト目 1177ms  焼けた尺 39.1秒/41秒   2.8 Mbit/s
+ *     x264 veryfast   1バイト目 729ms   焼けた尺 38.5秒/41秒
+ *     AV1 preset 12   1バイト目 1177ms  焼けた尺 39.1秒/41秒
  *
- * **落ちこぼれない** (焼けた尺が実時間に付いていっている)。同じ絵で 15% 軽い
- * かわりに、立ち上がりが 0.45 秒ぶん遅い。
+ * **確かなのは「落ちこぼれない」ことだけ** (焼けた尺が実時間に付いていっている)。
+ * 立ち上がりは 0.45 秒ぶん遅い。
+ *
+ * **量は中身次第で、まだ何とも言えない。** どちらも品質を指定して焼いている
+ * (ビットレートを決めていない) ので、出てくる量は場面で動く。実測も揃わなかった:
+ *
+ *     ある40秒   x264 3.3 Mbit/s   AV1 2.8 Mbit/s   ← AV1 が 15% 小さい
+ *     別の25秒   x264 11.6 Mbit/s  AV1 11.4 Mbit/s  ← ほぼ同じ
+ *
+ * 音声は Opus に替える (`audioArgs`)。
  *
  * `lookahead=0` が要る。SVT-AV1 は既定で先を読むぶん貯めるので、付けないと
  * その貯めがそのまま遅れになる。preset は 12 — これより速い 13 はもう
@@ -244,6 +247,28 @@ function videoArgs(codec: LiveCodec): string[] {
 }
 
 /**
+ * 音声の焼き方。**AV1 と組むときは Opus。**
+ *
+ * 設計 (stream.md §1) が狙っていた組み合わせで、**録画と同じ扱い**でもある
+ * (`encoder.ts` は前から `libopus -b:a 256k`)。同じ音質なら AAC より小さく、
+ * ブラウザは MSE で受け取れる (Chromium で `av01…,opus` を確かめ済み)。
+ *
+ * **256k は放送に合わせた値。** 元の放送が AAC 256kbps なので、録画側は
+ * そこへ揃えてある。ライブだけ 192k で低かったのを、こちらへ寄せる。
+ *
+ * H.264 は AAC のまま。**どの端末でも出る**ほうを既定にしている以上、
+ * 音声まで新しいものに替える理由が無い。
+ *
+ * どちらも 2ch に落とす。デュアルモノの配り直し (`-af pan=…`) はこの手前で
+ * 効いているので、ここへ来るのは既に「出したい音」1本ぶん
+ */
+function audioArgs(codec: LiveCodec): string[] {
+    return codec === 'av1'
+        ? ['-c:a', 'libopus', '-b:a', '256k', '-ac', '2']
+        : ['-c:a', 'aac', '-b:a', '192k', '-ac', '2'];
+}
+
+/**
  * ブラウザに渡す codecs 文字列。**MSE はこれが合っていないと受け取らない。**
  *
  * 中身から起こすのが本筋だが (moov を読めば分かる)、焼き方はこちらで決めて
@@ -252,12 +277,11 @@ function videoArgs(codec: LiveCodec): string[] {
  * - `avc1.640029` … High profile / Level 4.1。1080p60 まで
  * - `av01.0.08M.08` … Main profile / Level 4.0 / 8bit。同じく 1080p60 まで
  *
- * 音声はどちらも AAC。**AV1 に Opus を組み合わせるのは、まだ**  — 音声だけ
- * 別に選べる形にしていないので、切り替えるたびに音の出方まで変わってしまう
+ * **音声も組で決まる** (`audioArgs`)。AV1 は Opus、H.264 は AAC
  */
 export function codecsFor(codec: LiveCodec): string {
     return codec === 'av1'
-        ? 'video/mp4; codecs="av01.0.08M.08,mp4a.40.2"'
+        ? 'video/mp4; codecs="av01.0.08M.08,opus"'
         : 'video/mp4; codecs="avc1.640029,mp4a.40.2"';
 }
 

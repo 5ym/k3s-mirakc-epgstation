@@ -175,8 +175,11 @@ describe('ライブの焼き方', () => {
  * AV1 は設計 (stream.md §1) が最初から狙っていた形。実機は HW エンコーダを
  * 持たないが 44 スレッドあり、同じ電波を 40 秒ずつ通した実測では落ちこぼれない:
  *
- *     x264 veryfast   1バイト目 729ms   焼けた尺 38.5秒/41秒   3.3 Mbit/s
- *     AV1 preset 12   1バイト目 1177ms  焼けた尺 39.1秒/41秒   2.8 Mbit/s
+ *     x264 veryfast   1バイト目 729ms   焼けた尺 38.5秒/41秒
+ *     AV1 preset 12   1バイト目 1177ms  焼けた尺 39.1秒/41秒
+ *
+ * **量は中身次第。** どちらも品質を指定して焼いているので、ある40秒では
+ * AV1 が 15% 小さく (3.3 → 2.8 Mbit/s)、別の25秒ではほぼ同じ (11.6 → 11.4) だった
  */
 describe('焼き方を選ぶ', () => {
     const av1 = () => encodeArgs(1024, true, stereo, 'av1');
@@ -215,8 +218,49 @@ describe('焼き方を選ぶ', () => {
     test('ブラウザに渡す名前は形ごとに変わる', () => {
         expect(codecsFor('h264')).toContain('avc1.');
         expect(codecsFor('av1')).toContain('av01.');
-        // 音声はどちらも AAC。形を変えて音の出方まで変わっては困る
+    });
+});
+
+/**
+ * **AV1 と組むときは Opus。**
+ *
+ * 設計 (stream.md §1) が狙っていた組み合わせで、録画と同じ扱いでもある
+ * (`encoder.ts` は前から `libopus -b:a 256k`)。ライブだけ 192k AAC で
+ * 低かったのを、放送 (AAC 256kbps) に合わせた 256k へ寄せる。
+ *
+ * H.264 は AAC のまま。**どの端末でも出る**ほうを既定にしている以上、
+ * 音声まで替える理由が無い。
+ */
+describe('音声も組で決まる', () => {
+    const args = (codec: 'h264' | 'av1') => encodeArgs(1024, true, stereo, codec);
+    const rate = (a: string[]) => a[a.indexOf('-b:a') + 1];
+
+    test('AV1 は Opus 256k', () => {
+        expect(args('av1')).toContain('libopus');
+        expect(rate(args('av1'))).toBe('256k');
+        expect(codecsFor('av1')).toContain('opus');
+    });
+
+    test('H.264 は AAC のまま', () => {
+        expect(args('h264')).toContain('aac');
+        expect(args('h264')).not.toContain('libopus');
         expect(codecsFor('h264')).toContain('mp4a.40.2');
-        expect(codecsFor('av1')).toContain('mp4a.40.2');
+    });
+
+    /** デュアルモノの配り直しは音声の形より手前。どちらを選んでも効く */
+    test('左右の配り直しは形によらず効く', () => {
+        const sub = audioTracks([{ componentType: 2, langs: ['jpn', 'eng'] }])[1];
+        for (const codec of ['h264', 'av1'] as const) {
+            const out = encodeArgs(1024, true, sub, codec);
+            expect(out[out.indexOf('-af') + 1]).toContain('c0=c1');
+        }
+    });
+
+    /** どちらも 2ch に落とす。器が1つなので、5.1ch をそのまま渡せない */
+    test('どちらも2chに落とす', () => {
+        for (const codec of ['h264', 'av1'] as const) {
+            const out = args(codec);
+            expect(out[out.indexOf('-ac') + 1]).toBe('2');
+        }
     });
 });
