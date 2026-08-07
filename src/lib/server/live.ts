@@ -83,12 +83,15 @@ import type { Connection } from './ws';
  * を見て、左だけを両耳に配る (`encoder.ts` の `DUAL_MONO`)。録画は左右を
  * 2トラックに分けるが、こちらは器が1つなので主音声を採る。
  *
- * @param serviceId どの局を出すか。0以下なら最初に見つけた映像 (従来どおり)
+ * @param program **放送が名乗っている番号** (ARIB の service_id = TS の
+ *   program_number)。`services.id` を渡してはいけない — あちらは
+ *   `network_id * 100000 + service_id` の内部IDで、TS の中には出てこない。
+ *   0以下なら最初に見つけた映像 (従来どおり)
  * @param smooth 60コマ/秒で出すか。国内アニメだけ false
  * @param dualMono 二カ国語放送か。左 (主音声) だけを両耳に配る
  */
-export function encodeArgs(serviceId: number, smooth: boolean, dualMono: boolean): string[] {
-    const from = Number.isFinite(serviceId) && serviceId > 0 ? `0:p:${serviceId}` : '0';
+export function encodeArgs(program: number, smooth: boolean, dualMono: boolean): string[] {
+    const from = Number.isFinite(program) && program > 0 ? `0:p:${program}` : '0';
     return [
         '-hide_banner',
         '-loglevel',
@@ -164,8 +167,10 @@ class Session {
     constructor(
         readonly channelType: string,
         readonly channel: string,
-        /** どの局を出すか。物理チャンネル1本に複数の局が乗っている */
+        /** 局の内部ID (`services.id`)。相乗りの目印に使う */
         readonly serviceId: number,
+        /** 放送が名乗っている番号。**ffmpeg に渡すのはこちら** (NowPlaying の説明) */
+        readonly program: number,
         /** 60コマ/秒で出すか。国内アニメだけ false */
         readonly smooth: boolean,
         /** 二カ国語放送か。左 (主音声) だけを両耳に配る */
@@ -210,10 +215,11 @@ class Session {
                 config.priority.live,
             );
 
-            const proc = Bun.spawn(
-                [config.ffmpeg, ...encodeArgs(this.serviceId, this.smooth, this.dualMono)],
-                { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' },
-            );
+            const proc = Bun.spawn([config.ffmpeg, ...encodeArgs(this.program, this.smooth, this.dualMono)], {
+                stdin: 'pipe',
+                stdout: 'pipe',
+                stderr: 'pipe',
+            });
             this.proc = proc;
 
             /*
@@ -312,13 +318,13 @@ function watch(
     channelType: string,
     channel: string,
     serviceId: number,
-    now: { smooth: boolean; dualMono: boolean },
+    now: NowPlaying,
     viewer: Viewer,
 ): Session {
     const id = key(channelType, channel, serviceId, now.smooth);
     let session = sessions.get(id);
     if (session === undefined) {
-        session = new Session(channelType, channel, serviceId, now.smooth, now.dualMono);
+        session = new Session(channelType, channel, serviceId, now.program, now.smooth, now.dualMono);
         sessions.set(id, session);
         // 畳むのは見ている人が居なくなったとき。ここでは待たない
         void session.run();
@@ -384,18 +390,38 @@ export function attend(connection: Connection): void {
     connection.onclose = leave;
 }
 
+export interface NowPlaying {
+    /**
+     * 放送が名乗っている番号 (ARIB の service_id = TS の program_number)。
+     * **`services.id` とは別物** — あちらは `network_id * 100000 + service_id` の
+     * 内部IDで、TS の中には出てこない。ffmpeg に渡すのはこちら
+     */
+    program: number;
+    smooth: boolean;
+    dualMono: boolean;
+}
+
 /**
  * いま流れている番組から、焼き方を決める。**番組表を頼りにする。**
  *
+ * - 局の番号 … ffmpeg に名指しさせる `program_number`。**内部IDを渡しては
+ *   いけない** (`services.id` は `network_id * 100000 + service_id`)。渡すと
+ *   ffmpeg はその番号の局を探して見つけられず、絵も音も出ない
  * - コマ数 … 国内アニメだけ倍にしない (`smoothMotionFor`)。**分からなければ
  *   実写として扱う** — 放送の大半は実写で、アニメを実写扱いにしても絵は
  *   変わらないが、逆は動きが落ちる
  * - 二カ国語 … `audio_type` が 2 ならデュアルモノ。**録画と同じ見分け方**
  *   (`encoder.ts` の `DUAL_MONO`)。分からなければ普通のステレオとして扱う
+ *
+ * @param serviceId 局の内部ID (`services.id`)。画面から届くのはこれ
  */
-function nowPlaying(serviceId: number): { smooth: boolean; dualMono: boolean } {
-    if (!Number.isFinite(serviceId)) return { smooth: true, dualMono: false };
+function nowPlaying(serviceId: number): NowPlaying {
+    if (!Number.isFinite(serviceId)) return { program: 0, smooth: true, dualMono: false };
     const at = Date.now();
+    const service = queryOne<{ service_id: number }>(
+        `SELECT service_id FROM services WHERE id = ?`,
+        serviceId,
+    );
     const program = queryOne<{ genre_detail: string | null; audio_type: number | null }>(
         `SELECT genre_detail, audio_type FROM programs
          WHERE service_id = ? AND start_at <= ? AND end_at > ?`,
@@ -404,6 +430,7 @@ function nowPlaying(serviceId: number): { smooth: boolean; dualMono: boolean } {
         at,
     );
     return {
+        program: service?.service_id ?? 0,
         smooth: smoothMotionFor(program?.genre_detail ?? null),
         dualMono: program?.audio_type === DUAL_MONO,
     };

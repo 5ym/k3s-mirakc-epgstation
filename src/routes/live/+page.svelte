@@ -39,6 +39,19 @@
         channels.find((c) => c.type === player.tuned?.channelType && c.channel === player.tuned?.channel),
     );
 
+    /*
+     * **一覧は種別で切り替える。** 地上波・BS・CS を全部縦に並べると、CS の局が
+     * 100を超える環境では地上波が上のほうへ流れて見えなくなる。番組表と
+     * 同じ並び・同じ見た目にしてあるので、探す場所がずれない
+     */
+    const TYPE_LABEL: Record<string, string> = { GR: '地上波', BS: 'BS', CS: 'CS' };
+    /** 局を持っている種別だけ出す。BS を繋いでいない環境で空の見出しを出さない */
+    const types = $derived(['GR', 'BS', 'CS'].filter((t) => channels.some((c) => c.type === t)));
+    /** **開いたときは、いま映している局の種別。** 選び直す手間を増やさない */
+    let picked = $state<string | null>(null);
+    const shown = $derived(picked ?? current?.type ?? types[0] ?? 'GR');
+    const listed = $derived(channels.filter((c) => c.type === shown));
+
     function select(channel: LiveChannel): void {
         void player.tune(video, {
             channelType: channel.type,
@@ -139,9 +152,20 @@
         余白があるのに一覧のほうが先に終わっていた
     -->
     <aside class="flex flex-col lg:min-h-0 lg:w-80 lg:shrink-0">
-        <h2 class="mb-2 text-sm font-medium">チャンネル</h2>
+        <!-- 番組表と同じ並び・同じ見た目。探す場所がずれないようにする -->
+        <div class="join mb-2" data-testid="live-type-tabs">
+            {#each types as type (type)}
+                <button
+                    class="btn join-item btn-sm {shown === type ? 'btn-active' : ''}"
+                    onclick={() => (picked = type)}
+                    data-testid="live-type-{type}"
+                >
+                    {TYPE_LABEL[type]}
+                </button>
+            {/each}
+        </div>
         <ul class="flex-1 space-y-1 overflow-y-auto lg:min-h-0" data-testid="live-channels">
-            {#each channels as channel (channel.id)}
+            {#each listed as channel (channel.id)}
                 <li>
                     <button
                         class="hover:bg-base-200 flex w-full items-center gap-3 rounded p-2 text-left

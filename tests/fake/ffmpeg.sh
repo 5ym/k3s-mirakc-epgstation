@@ -33,6 +33,11 @@ fi
 # ライブ配信(TS): stdin をそのまま stdout に流し続ける。
 # 中身は本物のTSではないが、「切るまで流れ続ける」という性質だけは同じ
 if [ "$output" = "pipe:1" ]; then
+    # **何を渡されたかを残す。** 焼き方の指定は間違えても E2E では絵が要らないぶん
+    # 素通りするので、テストから中身を見られるようにしておく
+    if [ -n "${FAKE_FFMPEG_ARGS_FILE:-}" ]; then
+        printf '%s\n' "$@" > "$FAKE_FFMPEG_ARGS_FILE"
+    fi
     exec cat
 fi
 

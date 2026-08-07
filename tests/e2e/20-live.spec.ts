@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { SERVICES } from '../fake/services';
 import { expect, goto, syncEpg, test } from './helpers';
 
 /**
@@ -64,6 +66,45 @@ test.describe('ライブ視聴', () => {
     });
 
     /*
+     * **一覧は種別で切り替える。** 全部縦に並べると、CS の局が100を超える環境で
+     * 地上波が上のほうへ流れて見えなくなる。**開いたときは、いま映している局の種別**
+     */
+    test('チャンネル一覧を地上波/BS/CSで切り替えられる', async ({ page }) => {
+        await goto(page, '/live');
+        await expect(page.getByTestId('live-type-GR')).toHaveClass(/btn-active/);
+        // 地上波を見ているので、一覧に出るのは地上波だけ
+        const shown = page.getByTestId('live-channel');
+        await expect(shown.first()).toBeVisible();
+        for (const channel of await shown.all()) {
+            await expect(channel).toHaveAttribute('data-channel', /^GR\//);
+        }
+
+        await page.getByTestId('live-type-BS').click();
+        await expect(page.getByTestId('live-type-BS')).toHaveClass(/btn-active/);
+        await expect(shown.first()).toHaveAttribute('data-channel', /^BS\//);
+        // 切り替えただけでは選局しない。見ているものはそのまま
+        await expect(page.getByTestId('live-title')).toBeVisible();
+    });
+
+    /*
+     * **放送に終わりは無いと言っておく。** 何も言わないと MediaSource の尺は
+     * 「いま持っている中でいちばん後ろ」になり、0.2秒ごとに中身が届くたびに
+     * 伸びる。備え付けの再生位置が右端まで行っては少し左へ戻る、を繰り返す
+     */
+    test('再生位置に終わりを作らない', async ({ page }) => {
+        await goto(page, '/live');
+        await page.getByTestId('live-channel').first().click();
+        await expect(page.getByTestId('live-title')).toBeVisible();
+
+        await expect(async () => {
+            const duration = await page
+                .getByTestId('live-video')
+                .evaluate((v) => (v as HTMLVideoElement).duration);
+            expect(duration).toBe(Number.POSITIVE_INFINITY);
+        }).toPass({ timeout: 15_000 });
+    });
+
+    /*
      * **既定で黙らせない。** `muted` を書き付けていた頃は、開いても永久に
      * 無音だった (備え付けの操作で外すまで誰も気付けない)。黙るのは
      * 自動再生を断られたときだけで、そのときは押せる場所を出す
@@ -92,6 +133,34 @@ test.describe('ライブ視聴', () => {
         await goto(page, '/tuners');
         await expect(page.getByText(/ライブ/).first()).toBeVisible();
         expect(channel).not.toBeNull();
+    });
+
+    /*
+     * **ffmpeg に渡すのは、放送が名乗っている番号。**
+     *
+     * 1本の物理チャンネルに複数の局が乗っているので局を名指しするのだが、
+     * 渡す番号を間違えると ffmpeg はその局を探して見つけられず、**絵も音も
+     * 出ない**。denpa の `services.id` は `network_id * 100000 + service_id` の
+     * 内部IDで、TS の中には出てこない — 実際にこれを渡して再生できなくなった。
+     */
+    test('局は放送が名乗っている番号で名指しする', async ({ page, stack }) => {
+        await goto(page, '/live');
+        const target = page.getByTestId('live-channel').first();
+        await target.click();
+        await expect(page.getByTestId('live-title')).toBeVisible();
+
+        await expect(() => {
+            expect(existsSync(stack.liveArgsFile)).toBe(true);
+        }).toPass({ timeout: 15_000 });
+        const args = readFileSync(stack.liveArgsFile, 'utf8').split('\n');
+
+        // 名指ししている先が、内部IDではなく放送の番号になっていること
+        const video = args.find((a) => a.startsWith('0:p:') && a.endsWith(':v:0'));
+        expect(video).toBeDefined();
+        const named = Number(video?.slice('0:p:'.length, -':v:0'.length));
+        const service = SERVICES.find((s) => s.serviceId === named);
+        expect(service, `${named} は放送の番号ではない (内部IDを渡していないか)`).toBeDefined();
+        expect(args).toContain(`0:p:${named}:a:0`);
     });
 
     /*

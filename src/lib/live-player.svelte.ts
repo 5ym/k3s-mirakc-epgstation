@@ -233,6 +233,15 @@ export function livePlayer() {
             'sourceopen',
             () => {
                 URL.revokeObjectURL(video.src);
+                /*
+                 * **終わりが無いと言っておく。**
+                 *
+                 * 何も言わないと、MediaSource の尺は「いま持っている中でいちばん
+                 * 後ろ」になる。0.2秒ごとに中身が届くたびに尺が伸びるので、
+                 * 備え付けの再生位置は右端まで行っては少し左へ戻る、を繰り返す。
+                 * 放送に終わりは無いので、そう言うほうが正しい
+                 */
+                media.duration = Number.POSITIVE_INFINITY;
                 buffer = media.addSourceBuffer(codecs);
                 /*
                  * **並べ直させない** (`sequence` にしない)。焼いたものの時刻を
