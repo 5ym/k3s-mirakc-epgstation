@@ -75,6 +75,25 @@ export async function past(page: Page): Promise<Cell[]> {
     return found;
 }
 
+/**
+ * 番組表に出ているうち、**いま流れているもの。** 局ごとに1つ。
+ *
+ * 偽の放送は隙間なく並べてある (`tests/fake/broadcast.ts`) ので、始まったものの
+ * うちいちばん新しいものがそれにあたる。終わりの時刻はマスに出ていない
+ */
+export async function airing(page: Page): Promise<Cell[]> {
+    const at = Date.now();
+    const latest = new Map<string, Cell>();
+    for (const cell of await allCells(page)) {
+        if (cell.startAt > at) continue;
+        const held = latest.get(cell.serviceId);
+        if (held === undefined || cell.startAt > held.startAt) latest.set(cell.serviceId, cell);
+    }
+    const found = [...latest.values()];
+    expect(found.length).toBeGreaterThan(0);
+    return found;
+}
+
 export async function upcoming(page: Page): Promise<Cell[]> {
     let soon = await cellsOn(page);
     if (soon.length === 0) {

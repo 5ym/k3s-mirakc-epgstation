@@ -470,6 +470,25 @@
                     </a>
                 {/if}
 
+                {#if program.start_at <= clock && program.end_at > clock}
+                    <!--
+                        **いま流れている番組は、その場で観られるようにする。**
+                        番組表で見つけた番組を観るのに、ライブ画面へ行って
+                        同じ局を一覧から探し直させるのは遠回り (局が100を超える
+                        環境では、探すほうが手間になる)。
+
+                        **リンクにする。** 押した先は別の画面で、そこで選局から
+                        やり直すことになるので、モーダルの中で始めるものではない
+                    -->
+                    <a
+                        class="btn btn-outline"
+                        href="/live?service={program.service_id}"
+                        data-testid="detail-watch"
+                    >
+                        視聴
+                    </a>
+                {/if}
+
                 {#if CANCELABLE.includes(program.reservation_state ?? '')}
                     <!-- 予約したあと番組表から止められないと、わざわざ予約一覧まで行くことになる -->
                     <form

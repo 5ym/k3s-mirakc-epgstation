@@ -30,7 +30,7 @@ export interface LiveChannel {
     now: { name: string; startAt: number; endAt: number } | null;
 }
 
-export function load() {
+export function load({ url }) {
     const at = Date.now();
     // テレビと同じ並び (SERVICE_TYPE_ORDER / SERVICE_ORDER)。番組表とも揃えてある
     const services = queryAll<Service>(
@@ -67,5 +67,15 @@ export function load() {
         };
     });
 
-    return { channels };
+    /*
+     * **番組表の「視聴」から来たとき、その局** (`services.id`)。
+     *
+     * 画面が覚えている前回の局より優先させるためにここで確かめておく
+     * (押した人はその局を見に来ている)。**居ない番号は渡さない** — 局が
+     * 入れ替わったあとの古いリンクを踏んでも、いつもの前回の局で開く
+     */
+    const asked = Number(url.searchParams.get('service'));
+    const initial = channels.some((channel) => channel.id === asked) ? asked : null;
+
+    return { channels, initial };
 }

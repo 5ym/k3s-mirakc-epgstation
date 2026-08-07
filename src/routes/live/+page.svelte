@@ -21,32 +21,40 @@
      * 一覧の先頭 = リモコン番号のいちばん若い局。テレビを点けたときと同じ振る舞い。
      *
      * 局が入れ替わって前回のものが消えていることがあるので、居るかどうかは見る。
+     *
+     * **番組表から名指しで来たときは、そちらが勝つ** (`data.initial`)。押した人は
+     * その番組を見に来ているので、覚えている局を出しても用が済まない
      */
     onMount(() => {
         // 重ねるものの置き場を先に渡す。選局はこのあと
         player.attach(still, overlay);
         const saved = lastChannel();
-        const found =
+        const asked = channels.find((c) => c.id === data.initial);
+        const remembered =
             saved === null
                 ? undefined
                 : channels.find((c) => c.type === saved.channelType && c.channel === saved.channel);
-        const target = found ?? channels[0];
+        const target = asked ?? remembered ?? channels[0];
         if (target !== undefined) {
             void player.tune(video, {
                 channelType: target.type,
                 channel: target.channel,
                 serviceId: target.id,
                 // 音声の控えは、同じ局に戻ったときだけ活かす
-                audio: found === undefined ? undefined : saved?.audio,
+                audio: target === remembered ? saved?.audio : undefined,
             });
         }
         return () => player.stop();
     });
 
-    /** いま映している局。一覧で目立たせる */
-    const current = $derived(
-        channels.find((c) => c.type === player.tuned?.channelType && c.channel === player.tuned?.channel),
-    );
+    /**
+     * いま映している局。一覧で目立たせる。
+     *
+     * **局で引く。** 物理チャンネルで引いていた頃は、**1本に複数の局が乗って
+     * いると先頭の局が塗られていた** — MX2 を選んでも MX1 の行が光る。
+     * 焼いているのは選んだ局なので (`live.ts`)、絵と印が食い違う
+     */
+    const current = $derived(channels.find((c) => c.id === player.tuned?.serviceId));
 
     /*
      * **一覧は種別で切り替える。** 地上波・BS・CS を全部縦に並べると、CS の局が
@@ -596,6 +604,7 @@
                         data-testid="live-channel"
                         data-current={tuned ? 'true' : 'false'}
                         data-channel="{channel.type}/{channel.channel}"
+                        data-service={channel.id}
                     >
                         <!--
                             **テレビに出ている番号を添える。** 地上波はリモコン番号、

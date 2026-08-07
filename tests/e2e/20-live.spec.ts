@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import type { Locator } from '@playwright/test';
 import { SERVICES } from '../fake/services';
-import { expect, goto, syncEpg, test } from './helpers';
+import { airing, cellOf, expect, goto, syncEpg, test, upcoming } from './helpers';
 
 /**
  * 偽 ffmpeg が残した引数を1回ぶんずつに切って、探しているものを選ぶ。
@@ -177,6 +177,42 @@ test.describe('ライブ視聴', () => {
         await expect(second).toContainText('視聴中');
         // 印は1つだけ。ほかの行に残っていたら、どれを見ているのか分からない
         expect(await page.locator('[data-testid="live-channel"][data-current="true"]').count()).toBe(1);
+    });
+
+    /*
+     * **番組表で見つけた番組は、その場から観に行ける。**
+     *
+     * ライブ画面へ移ってから同じ局を一覧で探し直させるのは遠回りで、局が100を
+     * 超える環境では探すほうが手間になる。**局まで名指しで渡す** — 1本の物理
+     * チャンネルには複数の局が乗っているので、チャンネルだけでは足りない
+     */
+    test('番組表の「視聴」から、その局で開く', async ({ page }) => {
+        await goto(page, '/guide?type=GR');
+        const [target] = await airing(page);
+        await cellOf(page, target.programId).getByTestId('program-button').click();
+
+        const detail = page.getByTestId('program-detail');
+        await expect(detail).toBeVisible();
+        await detail.getByTestId('detail-watch').click();
+
+        await expect(page).toHaveURL(new RegExp(`/live\\?service=${target.serviceId}$`));
+        const row = page.locator('[data-testid="live-channel"][data-current="true"]');
+        await expect(row).toHaveAttribute('data-service', target.serviceId);
+    });
+
+    /*
+     * **これから放送されるものには出さない。** 押しても、その局のいま流れている
+     * 別の番組が映るだけで、押した人の用は済まない
+     */
+    test('これからの番組には「視聴」を出さない', async ({ page }) => {
+        await goto(page, '/guide?type=GR');
+        const [target] = await upcoming(page);
+        await cellOf(page, target.programId).getByTestId('program-button').click();
+
+        const detail = page.getByTestId('program-detail');
+        await expect(detail).toBeVisible();
+        await expect(detail.getByTestId('detail-reserve')).toBeVisible();
+        await expect(detail.getByTestId('detail-watch')).toHaveCount(0);
     });
 
     /*
