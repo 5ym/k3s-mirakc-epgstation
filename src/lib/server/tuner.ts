@@ -177,6 +177,56 @@ export async function openChannelStream(
     return res.body;
 }
 
+/** 空き待ちで掛け直す回数と間隔 (ms)。待つのは前のチャンネルが離れるまで */
+const BUSY_TRIES = 3;
+const BUSY_WAIT = 700;
+
+/**
+ * 開く。**空きが無ければ少し待って掛け直す。**
+ *
+ * ライブは**チャンネルを変える一瞬だけ、前のチャンネルと合わせて2本要る**。
+ * 前のを離してから頼んでいるが、離れたことがエージェントに届くのは非同期なので、
+ * 重なる瞬間が残る。地上波は2本しかないため、録画か番組表集めが1本使っていると
+ * そこで断られていた (実機で `[live] GR:T15: チューナーに空きがありません`)。
+ *
+ * **待っているのは前のチャンネルが離れるまで**なので、長くは掛からない。
+ * 掛け直すのは空き待ちのときだけ — 選局そのものが駄目なら何度やっても同じ。
+ *
+ * 録画には使わない。あちらは**時刻が決まっている**ので、掴めないなら
+ * その場で分かるほうがよく、黙って数秒遅らせるのは頭切れになる。
+ */
+export function openWhenFree(
+    type: string,
+    channel: string,
+    signal: AbortSignal,
+    use: StreamUse,
+    priority: number,
+    giveUp: () => boolean = () => false,
+): Promise<ReadableStream<Uint8Array>> {
+    return retryWhileBusy(() => openChannelStream(type, channel, signal, use, priority), giveUp);
+}
+
+/**
+ * 空き待ちのときだけ掛け直す。**掛け方そのものは渡してもらう。**
+ *
+ * 分けてあるのは試すため — 本物のエージェントを立てなくても、待ち直しの
+ * 判断だけを確かめられる (`tuner.test.ts`)
+ */
+export async function retryWhileBusy<T>(
+    open: () => Promise<T>,
+    giveUp: () => boolean = () => false,
+    wait: (ms: number) => Promise<void> = (ms) => Bun.sleep(ms),
+): Promise<T> {
+    for (let tries = 0; ; tries++) {
+        try {
+            return await open();
+        } catch (error) {
+            if (!(error instanceof TunerBusyError) || tries >= BUSY_TRIES || giveUp()) throw error;
+            await wait(BUSY_WAIT);
+        }
+    }
+}
+
 /** エージェントが生きているか。ダッシュボードの表示用 */
 export async function ping(): Promise<{ ok: boolean; tuners?: number; error?: string }> {
     try {

@@ -28,7 +28,7 @@ import { config } from './config';
 import { queryOne } from './db';
 import { deinterlace, smoothMotionFor } from './encoder';
 import { chunks, lines } from './stream';
-import { openChannelStream } from './tuner';
+import { openWhenFree } from './tuner';
 import type { Connection } from './ws';
 
 /**
@@ -291,12 +291,20 @@ class Session {
     async run(): Promise<void> {
         const label = `${this.channelType}:${this.channel}`;
         try {
-            const stream = await openChannelStream(
+            /*
+             * **空きが無ければ待って掛け直す** (`openWhenFree`)。チャンネルを
+             * 変える一瞬だけ、前のチャンネルと合わせてチューナーが2本要る —
+             * 前のを離してから頼んでいるが、離れたことがエージェントに届くのは
+             * 非同期なので重なる瞬間が残る。地上波は2本しかないので、録画か
+             * 番組表集めが1本使っていると、そこで断られていた
+             */
+            const stream = await openWhenFree(
                 this.channelType,
                 this.channel,
                 this.aborter.signal,
                 `live ${this.channelType}/${this.channel}`,
                 config.priority.live,
+                () => this.stopped,
             );
 
             const proc = Bun.spawn([config.ffmpeg, ...encodeArgs(this.program, this.smooth, this.audio)], {
