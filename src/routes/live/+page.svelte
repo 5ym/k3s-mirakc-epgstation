@@ -361,17 +361,26 @@
                 <!--
                     何も出ていない間に何が起きているかを出す。黒いままだと壊れて見える。
 
+                    **前の絵を貼っている間は塗り潰さない。** 覆ってしまうと、
+                    貼っている意味が無くなる (実機で撮ると、前の絵が白くかすんだ
+                    だけの画面になっていた)。回っているものだけを、どんな絵の上でも
+                    見えるように小さく敷いて出す。
+
                     **押せる邪魔をしない** (`pointer-events-none`)。箱いっぱいに
                     広がるので、そのままだと下の操作列を覆って押せなくなる。
                     中の「やり直す」だけは押せるように戻す
                 -->
                 <div
-                    class="bg-base-300/80 pointer-events-none absolute inset-0 flex items-center
-                           justify-center"
+                    class="pointer-events-none absolute inset-0 flex items-center justify-center
+                           {player.holding ? '' : 'bg-base-300/80'}"
                     data-testid="live-status"
+                    data-veiled={!player.holding}
                 >
                     {#if player.state === 'connecting'}
-                        <span class="loading loading-spinner loading-lg"></span>
+                        <span
+                            class="loading loading-spinner loading-lg
+                                   {player.holding ? 'rounded-box bg-black/45 p-3 text-white' : ''}"
+                        ></span>
                     {:else if player.state === 'error'}
                         <div class="text-center">
                             <div class="text-error font-medium">{player.message}</div>
