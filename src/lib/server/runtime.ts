@@ -213,7 +213,18 @@ export function stop(): void {
  * 待っている途中で SIGKILL され、居座った意味が無くなる。
  */
 function installShutdownHooks(): void {
-    const take = () => takeOverSignals((signal) => void drain(signal));
+    /*
+     * **落ちても降りる。** `drain` の中で投げると、`void` で捨てているぶん
+     * 誰も拾わず、**プロセスが生きたまま残る** = 入れ替えが止まる。
+     * 拾って、掴んでいるものだけ放して降りる
+     */
+    const onSignal = (signal: NodeJS.Signals) => {
+        drain(signal).catch((error) => {
+            console.warn(`[boot] 停止の途中で失敗しました: ${error}`);
+            process.exit(0);
+        });
+    };
+    const take = () => takeOverSignals(onSignal);
     take();
     /*
      * **もう一度、あとから引き取り直す。**
@@ -275,28 +286,72 @@ export function takeOverSignals(onSignal: (signal: NodeJS.Signals) => void): num
 
 /** 5秒ごとに様子を見る。録画は分単位なので、これ以上細かく見ても意味が無い */
 const DRAIN_CHECK = 5000;
+/** 待っている間、これだけおきに「まだ待っている」と残す (ms) */
+const DRAIN_REPORT = 60_000;
+
+/**
+ * 何があっても降りる。**降り損ねを「ぶら下がったまま」にしない。**
+ *
+ * 実機で、消しはじめられた Pod が **40分たっても降りてこない**ことがあった
+ * (録画はとうに終わり、`activeRecordingIds()` も 0、SIGTERM は捕まえている
+ * — `/proc/1/status` の `SigCgt` に 15 が立っている — のに生きている)。
+ * こうなると `terminationGracePeriodSeconds` (6時間) を使い切るまで
+ * **新しい Pod が上がらない**。Recreate なので、その間ずっと古いまま。
+ *
+ * 待ちの輪を回す前に**先に目覚ましを掛ける**。輪の中で何が起きても、
+ * `SHUTDOWN_WAIT` を過ぎたら降りる。原因が分からなくても、
+ * 「入れ替えが6時間止まる」だけは起こさない
+ */
+function forceExitAfter(ms: number, why: string): void {
+    const timer = setTimeout(() => {
+        console.warn(`[boot] ${why}。これ以上待たずに停止します`);
+        try {
+            stop();
+        } catch (error) {
+            console.warn(`[boot] 後始末に失敗しました: ${error}`);
+        }
+        process.exit(0);
+    }, ms);
+    // 目覚ましそのものがプロセスを生かし続けないように
+    timer.unref?.();
+}
 
 async function drain(signal: string): Promise<void> {
+    /*
+     * **まず残す。** 何をしているかを先に書いておかないと、この先で躓いたときに
+     * 「合図を受け取ったのかどうか」すら分からない。実際、降りてこない Pod を
+     * 調べたときに、記録から読み取れることが何も無かった
+     */
     const recordings = activeRecordingIds().length;
+    console.log(`[boot] ${signal} を受けました (録画 ${recordings} 件)`);
+
     if (config.shutdownWait <= 0 || recordings === 0) {
-        console.log(`[boot] ${signal} を受けたので停止します`);
         stop();
         process.exit(0);
     }
 
+    // 輪を回す前に掛ける。**この先で何が起きても降りる**
+    forceExitAfter(config.shutdownWait, '待ち時間を使い切りました');
+
     beginDraining();
-    console.log(
-        `[boot] ${signal} を受けましたが、録画 ${recordings} 件が終わるまで待ちます (この間も画面は開けます)`,
-    );
+    console.log(`[boot] 録画が終わるまで待ちます (この間も画面は開けます)`);
 
     const until = Date.now() + config.shutdownWait;
+    let reported = Date.now();
     while (activeRecordingIds().length > 0 && Date.now() < until) {
         await new Promise((resolve) => setTimeout(resolve, DRAIN_CHECK));
+        // **黙って待たない。** 何を待っているのかが分からないと、外からは固まって見える
+        if (Date.now() - reported >= DRAIN_REPORT) {
+            reported = Date.now();
+            console.log(`[boot] まだ待っています (録画 ${activeRecordingIds().length} 件)`);
+        }
     }
 
     const left = activeRecordingIds().length;
     if (left > 0) {
         console.warn(`[boot] 待ち時間を使い切りました。録画 ${left} 件を残して停止します`);
+    } else {
+        console.log('[boot] 録画が終わったので停止します');
     }
     stop();
     process.exit(0);
