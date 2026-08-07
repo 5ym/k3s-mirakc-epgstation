@@ -1,8 +1,21 @@
 import { cpus } from 'node:os';
 import { defineConfig } from '@playwright/test';
 
-/** ワーカーの数。上限6の実測と理由は docs/development.md「並べて流す」 */
-const WORKERS = Math.max(2, Math.min(6, cpus().length));
+/**
+ * ワーカーの数。上限6の実測と理由は docs/development.md「並べて流す」。
+ *
+ * **CI では1つ空ける。** ランナーは4コアで、ワーカーごとに denpa と偽エージェントと
+ * ブラウザを1式ずつ立てるので、4つ並べるとコアが1つも余らない。**チューナーを
+ * 掴むのを待つテスト**(番組表集め・ロゴ集め・選局)が、30秒待っても掴めずに落ちる。
+ *
+ * 手元の12コアを `taskset` で4つに絞って測ったもの (shard 2、2回ずつ):
+ *
+ *     4ワーカー → 1.1分 / 1.7分   どちらも落ちた (16-scan・20-live)
+ *     3ワーカー → 1.1分 / 54秒    どちらも通った
+ *
+ * **速さは変わらない。** 詰まっていたぶんが減るだけ
+ */
+const WORKERS = process.env.CI ? 3 : Math.max(2, Math.min(6, cpus().length));
 
 export default defineConfig({
     testDir: 'tests/e2e',
