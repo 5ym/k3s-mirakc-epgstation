@@ -226,6 +226,8 @@ test.describe('番組表のマスを押す', () => {
         await goto(page, '/guide?type=GR');
         const [target] = await upcoming(page);
         const cell = cellOf(page, target.programId);
+        // 上と同じ理由 (4時台は「これから始まる番組」が見出しの下に隠れる)
+        await cell.scrollIntoViewIfNeeded();
         const box = (await cell.boundingBox()) ?? { x: 0, y: 0, width: 0, height: 0 };
 
         await page.evaluate(
