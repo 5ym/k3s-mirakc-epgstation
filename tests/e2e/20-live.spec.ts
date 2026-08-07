@@ -418,6 +418,37 @@ test.describe('ライブ視聴', () => {
     });
 
     /*
+     * **指で触っても、その場では消えない。**
+     *
+     * 指を離すとブラウザはポインタを取り下げるので、`pointerleave` が**触った
+     * 直後に必ず飛ぶ**。マウスと同じに「出ていったら消す」で扱っていたので、
+     * タッチの端末では**触った瞬間に操作列が消えて**いた — 帯を掴みに行く間が無い。
+     *
+     * ついでに、指のほうは出しておく時間を長くしてある。マウスは動かしているだけで
+     * 出しっぱなしにできるが (`pointermove` が絶えず飛ぶ)、指は置いた瞬間しか
+     * 報せが来ない
+     */
+    test('指で触ったときは、離しても消えない', async ({ browser }) => {
+        // 指のある端末として開く。既定の枠にはタッチが無く、tap そのものが使えない
+        const context = await browser.newContext({ hasTouch: true });
+        const page = await context.newPage();
+        await goto(page, '/live');
+        const controls = page.getByTestId('live-controls');
+        // いったん消えるまで待つ。出たままのところから始めると何も分からない
+        await expect(controls).toHaveAttribute('data-shown', 'false', { timeout: 6000 });
+
+        const box = (await page.getByTestId('live-video').boundingBox())!;
+        const at = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+        await page.touchscreen.tap(at.x, at.y);
+
+        // 指を離したあとも出ている。ここが直る前は、離した時点で消えていた
+        await expect(controls).toHaveAttribute('data-shown', 'true');
+        await page.waitForTimeout(3000);
+        await expect(controls, '指のときは 3 秒では引っ込めない').toHaveAttribute('data-shown', 'true');
+        await context.close();
+    });
+
+    /*
      * 止める・再開するの繋がりだけ見る。
      *
      * **「止めた所から見られる」ところまでは、ここでは確かめられない。** 偽の

@@ -93,27 +93,47 @@
 
     /**
      * 操作列を出しておく時間 (ms)。**絵の上に居座るものなので、触っていない間は
-     * 引っ込める。** 止めている間と、キーボードで触っている間は残す
+     * 引っ込める。** 止めている間と、キーボードで触っている間は残す。
+     *
+     * **指のほうを長くする。** マウスは動かしているだけで出しっぱなしにできるが
+     * (`pointermove` が絶えず飛ぶ)、指は置いた瞬間しか報せが来ない。同じ 2.5 秒だと
+     * 「触ったら消えた」ようにしか見えず、帯を掴みに行く間も無い
      */
-    const LINGER = 2500;
+    const LINGER = { mouse: 2500, touch: 5000 };
     let touched = $state(Date.now());
     let keyboard = $state(false);
     let now = $state(Date.now());
+    /** 直前に触ったのが指 (かペン) か。**マウスの繋がっていない端末もある** */
+    let byTouch = $state(false);
     /*
      * **見るのは「触ったか」と「止めているか」だけ。** 再生できているかどうかを
      * 混ぜていた頃は、繋いでいる間ずっと出たままになり、消える経路を
      * 確かめようが無かった。繋いでいる間も、動かせばすぐ戻る
      */
-    const controlsShown = $derived(player.paused || keyboard || now - touched < LINGER);
+    const controlsShown = $derived(
+        player.paused || keyboard || now - touched < (byTouch ? LINGER.touch : LINGER.mouse),
+    );
     /** 消す時刻を跨ぐためだけの目覚まし。出ている間しか回さない */
     $effect(() => {
         if (controlsShown === false) return;
         const timer = setInterval(() => (now = Date.now()), 250);
         return () => clearInterval(timer);
     });
-    const wake = () => {
+    const wake = (event: PointerEvent) => {
+        byTouch = event.pointerType !== 'mouse';
         touched = Date.now();
         now = touched;
+    };
+    /**
+     * 出ていく先で消す。**指のときは消さない。**
+     *
+     * 指を離すとブラウザはその場でポインタを取り下げるので、`pointerleave` が
+     * **触った直後に必ず飛ぶ**。マウスと同じに扱っていたので、タッチの端末では
+     * **触った瞬間に操作列が消えて**いた (帯を掴むどころではない)。
+     * マウスは絵の外へ出たなら本当に離れているので、そちらは今までどおり消す
+     */
+    const away = (event: PointerEvent) => {
+        if (event.pointerType === 'mouse') touched = 0;
     };
 
     /**
@@ -165,7 +185,7 @@
                    {controlsShown ? '' : 'cursor-none'}"
             onpointermove={wake}
             onpointerdown={wake}
-            onpointerleave={() => (touched = 0)}
+            onpointerleave={away}
             onfocusin={() => (keyboard = true)}
             onfocusout={() => (keyboard = false)}
         >
