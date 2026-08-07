@@ -513,24 +513,31 @@ export function livePlayer() {
         pending.length = 0;
     }
 
+    /** 繋ぎも含めて畳む。**画面を離れるときと、繋ぎ直すとき** */
     function reset(): void {
         socket?.close();
         socket = null;
-        clearCaptions();
-        // 局が変われば、持っている字幕も変わる (字幕そのものが無い局もある)
-        captionTracks = [];
-        captionTrack = 0;
-        clear();
+        forget(false);
     }
 
     /**
-     * 待たせている字幕を捨てる。**局を変えるときだけ。**
+     * 受け取ったものを忘れる。**繋ぎはそのまま。**
      *
-     * 音声を選び直したときは通さない — サーバ側の字幕は局で決まるので回り続けて
-     * おり (`captions.ts`)、ここで捨てると次の字幕まで何も出なくなる。
-     * 映像の時刻も変わらない (どちらも `-copyts`) ので、待たせているぶんは
-     * そのまま使える
+     * @param keepCaptions 字幕はそのままにするか。**音声を選び直したときだけ true** —
+     *   サーバ側の字幕は局で決まるので回り続けており (`captions.ts`)、捨てると
+     *   次の字幕まで何も出なくなる。映像の時刻も変わらないので待たせているぶんは使える
      */
+    function forget(keepCaptions: boolean): void {
+        if (!keepCaptions) {
+            clearCaptions();
+            // 局が変われば、持っている字幕も変わる (字幕そのものが無い局もある)
+            captionTracks = [];
+            captionTrack = 0;
+        }
+        clear();
+    }
+
+    /** 待たせている字幕を捨てる。**局を変えるときだけ** (`forget` の説明) */
     function clearCaptions(): void {
         generation++;
         for (const cue of cues) cue.bitmap?.close();
@@ -565,19 +572,8 @@ export function livePlayer() {
      */
     function setAudio(id: string): void {
         if (tuned === null || element === null || id === audio) return;
-        const next: Tuned = { ...tuned, audio: id };
-        // 繋がっていなければ普通に選局し直す (繋ぐところからやる)
-        if (socket === null || socket.readyState !== WebSocket.OPEN) {
-            void tune(element, next);
-            return;
-        }
-        freeze();
-        tuned = next;
-        audio = id;
-        state = 'connecting';
-        quiet = Date.now() + GRACE;
-        remember(next);
-        socket.send(JSON.stringify({ type: 'tune', ...next } satisfies Command));
+        // 局は変わらないので、待たせている字幕はそのまま使える
+        void tune(element, { ...tuned, audio: id }, true);
     }
 
     /**
@@ -591,17 +587,39 @@ export function livePlayer() {
         overlay = subtitles;
     }
 
-    async function tune(video: HTMLVideoElement, target: Tuned): Promise<void> {
+    /**
+     * 選局する。**繋がっていれば繋ぎ直さない。**
+     *
+     * @param keepCaptions 待たせている字幕を残すか。**音声の選び直しだけ true**
+     *   (`forget` の説明)
+     */
+    async function tune(video: HTMLVideoElement, target: Tuned, keepCaptions = false): Promise<void> {
         element = video;
         // 次の絵が出るまで前の絵を貼る。**閉じる前に写す** (閉じると何も映らなくなる)
         freeze();
-        reset();
+        /*
+         * **繋がっていれば繋ぎ直さない。**
+         *
+         * 取り決めは1本の WebSocket に何度でも `tune` を送れる形になっていて
+         * (`server/live.ts` の `attend`)、音声の選び直しは前からそうしていた。
+         * 局を変えるときだけ張り直していたのは**ただの取りこぼし**で、実測で
+         * 札を取り直すのに 50ms、握手に 50ms 掛かっていた
+         */
+        const open = socket !== null && socket.readyState === WebSocket.OPEN;
+        if (open) forget(keepCaptions);
+        else reset();
+
         state = 'connecting';
         message = '';
         tuned = target;
         audio = target.audio ?? '';
         quiet = Date.now() + GRACE;
         remember(target);
+
+        if (open) {
+            socket?.send(JSON.stringify({ type: 'tune', ...target } satisfies Command));
+            return;
+        }
 
         /*
          * **札を先に取る。** ブラウザは WebSocket の握手に `Authorization` を

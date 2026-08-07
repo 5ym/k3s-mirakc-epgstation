@@ -22,6 +22,7 @@
 import { type Audio, type AudioTrack, audioTracks, pickTrack } from '$lib/arib';
 import { CHANNEL, type Notice } from '$lib/live';
 import { Fmp4Splitter } from '$lib/ts/fmp4';
+import { PsiTap } from '$lib/ts/psi';
 import { frame, TROUBLE, watchCaptions } from './captions';
 import { config } from './config';
 import { queryOne } from './db';
@@ -199,6 +200,18 @@ export function encodeArgs(program: number, smooth: boolean, audio: AudioTrack):
  */
 export const CODECS = 'video/mp4; codecs="avc1.640029,mp4a.40.2"';
 
+/**
+ * 前に開いたときの PAT/PMT。**物理チャンネルごと。**
+ *
+ * ffmpeg を起こしてすぐ流す呼び水に使う (`Session.run` の説明)。局ではなく
+ * チャンネルで持つのは、PSI が TS 1本ぶんのものだから — 同じチャンネルに
+ * 乗っている局はどれも同じ PAT/PMT を使う。
+ *
+ * **際限なく増えない。** チャンネルの数だけで、1本あたり数 KB
+ */
+const primers = new Map<string, Uint8Array>();
+const channelKey = (type: string, channel: string) => `${type}:${channel}`;
+
 interface Viewer {
     connection: Connection;
     /** init を渡したか。渡す前に中身を送っても MSE は捨てる */
@@ -257,6 +270,35 @@ class Session {
     async run(): Promise<void> {
         const label = `${this.channelType}:${this.channel}`;
         try {
+            /*
+             * **ffmpeg を先に起こして、呼び水を流しておく。**
+             *
+             * 選局のやり直しには 0.66 秒かかる (復調器のロックが 0.32 秒、
+             * スクランブル解除が ECM を待つのが 0.24 秒)。その間 ffmpeg には
+             * 何も渡せていないのに、あちらは入口で PAT と PMT を待っている。
+             *
+             * PSI は物理チャンネルごとに決まっているので、**前に開いたときの
+             * ものを取っておいて先に流せば**、電波が来る頃には入口の仕事が
+             * 終わっている。実測で 0.18 秒縮み、**ばらつきも 342ms → 77ms**
+             * に落ちた ([stream.md](../../../docs/stream.md) §4)。
+             *
+             * 古くなっていても害は無い — 本物が 0.1 秒ごとに来て上書きする。
+             * 覚えていなければ何も流さないだけ (初めて開く局)。
+             */
+            const proc = Bun.spawn([config.ffmpeg, ...encodeArgs(this.program, this.smooth, this.audio)], {
+                stdin: 'pipe',
+                stdout: 'pipe',
+                stderr: 'pipe',
+            });
+            this.proc = proc;
+
+            const primer = primers.get(channelKey(this.channelType, this.channel));
+            if (primer !== undefined) {
+                const writer = proc.stdin as import('bun').FileSink;
+                writer.write(primer);
+                await writer.flush();
+            }
+
             const stream = await openChannelStream(
                 this.channelType,
                 this.channel,
@@ -264,13 +306,6 @@ class Session {
                 `live ${this.channelType}/${this.channel}`,
                 config.priority.live,
             );
-
-            const proc = Bun.spawn([config.ffmpeg, ...encodeArgs(this.program, this.smooth, this.audio)], {
-                stdin: 'pipe',
-                stdout: 'pipe',
-                stderr: 'pipe',
-            });
-            this.proc = proc;
 
             /*
              * **流し込みと汲み出しを同時に回す。** 順にやると、ffmpeg の
@@ -288,15 +323,26 @@ class Session {
         }
     }
 
-    /** エージェントから来た TS を ffmpeg へ */
+    /**
+     * エージェントから来た TS を ffmpeg へ。**ついでに呼び水を拾う。**
+     *
+     * 拾うのは PAT と PMT が揃うまでの一瞬だけで、そのあとは素通し
+     * (`PsiTap.feed` が自分で止まる)
+     */
     private async pump(
         stream: ReadableStream<Uint8Array>,
         proc: ReturnType<typeof Bun.spawn>,
     ): Promise<void> {
         const writer = proc.stdin as import('bun').FileSink;
+        const tap = new PsiTap();
         try {
             for await (const chunk of chunks(stream)) {
                 if (this.stopped) break;
+                if (!tap.full) {
+                    tap.feed(chunk);
+                    const primer = tap.primer();
+                    if (primer !== null) primers.set(channelKey(this.channelType, this.channel), primer);
+                }
                 writer.write(chunk);
                 await writer.flush();
             }

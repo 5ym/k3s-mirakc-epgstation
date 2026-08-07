@@ -216,6 +216,41 @@ test.describe('ライブ視聴', () => {
     });
 
     /*
+     * **局を選び直すのに繋ぎ直さない。**
+     *
+     * 取り決めは1本の WebSocket に何度でも `tune` を送れる形になっている
+     * (`server/live.ts` の `attend`)。張り直していた頃は、切り替えのたびに
+     * 札を取り直して握手し直しており、実測で 100ms 掛かっていた
+     */
+    test('局を選び直しても繋ぎ直さない', async ({ page }) => {
+        await page.addInitScript(() => {
+            const counted = window as unknown as { __sockets: number };
+            counted.__sockets = 0;
+            const Original = window.WebSocket;
+            window.WebSocket = class extends Original {
+                constructor(url: string | URL, protocols?: string | string[]) {
+                    super(url, protocols);
+                    counted.__sockets += 1;
+                }
+            };
+        });
+        const sockets = () => page.evaluate(() => (window as unknown as { __sockets: number }).__sockets);
+
+        await goto(page, '/live');
+        const channels = page.getByTestId('live-channel');
+        await channels.first().click();
+        await expect(page.getByTestId('live-title')).toBeVisible();
+        const before = await sockets();
+        expect(before).toBeGreaterThan(0);
+
+        const second = channels.nth(1);
+        await second.click();
+        await expect(second).toHaveAttribute('data-current', 'true');
+
+        expect(await sockets(), '局を変えるたびに繋ぎ直している').toBe(before);
+    });
+
+    /*
      * **開いたら、いま映しているものまで送っておく。** 局が100を超える環境では
      * 覚えていた局が画面の外にあるほうが普通で、探させるのはテレビを点けたときの
      * 振る舞いから遠い
