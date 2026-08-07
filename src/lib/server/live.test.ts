@@ -143,7 +143,7 @@ describe('ライブの焼き方', () => {
         expect(args).not.toContain('0:p:1032:a:0');
     });
 
-    /** 字幕を映像と同じ物差しに並べるのに要る */
+    /** 受け側は使わないが、サーバ側で字幕と突き合わせて測るのに要る (`captionLead`) */
     test('元TSの時刻を保つ', () => {
         expect(plain()).toContain('-copyts');
     });
@@ -151,8 +151,8 @@ describe('ライブの焼き方', () => {
     /*
      * **字幕と時刻を突き合わせないので、コマごとに喋らせるものが無い。**
      *
-     * 絶対の時刻で合わせる道は2回外している (`live.ts` の説明)。いまは受け側が
-     * 届いた時点の再生位置に置くので、こちらから添えるものは何も無い。
+     * 絶対の時刻で合わせる道は2回外している (`live.ts` の説明)。いまは時刻では
+     * なく**待たせる量**を渡すので、コマごとに添えるものは何も無い。
      * `showinfo` を挟んでいた頃は**毎秒60行**が標準エラーに流れていた
      */
     test('コマごとに showinfo を吐かせない', () => {
@@ -342,10 +342,11 @@ describe('コマ数の上限', () => {
  * (`captionLead` に実測の内訳)。
  */
 describe('字幕を待たせる量', () => {
-    /** 電波の中の先回り 0.3秒 + H.264 の焼き 0.22秒。実測の -485/-497ms と合う */
+    /** 実測は局で 0.49〜0.79秒。コマ数では動かないので、真ん中を1つ持つ */
     test('H.264 はコマ数で変わらない', () => {
-        expect(captionLead('h264', true)).toBeCloseTo(0.5);
-        expect(captionLead('h264', false)).toBeCloseTo(0.5);
+        expect(captionLead('h264', true)).toBe(captionLead('h264', false));
+        expect(captionLead('h264', true)).toBeGreaterThan(0.49);
+        expect(captionLead('h264', true)).toBeLessThan(0.79);
     });
 
     /**
