@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { lastChannel, livePlayer } from '$lib/live-player.svelte';
+    import { livePlayer } from '$lib/live-player.svelte';
     import { SPEEDS } from '$lib/ts/pacing';
     import { time } from '$lib/format';
     import type { LiveChannel } from './+page.server';
@@ -17,33 +17,17 @@
     let overlay: HTMLCanvasElement;
 
     /**
-     * **前回見ていたチャンネルで開く。** 覚えていない (初めて開いた) ときは
-     * 一覧の先頭 = リモコン番号のいちばん若い局。テレビを点けたときと同じ振る舞い。
+     * **サーバが決めた局で開く** (`+page.server.ts` の `start`)。
      *
-     * 局が入れ替わって前回のものが消えていることがあるので、居るかどうかは見る。
-     *
-     * **番組表から名指しで来たときは、そちらが勝つ** (`data.initial`)。押した人は
-     * その番組を見に来ているので、覚えている局を出しても用が済まない
+     * 名指し (`?service=`) → 覚えている前回の局 → 一覧の先頭、の順で決まって
+     * いる。**こちらでも同じ判断をしない** — サーバは既にその局を焼きはじめて
+     * いるので (`server/live.ts` の `warm`)、判断がずれると先に焼いたものが
+     * 使われないまま別の局が開く
      */
     onMount(() => {
         // 重ねるものの置き場を先に渡す。選局はこのあと
         player.attach(still, overlay);
-        const saved = lastChannel();
-        const asked = channels.find((c) => c.id === data.initial);
-        const remembered =
-            saved === null
-                ? undefined
-                : channels.find((c) => c.type === saved.channelType && c.channel === saved.channel);
-        const target = asked ?? remembered ?? channels[0];
-        if (target !== undefined) {
-            void player.tune(video, {
-                channelType: target.type,
-                channel: target.channel,
-                serviceId: target.id,
-                // 音声の控えは、同じ局に戻ったときだけ活かす
-                audio: target === remembered ? saved?.audio : undefined,
-            });
-        }
+        if (data.start !== null) void player.tune(video, data.start);
         return () => player.stop();
     });
 

@@ -7,14 +7,19 @@
  */
 
 import type { AudioTrack } from '$lib/arib';
-import { type CaptionTrack, CHANNEL, type Command, LAST_COOKIE, type Notice, SOCKET_PATH } from '$lib/live';
+import {
+    type CaptionTrack,
+    CHANNEL,
+    type Command,
+    LAST_COOKIE,
+    type Notice,
+    SOCKET_PATH,
+    type Tuned,
+} from '$lib/live';
 import { type Cue, currentCue, insertCue, trimCues } from '$lib/ts/captions';
 import { FLOOR, nextTarget, pacing } from '$lib/ts/pacing';
 
 export type LiveState = 'idle' | 'connecting' | 'playing' | 'error';
-
-/** 前回見ていたチャンネルの控え */
-const LAST = 'denpa:live:last';
 
 /**
  * 遅れて見られる長さ (秒)。**止めている間も受け取り続けるので、上限が要る。**
@@ -41,48 +46,19 @@ const GRACE = 3_000;
  */
 const HOLD_MOST = 6_000;
 
-export interface Tuned {
-    channelType: string;
-    channel: string;
-    /** どの局を選んだか。いま流れている番組からコマ数を決めるのに要る */
-    serviceId: number;
-    /** どの音声を出すか (`AudioTrack.id`)。省くと主音声 */
-    audio?: string;
-}
-
-/** 前回見ていたチャンネル。**初手はここから開く** */
-export function lastChannel(): Tuned | null {
-    try {
-        const saved: unknown = JSON.parse(localStorage.getItem(LAST) ?? 'null');
-        if (typeof saved !== 'object' || saved === null) return null;
-        const { channelType, channel, serviceId, audio } = saved as Record<string, unknown>;
-        if (typeof channelType !== 'string' || typeof channel !== 'string') return null;
-        /*
-         * **音声も覚えておく。** 番組が変われば構成も変わる (二カ国語の映画が
-         * 終わればステレオに戻る) が、サーバは無いものを頼まれたら先頭に落とす
-         * (`arib.pickTrack`) ので、古い合言葉が残っていても困らない
-         */
-        return {
-            channelType,
-            channel,
-            serviceId: Number(serviceId),
-            audio: typeof audio === 'string' ? audio : undefined,
-        };
-    } catch {
-        return null;
-    }
-}
-
 /**
- * 見ている局を覚える。**cookie にも同じものを置く。**
+ * 見ている局を覚える。**置き場は cookie 1つ。**
  *
- * localStorage はサーバから読めないので、画面を組む時点で「どの局を開くか」が
- * 分からない。それが分かっていれば**繋いでくる前に焼きはじめられる**
- * (`server/live.ts` の `warm`) ので、そのためだけに二重に書いておく。
- * 読むのはいつも localStorage のほうで、cookie は落ちても実害が無い
+ * **読むのはサーバ** (`live/+page.server.ts`)。次に開いたとき、画面が繋いで
+ * くるのを待たずに焼きはじめるため (`server/live.ts` の `warm`)。localStorage
+ * にも持っていた頃があるが、**二重に持つと決め方がずれる** — 先に焼いたものが
+ * 使われず、画面は別の局を開く、という形で静かに壊れる。
+ *
+ * **音声も覚える。** 番組が変われば構成も変わる (二カ国語の映画が終われば
+ * ステレオに戻る) が、サーバは無いものを頼まれたら先頭に落とす
+ * (`arib.pickTrack`) ので、古い合言葉が残っていても困らない
  */
 function remember(target: Tuned): void {
-    localStorage.setItem(LAST, JSON.stringify(target));
     const value = encodeURIComponent(JSON.stringify(target));
     document.cookie = `${LAST_COOKIE}=${value}; path=/live; max-age=31536000; samesite=lax`;
 }

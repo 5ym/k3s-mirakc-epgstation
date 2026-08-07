@@ -33,12 +33,9 @@ export interface LiveChannel {
 }
 
 /**
- * 画面が覚えている前回の局。**cookie から読む。**
+ * 画面が覚えている前回の局 (`live-player.svelte.ts` の `remember` が置く cookie)。
  *
- * 覚え先そのものは localStorage (`live-player.svelte.ts` の `remember`) だが、
- * あちらはサーバから読めない。**繋いでくる前に焼きはじめる**ためだけに、
- * 同じものを cookie にも置いてもらっている。壊れていても無視するだけでよい —
- * 落ちたら「先に焼く相手が分からない」で、いつもどおりの速さに戻るだけ
+ * 壊れていても無視するだけでよい — 覚えていないときと同じで、一覧の先頭が出る
  */
 function remembered(
     raw: string | undefined,
@@ -95,25 +92,40 @@ export function load({ url, cookies }) {
     });
 
     /*
-     * **番組表の「視聴」から来たとき、その局** (`services.id`)。
+     * **どの局で開くかは、ここで決める。**
      *
-     * 画面が覚えている前回の局より優先させるためにここで確かめておく
-     * (押した人はその局を見に来ている)。**居ない番号は渡さない** — 局が
-     * 入れ替わったあとの古いリンクを踏んでも、いつもの前回の局で開く
+     * 1. 番組表の「視聴」から名指しで来た局 (`?service=`)。押した人はそれを
+     *    見に来ているので、覚えている前回の局より優先する。**居ない番号は
+     *    使わない** — 局が入れ替わったあとの古いリンクを踏んでも、いつもの
+     *    前回の局で開く
+     * 2. 画面が覚えている前回の局 (`LAST_COOKIE`)
+     * 3. 一覧の先頭 = リモコン番号のいちばん若い局
+     *
+     * **決めるのをここ1箇所にしてある。** 画面にも同じ判断を持たせていた頃は、
+     * ずれたときに「先に焼いたものが使われず、画面は別の局を開く」という形で
+     * 静かに壊れた。画面は決まったものを開くだけ
      */
     const asked = Number(url.searchParams.get('service'));
-    const initial = channels.some((channel) => channel.id === asked) ? asked : null;
+    const named = channels.find((channel) => channel.id === asked);
+    const saved = named === undefined ? remembered(cookies.get(LAST_COOKIE), channels) : null;
+    const target = named ?? saved?.channel ?? channels[0];
+
+    const start =
+        target === undefined
+            ? null
+            : {
+                  channelType: target.type,
+                  channel: target.channel,
+                  serviceId: target.id,
+                  // 音声の控えは、同じ局に戻ったときだけ活かす
+                  audio: saved?.audio,
+              };
 
     /*
-     * **繋いでくる前に焼きはじめる** (`live.warm`)。
-     *
-     * これから開くのがどの局かは、ここで既に決まっている — 画面が `onMount` で
-     * 選ぶのと同じ順 (名指し → 覚えている前回の局 → 一覧の先頭)。**順番を
-     * 揃えておく**こと。ずれると、使われない焼きが1本立って畳まれるだけになる
+     * **繋いでくる前に焼きはじめる** (`live.warm`)。画面が動き出して札を取り、
+     * WebSocket が繋がるまでの 160ms を、ffmpeg の立ち上がりと重ねる
      */
-    const saved = initial === null ? remembered(cookies.get(LAST_COOKIE), channels) : null;
-    const first = initial === null ? (saved?.channel ?? channels[0]) : channels.find((c) => c.id === initial);
-    if (first !== undefined) warm(first.type, first.channel, first.id, saved?.audio);
+    if (start !== null) warm(start.channelType, start.channel, start.serviceId, start.audio);
 
-    return { channels, initial };
+    return { channels, start };
 }

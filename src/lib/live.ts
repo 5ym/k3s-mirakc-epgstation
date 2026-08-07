@@ -116,12 +116,27 @@ export type Command = {
 /** WebSocket の宛先 */
 export const SOCKET_PATH = '/api/live/socket';
 
+/** どの局を、どの音声で開くか。**画面もサーバも同じ形で扱う** */
+export interface Tuned {
+    channelType: string;
+    channel: string;
+    /** 局の内部ID (`services.id`)。いま流れている番組からコマ数を決めるのに要る */
+    serviceId: number;
+    /** どの音声を出すか (`AudioTrack.id`)。省くと主音声 */
+    audio?: string;
+}
+
 /**
- * 前回見ていた局を、**サーバにも読めるように**置いておく cookie。
+ * 前回見ていた局を覚えておく cookie。中身は `Tuned` の JSON。
  *
- * 覚え先そのものは localStorage だが、あちらはサーバから読めない。画面を
- * 組む時点で「これからどの局を開くか」が分からないと、**繋いでくる前に
- * 焼きはじめられない** (`server/live.ts` の `warm`)。中身は `Tuned` の JSON。
+ * **cookie にするのは、サーバにも読めるようにするため。** 画面を組む時点で
+ * 「これからどの局を開くか」が分かっていないと、**繋いでくる前に焼きはじめ
+ * られない** (`server/live.ts` の `warm`)。
+ *
+ * **どの局を開くかを決めるのはサーバ側1箇所** (`live/+page.server.ts`)。
+ * 画面はそこで決まったものを開くだけなので、localStorage には持たない —
+ * 二重に持つと、決め方がずれたときに**先に焼いたものが使われず、画面は
+ * 別の局を開く**という形で静かに壊れる。
  *
  * `/live` にだけ付ける。他の画面の要求に毎回ぶら下げるものではない
  */
