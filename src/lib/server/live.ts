@@ -265,7 +265,7 @@ function videoArgs(codec: LiveCodec): string[] {
 function audioArgs(codec: LiveCodec): string[] {
     return codec === 'av1'
         ? ['-c:a', 'libopus', '-b:a', '256k', '-ac', '2']
-        : ['-c:a', 'aac', '-b:a', '192k', '-ac', '2'];
+        : ['-c:a', 'aac', '-b:a', '256k', '-ac', '2'];
 }
 
 /**
