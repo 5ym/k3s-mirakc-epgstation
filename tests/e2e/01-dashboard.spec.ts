@@ -73,9 +73,22 @@ test.describe('ダッシュボードと画面遷移', () => {
                 height: grid.clientHeight,
             };
         });
-        expect(view.scrollTop).toBeGreaterThan(0);
-        expect(view.offset).toBeGreaterThan(0);
-        expect(view.offset).toBeLessThan(view.height / 2);
+        /*
+         * **見えているところに居ること**が要る。動いた量ではない。
+         *
+         * 画面の4分の1あたりに置くようにしてあるので、上端から見て
+         * 0 以上・4分の1あたりまでに入っていればよい。**4分の1より近くなる
+         * ことはある** — 番組表は 4:00 始まりで、その直後は「いま」がもともと
+         * 上のほうにあり、`Math.max(0, ...)` で頭に貼り付くのが正しい。
+         *
+         * `scrollTop > 0` で見ていた頃は、**4時台に走らせると落ちていた**。
+         * 時計次第で落ちるテストは、落ちても直すところが無い。
+         *
+         * 行き過ぎ (offset が負) も、動かさない不具合 (offset が画面より下) も
+         * この2つで出る
+         */
+        expect(view.offset).toBeGreaterThanOrEqual(0);
+        expect(view.offset).toBeLessThan(view.height / 3);
 
         // 番組をクリックすると詳細が出る。ここで予約するかどうか決める
         await page.getByTestId('program-button').first().click();

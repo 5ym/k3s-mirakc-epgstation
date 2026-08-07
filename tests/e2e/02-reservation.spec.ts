@@ -184,6 +184,12 @@ test.describe('番組表のマスを押す', () => {
         await goto(page, '/guide?type=GR');
         const [target] = await upcoming(page);
         const cell = cellOf(page, target.programId);
+        /*
+         * **見えるところまで送っておく。** 番組表は 4:00 始まりなので、4時台に
+         * 走らせると「これから始まる番組」がグリッドの先頭にあり、真ん中を
+         * 押したつもりが貼り付いた見出しに当たっていた (時計次第で落ちていた)
+         */
+        await cell.scrollIntoViewIfNeeded();
         const box = (await cell.boundingBox()) ?? { x: 0, y: 0, width: 0, height: 0 };
         const x = box.x + box.width / 2;
         const y = box.y + box.height / 2;
