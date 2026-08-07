@@ -32,3 +32,24 @@ spec:
       services:
         - name: denpa
           port: 3000
+          # **宛先は Traefik に選ばせず、Service (ClusterIP) へ渡す。**
+          #
+          # denpa は録画中に入れ替えが来ると、終わるまで居座ってから止まる
+          # (`deployment.yaml` の `terminationGracePeriodSeconds`)。その間 Pod は
+          # 動いていて画面も出せるのに、**Traefik だけが 503 を返していた**。
+          #
+          # 実機で確かめたところ (録画2本の最中):
+          #
+          #     Traefik ごし   503
+          #     ClusterIP 直   200
+          #     Pod 直         200
+          #
+          # Kubernetes は消しはじめた Pod の EndpointSlice に `terminating: true` を
+          # 立てる。`publishNotReadyAddresses: true` (`service.yaml`) で `ready` は
+          # true のままにできるが、**Traefik 3 は `terminating` のほうも見て外す**。
+          # 以前これで直ったのは `ready` しか見ていなかった頃の話で、**戻っていた**。
+          #
+          # `nativeLB` を立てると Traefik は宛先を自分で選ばず ClusterIP へ渡す。
+          # そこから先は kube-proxy の仕事で、あちらは `publishNotReadyAddresses` を
+          # 見るので届く。**replicas は1**なので、振り分けを手放す不利益は無い
+          nativeLB: true
