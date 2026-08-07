@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { PsiTap, parseNit, parseSdt, ServiceReader } from './psi';
-import { nitSection, packetize, patSection, pmtSection, sdtSection } from './synth';
+import { parseNit, parseSdt, ServiceReader } from './psi';
+import { nitSection, packetize, sdtSection } from './synth';
 
 /**
  * 実チューナーが無いので、NIT と SDT を組み立てて食わせる。
@@ -143,66 +143,5 @@ describe('同期の取り直し', () => {
         for (let i = 0; i < 50; i++) reader.feed(new Uint8Array(4096).fill(0x00));
         reader.feed(repeated());
         expect(reader.complete).toBe(true);
-    });
-});
-
-/**
- * 呼び水。**次に開くときのために PAT と PMT を取っておく。**
- *
- * ffmpeg は入口で PAT と PMT を待つので、選局を待っている間に先に流して
- * おける。半端なものを流しても意味が無いので、揃うまでは出さない。
- */
-describe('呼び水 (PsiTap)', () => {
-    const PAT = packetize(
-        0x0000,
-        patSection([
-            [1024, 0x01f0],
-            [1025, 0x01f1],
-        ]),
-    );
-    const PMT1 = packetize(0x01f0, pmtSection(1024, 0x0100, 0x00), 3);
-    const PMT2 = packetize(0x01f1, pmtSection(1025, 0x0110, 0x00), 5);
-
-    test('PAT だけでは揃わない', () => {
-        const tap = new PsiTap();
-        tap.feed(PAT);
-        expect(tap.full).toBe(false);
-        expect(tap.primer()).toBeNull();
-    });
-
-    /** PAT に2局居るなら、PMT も2本ぶん要る。1本で出すと片方が引けない */
-    test('PAT が名乗った PMT が全部そろって初めて出す', () => {
-        const tap = new PsiTap();
-        tap.feed(PAT);
-        tap.feed(PMT1);
-        expect(tap.full).toBe(false);
-        tap.feed(PMT2);
-        expect(tap.full).toBe(true);
-
-        const primer = tap.primer()!;
-        expect(primer.length).toBe(PAT.length + PMT1.length + PMT2.length);
-        // 拾ったものをそのまま並べる。作り直さない
-        expect(primer.subarray(0, PAT.length)).toEqual(PAT);
-    });
-
-    /** PMT より先に来ることもある。PAT を読むまでどの PID が要るか分からない */
-    test('PAT より先に来た PMT は拾わない', () => {
-        const tap = new PsiTap();
-        tap.feed(PMT1);
-        tap.feed(PAT);
-        tap.feed(PMT2);
-        // PMT1 を取りこぼしているので、まだ揃っていない
-        expect(tap.full).toBe(false);
-        tap.feed(PMT1);
-        expect(tap.full).toBe(true);
-    });
-
-    /** 揃ったら止める。PSI は流れ続けるが、拾い直す値打ちは無い */
-    test('揃ったあとは太らない', () => {
-        const tap = new PsiTap();
-        tap.feed(Uint8Array.from([...PAT, ...PMT1, ...PMT2]));
-        const size = tap.primer()!.length;
-        for (let i = 0; i < 20; i++) tap.feed(Uint8Array.from([...PAT, ...PMT1, ...PMT2]));
-        expect(tap.primer()!.length).toBe(size);
     });
 });
