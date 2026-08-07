@@ -75,7 +75,18 @@ public sealed class TunerPool(
     private sealed class Held(ITuneDevice device, AribB25? b25) : IDisposable
     {
         public ITuneDevice Device { get; } = device;
-        public AribB25? B25 { get; } = b25;
+        public AribB25? B25 { get; private set; } = b25;
+
+        /// <summary>
+        /// 復号器だけ入れ替える。**この入れ物ごと作り直さない** — デバイスは
+        /// 掴んだままだし (掴み直すと <c>Device or resource busy</c>)、下の
+        /// <see cref="Gate"/> が別物になると選局が2つ同時に入りうる
+        /// </summary>
+        public void ReplaceB25(AribB25? next)
+        {
+            B25?.Dispose();
+            B25 = next;
+        }
 
         /// <summary>
         /// **この1本を選局し直す間の錠。本ごとに別**なので、他の本は待たない。
@@ -146,6 +157,8 @@ public sealed class TunerPool(
         TunerSpec spec;
         Lease lease;
         Sink sink;
+        /** 蹴った相手。**止まりきるのを錠の外で待つ** (下の説明) */
+        Lease? kicked = null;
 
         lock (_gate)
         {
@@ -158,7 +171,11 @@ public sealed class TunerPool(
                 ?? throw new TunerBusyException($"{type} のチューナーに空きがありません");
 
             // 蹴る相手が居れば先に片付ける。同じチューナーを2つの選局が掴まないように
-            if (_leases.TryGetValue(index, out var victim)) Release(victim, "優先度の高い要求に譲りました");
+            if (_leases.TryGetValue(index, out var victim))
+            {
+                Release(victim, "優先度の高い要求に譲りました");
+                kicked = victim;
+            }
 
             spec = Tuners[index];
             lease = new Lease(index, type, channel);
@@ -183,6 +200,19 @@ public sealed class TunerPool(
          *
          * ここから先で触るのは、上で押さえた自分の本だけ。
          */
+
+        /*
+         * **蹴った相手が読み終わるまで待つ。**
+         *
+         * 復号器はチューナー1本につき1つで、選局を跨いで持ち回している。
+         * 前の読み手がまだ回っているうちに次を始めると、**同じ復号器を2本の
+         * 流れから叩く**ことになり、libaribb25 の中が壊れてプロセスごと落ちる
+         * (実機で `double free or corruption`。AribB25.cs)。
+         *
+         * **錠は放してから待つ。** 握ったまま待つと、その間どの本も開けない。
+         */
+        kicked?.Await();
+
         try
         {
             /*
@@ -247,27 +277,53 @@ public sealed class TunerPool(
     {
         lock (_deviceGate)
         {
-            if (_held.TryGetValue(index, out var open)) return open;
+            if (_held.TryGetValue(index, out var open))
+            {
+                /*
+                 * **解けなくなった復号器は持ち回らない。** 途中で投げたものは
+                 * 中の解析が半端なところで止まっているので、`Reset` して使い
+                 * 回すと壊れたまま次の選局へ持っていくことになる (実機で
+                 * ECM の解析に失敗した直後にプロセスごと落ちた)。
+                 *
+                 * **デバイスはそのまま。** 掴み直すと `Device or resource busy`
+                 * になる。作り直すのは復号器だけ
+                 */
+                if (open.B25 is { Broken: true })
+                {
+                    Log.Write($"[{spec.Name}] 復号器が壊れた疑いがあるので作り直します");
+                    open.ReplaceB25(Reopen(spec));
+                }
+                return open;
+            }
 
             var path = spec.Device ?? throw new IOException($"{spec.Name} にデバイスが書かれていません");
             ITuneDevice device = path.Contains("/dvb/", StringComparison.Ordinal)
                 ? new DvbTuner(path, spec.Lnb)
                 : new Px4Tuner(path, spec.Lnb);
 
-            AribB25? b25 = null;
-            try
-            {
-                b25 = AribB25.Open(_tune.CardUrl);
-            }
-            catch (Exception error)
-            {
-                Log.Write($"[{spec.Name}] 解けません: {error.Message}");
-            }
-
-            var held = new Held(device, b25);
+            var held = new Held(device, Reopen(spec));
             _held[index] = held;
             Log.Write($"[{spec.Name}] {path} を掴みました");
             return held;
+        }
+    }
+
+    /// <summary>
+    /// 復号器を用意する。**開けなくても選局はする。**
+    ///
+    /// カードが読めなくても、**掛かったままでも録るほうがまし**。電波は二度と
+    /// 戻ってこないし、解けていないことは denpa 側が見て分かる
+    /// </summary>
+    private AribB25? Reopen(TunerSpec spec)
+    {
+        try
+        {
+            return AribB25.Open(_tune.CardUrl);
+        }
+        catch (Exception error)
+        {
+            Log.Write($"[{spec.Name}] 解けません: {error.Message}");
+            return null;
         }
     }
 
@@ -324,17 +380,36 @@ public sealed class TunerPool(
         }, Linger);
     }
 
+    /**
+     * 選局を畳む。**読み手に理由を伝えてから、読むのをやめさせる。**
+     *
+     * <para>
+     * **`Sinks` はその錠の下で触る。** 読み手を配る側 (<c>StartNative</c>) は
+     * `lock (Sinks)` して回しているので、こちらが素で書き換えると回している
+     * 最中の一覧を壊すことになる。
+     * </para>
+     *
+     * <para>
+     * **止まるのを待つのは呼んだ側** (<see cref="Lease.Kill"/> は最長2秒待つ)。
+     * ここで待つと、取り合いの錠 (<see cref="_gate"/>) を握ったまま2秒止まり、
+     * その間どの本も開けなくなる。
+     * </para>
+     */
     private void Release(Lease lease, string? reason)
     {
         lease.CancelLinger();
         if (_leases.TryGetValue(lease.Tuner, out var held) && held == lease) _leases.Remove(lease.Tuner);
-        foreach (var sink in lease.Sinks)
+        lock (lease.Sinks)
         {
-            if (reason is null) sink.End();
-            else sink.Fail(reason);
+            foreach (var sink in lease.Sinks)
+            {
+                if (reason is null) sink.End();
+                else sink.Fail(reason);
+            }
+            lease.Sinks.Clear();
         }
-        lease.Sinks.Clear();
-        lease.Kill();
+        // 読むのをやめろとだけ言う。止まりきるのを待つのは錠の外 (上の説明)
+        lease.Stop();
     }
 
     /// <summary>
@@ -618,11 +693,18 @@ internal sealed class Lease(int tuner, string type, string channel)
         _pump = Task.Run(() =>
         {
             var buffer = new byte[188 * 1024];
+            /*
+             * **降りる合図を読み口まで渡す。** 渡さないと、電波が来ていない間は
+             * `Read` が永久に戻らず、蹴られてもここに居座る (Tuning.cs)
+             */
+            var ring = tuner.Output as DeviceStream;
             try
             {
                 while (!_stopped)
                 {
-                    var read = tuner.Output.Read(buffer, 0, buffer.Length);
+                    var read = ring is null
+                        ? tuner.Output.Read(buffer, 0, buffer.Length)
+                        : ring.Read(buffer, 0, buffer.Length, () => _stopped);
                     if (read <= 0) break;
 
                     var chunk = b25 is null ? buffer[..read] : b25.Decode(buffer.AsSpan(0, read)).ToArray();
@@ -643,9 +725,17 @@ internal sealed class Lease(int tuner, string type, string channel)
              * 溢れっぱなしなら読む側が遅い (番組表を一度に開きすぎ・B25 が重い)。
              * 黙って捨てると、あとから「なぜ番組表に穴があるのか」を追えない。
              */
-            if (tuner.Output is DeviceStream ring && ring.TakeOverflows() is > 0 and var overflows)
+            if (ring is not null && ring.TakeOverflows() is > 0 and var overflows)
             {
                 Log.Write($"[{Tuner}] {Channel}: 環が {overflows} 回溢れました (読むのが追いつきません)");
+            }
+            /*
+             * **同じ復号器に2本入りかけたら残す。** 静かに直しただけでは、
+             * 直ったのか元々起きていなかったのかが分からない (AribB25.cs)
+             */
+            if (b25?.TakeContended() is > 0 and var contended)
+            {
+                Log.Write($"[{Tuner}] {Channel}: 復号器に {contended} 回、二重に入りかけました");
             }
             // 畳めと言われて終わったのなら、それは失敗ではない
             if (!_stopped) onExit();
@@ -724,23 +814,57 @@ internal sealed class Lease(int tuner, string type, string channel)
         _linger = null;
     }
 
-    public void Kill()
+    /**
+     * **読むのをやめろと言う。待たない。**
+     *
+     * <para>
+     * 掴んだままのデバイスは閉じない — チューナーごとに開いたままで、次の選局が
+     * 同じものを使う。ここでやるのは合図だけ。読み口は 200ms ごとに起きて
+     * この印を見るので (<c>DeviceStream.Read</c>)、電波が来ていなくても止まる。
+     * </para>
+     */
+    public void Stop()
     {
-        /*
-         * **掴んだままのほうは閉じない。** デバイスはチューナーごとに開いた
-         * ままで、次の選局が同じものを使う。ここでやるのは読むのをやめること
-         * だけ (読み口は 200ms ごとに起きるので、すぐ気付く)。
-         */
-        if (_native)
-        {
-            _stopped = true;
-            _pump?.Wait(TimeSpan.FromSeconds(2));
-            _pump = null;
-        }
+        _stopped = true;
 
         var child = _child;
         _child = null;
         if (child is null || child.HasExited) return;
         Interop.KillGroup(child.Id);
+    }
+
+    /**
+     * **止まりきるまで待つ。呼ぶのは錠の外で。**
+     *
+     * <para>
+     * 次の選局は、これが返ってから始める。待たずに始めると**同じ復号器を
+     * 2本の流れから叩く**ことになり、プロセスごと落ちる (AribB25.cs)。
+     * </para>
+     *
+     * <para>
+     * それでも止まらないときは**記録に残す。** 黙って先へ進んでいた頃は、
+     * 窓が開いていたのかどうかを確かめようが無かった。
+     * </para>
+     */
+    public void Await()
+    {
+        if (!_native) return;
+        var pump = _pump;
+        _pump = null;
+        if (pump is null) return;
+        if (!pump.Wait(StopWait))
+        {
+            Log.Write($"[{Tuner}] {Channel}: 読み手が {StopWait.TotalSeconds} 秒で止まりませんでした");
+        }
+    }
+
+    /// <summary>止まるのを待つ上限。読み口は 200ms ごとに起きるので、十分に長い</summary>
+    private static readonly TimeSpan StopWait = TimeSpan.FromSeconds(2);
+
+    /// <summary>やめさせて、止まりきるまで待つ。**畳むときはこちら**</summary>
+    public void Kill()
+    {
+        Stop();
+        Await();
     }
 }

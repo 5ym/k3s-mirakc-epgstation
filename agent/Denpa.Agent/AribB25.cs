@@ -91,10 +91,56 @@ public sealed unsafe partial class AribB25 : IDisposable
     private readonly StdB25* _b25;
     private readonly CasCard* _card;
 
+    /// <summary>
+    /// **libaribb25 はスレッドセーフではない。** 1つの実体を2本の流れから
+    /// 同時に叩くと、中の節リストが壊れて**プロセスごと落ちる**
+    /// (実機で <c>double free or corruption</c>。docs/agent.md)。
+    ///
+    /// <para>
+    /// 実体は**チューナー1本につき1つ**で、選局を跨いで持ち回している
+    /// (<c>TunerPool.Held</c>)。掴んでいる選局は常に1つのはずだが、
+    /// 前の読み手が止まりきる前に次が始まる窓が実際にあった。ここで順番に
+    /// すれば、**その窓が開いていても壊れない。**
+    /// </para>
+    ///
+    /// <para>
+    /// 待たされるのは MULTI2 の復号1回ぶんなので、実害は無い。
+    /// </para>
+    /// </summary>
+    private readonly Lock _gate = new();
+
+    /// <summary>
+    /// 2本目が入ってこようとした回数。**0 でないなら、上の窓が実際に開いている。**
+    /// 静かに直しただけでは、直ったのか元々起きていなかったのか分からない
+    /// </summary>
+    private int _contended;
+
+    /// <summary>壊れた疑いがある。**次の選局では作り直す** (<c>TunerPool.Acquire</c>)</summary>
+    public bool Broken { get; private set; }
+
     private AribB25(StdB25* b25, CasCard* card)
     {
         _b25 = b25;
         _card = card;
+    }
+
+    /// <summary>取り合いが起きた回数。聞いたら 0 に戻す</summary>
+    public int TakeContended() => Interlocked.Exchange(ref _contended, 0);
+
+    /// <summary>順番に通す。**取り合いが起きたら数える** (上の説明) */</summary>
+    private Guard Enter()
+    {
+        if (!_gate.TryEnter())
+        {
+            Interlocked.Increment(ref _contended);
+            _gate.Enter();
+        }
+        return new Guard(_gate);
+    }
+
+    private readonly ref struct Guard(Lock gate)
+    {
+        public void Dispose() => gate.Exit();
     }
 
     /// <summary>
@@ -157,18 +203,36 @@ public sealed unsafe partial class AribB25 : IDisposable
     /// </summary>
     public ReadOnlySpan<byte> Decode(ReadOnlySpan<byte> chunk)
     {
+        using var _ = Enter();
+
         fixed (byte* source = chunk)
         {
             var input = new Buffer { Data = source, Size = (uint)chunk.Length };
             var code = _b25->Put(_b25, &input);
-            if (code < 0) throw new IOException($"復号に失敗しました ({Error(code)})");
+            if (code < 0) throw Failed(code);
         }
 
         var output = default(Buffer);
         var got = _b25->Get(_b25, &output);
-        if (got < 0) throw new IOException($"復号に失敗しました ({Error(got)})");
+        if (got < 0) throw Failed(got);
 
         return output.Data is null ? [] : new ReadOnlySpan<byte>(output.Data, (int)output.Size);
+    }
+
+    /// <summary>
+    /// 解けなかった。**この実体はもう使わない。**
+    ///
+    /// <para>
+    /// 途中で投げたということは、中の解析が半端なところで止まっている。
+    /// そのまま次の選局で <see cref="Reset"/> して使い回していた頃に、
+    /// 実機で ECM の解析に失敗した直後**プロセスごと落ちた**。壊れているかも
+    /// しれないものを持ち回るより、作り直すほうが安い。
+    /// </para>
+    /// </summary>
+    private IOException Failed(int code)
+    {
+        Broken = true;
+        return new IOException($"復号に失敗しました ({Error(code)})");
     }
 
     /// <summary>
@@ -179,11 +243,17 @@ public sealed unsafe partial class AribB25 : IDisposable
     /// 忘れさせないと、次のチャンネルの ECM が来るまで前の鍵で解こうとする。
     /// </para>
     /// </summary>
-    public void Reset() => _b25->Reset(_b25);
+    public void Reset()
+    {
+        using var _ = Enter();
+        _b25->Reset(_b25);
+    }
 
     /// <summary>中に溜まっている分を吐き出す。**終わりに1回**</summary>
     public ReadOnlySpan<byte> Flush()
     {
+        using var _ = Enter();
+
         // flush は「中で止めているものを出口まで進める」だけ。受け取るのは get
         if (_b25->Flush(_b25) < 0) return [];
 
@@ -202,6 +272,8 @@ public sealed unsafe partial class AribB25 : IDisposable
     /// </summary>
     public string[] Ids()
     {
+        using var _ = Enter();
+
         var id = default(CardId);
         if (_card->GetId(_card, &id) < 0 || id.Data is null) return [];
 
@@ -237,6 +309,8 @@ public sealed unsafe partial class AribB25 : IDisposable
 
     public void Dispose()
     {
+        // 読んでいる最中に手放さない。**閉じるのも順番のうち**
+        using var _ = Enter();
         _b25->Release(_b25);
         _card->Release(_card);
     }

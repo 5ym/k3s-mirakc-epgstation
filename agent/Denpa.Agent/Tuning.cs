@@ -137,13 +137,30 @@ internal sealed unsafe class DeviceStream(SafeFileHandle handle) : Stream
     /// 戻らない失敗は投げて、呼んだ側が何が起きたか言えるようにする。
     /// </para>
     /// </summary>
-    public override int Read(byte[] buffer, int offset, int count)
+    public override int Read(byte[] buffer, int offset, int count) => Read(buffer, offset, count, null);
+
+    /**
+     * <param name="giveUp">
+     * **読むのをやめる合図。** デバイスは選局を跨いで開いたままなので、
+     * <see cref="Stop"/> は使えない (次の選局が同じものを読む)。読み手のほうが
+     * 降りたいときはこれを渡す。
+     *
+     * <para>
+     * 渡さないと、**電波が来ていない間は永久に戻らない** — 0.2秒ごとに起きて
+     * 掛け直すだけで、呼んだ側は降りようがない。実機では、蹴られた読み手が
+     * ここで止まったまま次の選局が始まり、**同じ復号器を2本で叩いて**
+     * プロセスごと落ちた (AribB25.cs)。
+     * </para>
+     * </param>
+     */
+    public int Read(byte[] buffer, int offset, int count, Func<bool>? giveUp)
     {
         var fd = (int)handle.DangerousGetHandle();
         // struct pollfd { int fd; short events; short revents; }
         var descriptor = stackalloc byte[8];
         while (!_closed)
         {
+            if (giveUp?.Invoke() == true) return 0;
             *(int*)descriptor = fd;
             *(short*)(descriptor + 4) = PollIn;
             *(short*)(descriptor + 6) = 0;
