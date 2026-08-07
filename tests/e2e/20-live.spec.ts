@@ -29,6 +29,32 @@ async function ffmpegArgs(
 }
 
 /**
+ * TS の PAT に並んでいる局の番号。**丸ごと来ていれば複数、絞ってあれば1つ。**
+ *
+ * PAT は PID 0。`[pointer][table_id=0][...12バイト...][局2バイト][PMT の PID 2バイト]…`
+ * で、末尾4バイトが CRC。区切りが1パケットに収まる大きさなので、組み立ては要らない
+ */
+function patPrograms(data: Buffer): number[] {
+    const found: number[] = [];
+    for (let at = 0; at + 188 <= data.length; at += 188) {
+        if (data[at] !== 0x47) continue;
+        const pid = ((data[at + 1] & 0x1f) << 8) | data[at + 2];
+        // 区切りの頭が入っているものだけ (payload_unit_start_indicator)
+        if (pid !== 0 || (data[at + 1] & 0x40) === 0) continue;
+        const start = at + 4 + 1 + data[at + 4];
+        if (data[start] !== 0x00) continue;
+        const length = ((data[start + 1] & 0x0f) << 8) | data[start + 2];
+        const end = start + 3 + length - 4;
+        for (let i = start + 8; i + 4 <= end && i + 4 <= at + 188; i += 4) {
+            const program = (data[i] << 8) | data[i + 1];
+            // 0 は NIT で局ではない
+            if (program !== 0) found.push(program);
+        }
+    }
+    return found;
+}
+
+/**
  * 2つが寸分同じ枠に居ること。**組み上がりを待つ。**
  *
  * 開いた直後は幅が決まりきっていないので、1回だけ見比べると稀に外れる
@@ -248,6 +274,37 @@ test.describe('ライブ視聴', () => {
         await expect(second).toHaveAttribute('data-current', 'true');
 
         expect(await sockets(), '局を変えるたびに繋ぎ直している').toBe(before);
+    });
+
+    /*
+     * **渡す前に1局へ絞る。**
+     *
+     * ffmpeg は名指しした局を `-probesize` のぶん読む間に見つけられなければ、
+     * **そのまま終了する**。実機の tvk (T15。tvk1/2/3 + ワンセグ + データで、
+     * 局ごとに14本以上のストリーム) では 400KB でも足りずに降りていた。
+     *
+     * わざと probesize を下げて T15 で測ると、丸ごと渡す形は 120KB でも
+     * 3回中1回しか通らないのに、**1局に絞れば 20KB で3回とも通る**。
+     * 絞るのは録画と同じ `ServiceFilter`。
+     *
+     * ここで見るのは**渡ったものの PAT に局が1つしか無いこと**。絞り忘れても
+     * 絵は出てしまう (実機では出ないことがある、という形の壊れ方をする) ので、
+     * 渡した中身そのものを見る
+     */
+    test('ffmpeg に渡すのは、その局だけの TS', async ({ page, stack }) => {
+        rmSync(stack.liveTsFile, { force: true });
+        await goto(page, '/live');
+        await page.getByTestId('live-channel').first().click();
+        await expect(page.getByTestId('live-title')).toBeVisible();
+
+        let programs: number[] = [];
+        await expect(() => {
+            expect(existsSync(stack.liveTsFile)).toBe(true);
+            programs = patPrograms(readFileSync(stack.liveTsFile));
+            expect(programs.length, 'PAT がまだ来ていない').toBeGreaterThan(0);
+        }).toPass({ timeout: 15_000 });
+
+        expect(new Set(programs).size, `局が ${[...new Set(programs)].join(',')} と複数ある`).toBe(1);
     });
 
     /*

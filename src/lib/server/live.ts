@@ -22,6 +22,7 @@
 import { type Audio, type AudioTrack, audioTracks, pickTrack } from '$lib/arib';
 import { CHANNEL, type Notice } from '$lib/live';
 import { Fmp4Splitter } from '$lib/ts/fmp4';
+import { ServiceFilter } from '$lib/ts/service-filter';
 import { frame, TROUBLE, watchCaptions } from './captions';
 import { config } from './config';
 import { queryOne } from './db';
@@ -47,8 +48,9 @@ import type { Connection } from './ws';
  *
  *   **750ms 前後に床がある。** 放送の MPEG-2 は GOP の頭 (I フレーム) が来る
  *   まで焼き始められないためで、解析待ちをいくら削ってもここは残る。
- *   床に着く 400KB を採る。0.19 秒ぶんにあたり、PAT/PMT はおよそ 0.1 秒周期
- *   なので、選局直後のどこから始まっても2周ぶんは入る
+ *
+ *   **渡す前に1局へ絞るので、小さくてよい** (下の説明)。丸ごと渡していた頃は
+ *   400KB でも足りないことがあった
  * - `-tune zerolatency` … B フレームを作らない (作ると必ず遅れる)
  * - `-frag_duration` … 0.05秒ぶんずつ moof/mdat を出す。既定では ffmpeg が
  *   数秒溜めてから出すので、その場でライブでなくなる
@@ -102,12 +104,33 @@ import type { Connection } from './ws';
  * 時刻は揃う (1本の中に両方入れて測ると ±0.1 秒)。**こちらから添えるものは
  * 何も無い** — そのため `showinfo` も要らない。
  *
- * ## 局を名指しで選ぶ
+ * ## 局を名指しで選ぶ。**渡す前にも絞る**
  *
  * **1本の物理チャンネルに複数の局が乗っている。** `0:v:0` は「最初に見つけた
  * 映像」でしかないので、MX2 を選んでも MX1 の絵が出うる。実機の T26 を調べると
  * 局が4つ (Eテレ1/2/3 と**ワンセグ**) 並んでいて、ワンセグは 320x180 の H.264 —
  * それを掴む目まである。`0:p:<局>:v:0` なら選んだ局の中から選ぶ。
+ *
+ * **名指しだけでは足りない。** ffmpeg はその局を `-probesize` のぶん読む間に
+ * 見つけられなければ、**そのまま終了する**。実機の tvk (T15) は tvk1/2/3 +
+ * ワンセグ + データで、局ごとに14本以上のストリームがあり、400KB では
+ * 読み切れずに降りていた:
+ *
+ *     Failed to set value '0:p:24632:v:0' for option 'map': Invalid argument
+ *
+ * わざと probesize を下げて、その T15 で測ったもの (3回ずつ):
+ *
+ *     probesize  20KB   丸ごと 0/3 通る    1局に絞る 3/3
+ *     probesize  50KB   丸ごと 0/3 通る    1局に絞る 3/3
+ *     probesize 120KB   丸ごと 1/3 通る    1局に絞る 3/3
+ *     probesize 400KB   丸ごと 3/3 通る    1局に絞る 3/3
+ *
+ * **渡す前に1局へ絞れば 20KB でも通る。** 録画と同じ `ServiceFilter` を通すだけで、
+ * ffmpeg が受け取るのは局が1つだけの TS になる。局を探す仕事が消えるので、
+ * probesize は余裕を見て 100KB で足りる (通った 20KB の5倍)。
+ *
+ * 名指し (`0:p:<局>`) はそのまま残す。絞ったものに万一違う局が入っていたら、
+ * **黙って別の局を映すより、そこで落ちるほうがいい**。
  *
  * ## 多重音声
  *
@@ -148,9 +171,9 @@ export function encodeArgs(program: number, smooth: boolean, audio: AudioTrack):
         'error',
         '-fflags',
         'nobuffer',
-        // 立ち上がりの、削れる部分。これ以上小さくしても縮まない (上の説明)
+        // 渡す前に1局へ絞ってあるので、これで足りる (上の説明)
         '-probesize',
-        '400000',
+        '100000',
         '-copyts',
         '-i',
         'pipe:0',
@@ -324,16 +347,28 @@ class Session {
         this.tell({ type: 'error', message });
     }
 
-    /** エージェントから来た TS を ffmpeg へ */
+    /**
+     * エージェントから来た TS を ffmpeg へ。**その局のぶんだけ渡す。**
+     *
+     * 録画と同じ絞り方 (`ts/service-filter.ts`)。丸ごと渡していた頃は、局が
+     * 3つ乗っている TS で ffmpeg が局を見つけられずに降りていた (`encodeArgs`
+     * の説明)。ついでに渡す量も減る — 実機の tvk で 16.7 → 5 Mbit/s。
+     *
+     * **放送の番号が分からないときは絞らない。** 絞りようが無いので、
+     * 丸ごと渡して ffmpeg に最初の映像を採らせる (`encodeArgs` も同じ判断)
+     */
     private async pump(
         stream: ReadableStream<Uint8Array>,
         proc: ReturnType<typeof Bun.spawn>,
     ): Promise<void> {
         const writer = proc.stdin as import('bun').FileSink;
+        const filter = this.program > 0 ? new ServiceFilter(this.program) : null;
         try {
             for await (const chunk of chunks(stream)) {
                 if (this.stopped) break;
-                writer.write(chunk);
+                const out = filter === null ? chunk : filter.filter(chunk);
+                if (out.length === 0) continue;
+                writer.write(out);
                 await writer.flush();
             }
         } finally {
@@ -547,7 +582,22 @@ export function attend(connection: Connection): void {
         const now = nowPlaying(serviceId, audio);
 
         /*
-         * **字幕は先に面倒をみる。** 映像とは別建てなので、焼き方が同じでも
+         * **物理チャンネルが変わるなら、前のを先に離す。**
+         *
+         * 字幕は映像とは別に TS をもう1本もらう (`captions.ts`)。前のチャンネルを
+         * 掴んだまま新しいチャンネルの字幕を頼むと、**その一瞬だけチューナーが
+         * 1本余分に要る** — 地上波は2本しかないので、番組表集めが1本使っていると
+         * そこで断られる (実機で `[captions] GR:T15: チューナーに空きがありません`)。
+         *
+         * 離すのは物理チャンネルが変わるときだけ。同じチャンネルの中で局や音声を
+         * 選び直すぶんには、エージェント側で相乗りになるので余分は要らない
+         */
+        if (current !== null && (current.channelType !== channelType || current.channel !== channel)) {
+            leave();
+        }
+
+        /*
+         * **字幕は映像より先に面倒をみる。** 映像とは別建てなので、焼き方が同じでも
          * (=下の早戻りに掛かっても) 字幕だけ選び直せる。局が同じなら
          * `followCaptions` の中で何もしない
          */
@@ -561,8 +611,7 @@ export function attend(connection: Connection): void {
          * 押しても新しく起こさない。画面は待ち続けるだけになる
          */
         if (
-            current !== null &&
-            current.alive &&
+            current?.alive === true &&
             current.channelType === channelType &&
             current.channel === channel &&
             current.serviceId === serviceId &&

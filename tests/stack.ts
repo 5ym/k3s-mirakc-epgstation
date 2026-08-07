@@ -48,6 +48,8 @@ export interface Stack {
      * **黙って消えず、画面に理由が出る**ことを確かめるのに使う
      */
     liveFailFile: string;
+    /** ライブ視聴で偽 ffmpeg に渡された TS の頭。1局に絞れているかを見る */
+    liveTsFile: string;
 }
 
 /** 資格情報を持たずに叩く口。返るのは素の Response */
@@ -121,6 +123,7 @@ async function boot(index: number): Promise<{ stack: Stack; shutdown: () => Prom
         failFile: `${root}/fail-encode`,
         liveArgsFile: `${root}/live-ffmpeg-args`,
         liveFailFile: `${root}/fail-live`,
+        liveTsFile: `${root}/live-ffmpeg-ts`,
     };
 
     rmSync(root, { recursive: true, force: true });
@@ -174,6 +177,7 @@ async function boot(index: number): Promise<{ stack: Stack; shutdown: () => Prom
             FAKE_FFMPEG_FAIL_FILE: stack.failFile,
             FAKE_FFMPEG_ARGS_FILE: stack.liveArgsFile,
             FAKE_FFMPEG_LIVE_FAIL_FILE: stack.liveFailFile,
+            FAKE_FFMPEG_TS_FILE: stack.liveTsFile,
             // 定期処理は止め、テストからボタン/APIで明示的に走らせる(タイミング依存を避ける)
             RECONCILE_INTERVAL: '86400000',
             EPG_COLLECT_INTERVAL: '86400000',

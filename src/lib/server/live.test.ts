@@ -34,6 +34,31 @@ describe('ライブの焼き方', () => {
     });
 
     /*
+     * **入口の解析は小さくてよい。渡す前に1局へ絞るから。**
+     *
+     * ffmpeg は名指しした局を `-probesize` のぶん読む間に見つけられなければ、
+     * **そのまま終了する**。実機の tvk (T15。tvk1/2/3 + ワンセグ + データで、
+     * 局ごとに14本以上のストリーム) では 400KB でも足りず、
+     * `Failed to set value '0:p:24632:v:0' for option 'map'` で降りていた。
+     *
+     * わざと probesize を下げて T15 で測ったもの (3回ずつ):
+     *
+     *     20KB   丸ごと 0/3 通る   1局に絞る 3/3
+     *     50KB   丸ごと 0/3 通る   1局に絞る 3/3
+     *    120KB   丸ごと 1/3 通る   1局に絞る 3/3
+     *
+     * 絞れば 20KB でも通る。5倍の余裕を見て 100KB。
+     *
+     * **上げる方向には床がある。** 実測した ffmpeg の立ち上がりは
+     * 1.5MB → 1429ms、800KB → 972ms、400KB → 約 700ms、200KB → 754ms。
+     * 750ms 前後で止まるのは、放送の MPEG-2 が GOP の頭を待つため
+     */
+    test('入口の解析は 100KB まで', () => {
+        const args = plain();
+        expect(args[args.indexOf('-probesize') + 1]).toBe('100000');
+    });
+
+    /*
      * **コマごとに切らない。** `frag_every_frame` だと映像だけ・音声だけの塊が
      * 交互に並び (トラックごとにコマの間隔が違うため)、受け側の MSE が
      * それぞれを別の区切りとして扱って映像と音声を別々に並べ直す。
@@ -115,20 +140,6 @@ describe('ライブの焼き方', () => {
         const args = encodeArgs(1032, true, tracks[1]);
         expect(args).toContain('0:p:1032:a:1');
         expect(args).not.toContain('0:p:1032:a:0');
-    });
-
-    /*
-     * **解析待ちは削れるが、床がある。** 実測した ffmpeg の立ち上がりは
-     * 1.5MB → 1429ms、800KB → 972ms、400KB → 約 700ms、200KB → 754ms。
-     * 750ms 前後で止まるのは、放送の MPEG-2 が GOP の頭を待つため。
-     *
-     * 下限は PAT/PMT が拾えること。実機の放送は毎秒 2.1MB なので、
-     * 0.1 秒周期の表を2周ぶん入れるには 300KB ほど要る
-     */
-    test('解析待ちを詰める。ただし PAT/PMT が拾える量は残す', () => {
-        const bytes = Number(plain()[plain().indexOf('-probesize') + 1]);
-        expect(bytes).toBeGreaterThanOrEqual(300_000);
-        expect(bytes).toBeLessThanOrEqual(800_000);
     });
 
     /** 字幕を映像と同じ物差しに並べるのに要る */

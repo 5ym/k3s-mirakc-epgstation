@@ -63,9 +63,10 @@
  */
 
 import { type CaptionTrack, CHANNEL } from '$lib/live';
+import { ServiceFilter } from '$lib/ts/service-filter';
 import { config } from './config';
 import { chunks, lines } from './stream';
-import { openChannelStream } from './tuner';
+import { openChannelStream, TunerBusyError } from './tuner';
 
 /**
  * 字幕を描く画面の大きさ。
@@ -79,6 +80,15 @@ export const CANVAS = { width: 1920, height: 1080 };
 
 /** 字幕に使う字。録画と同じものを使う (見た目を揃えるため) */
 const FONTS = 'Rounded M+ 1m for ARIB';
+
+/**
+ * チューナーの空き待ちで掛け直す回数と間隔 (ms)。
+ *
+ * 待っているのは**前のチャンネルが離れるまで**なので、長くは掛からない。
+ * 諦めが早すぎるとその局の字幕が出ないままになる (`Captions.open`)
+ */
+const BUSY_TRIES = 3;
+const BUSY_WAIT = 700;
 
 /** PNG の署名。塊の切れ目を見つけるのに使う */
 const SIGNATURE = [0x89, 0x50, 0x4e, 0x47];
@@ -126,9 +136,9 @@ export function captionArgs(program: number, track = 0): string[] {
         FONTS,
         '-fflags',
         'nobuffer',
-        // 映像側と同じ。これ以上小さくしても立ち上がりは縮まない (live.ts)
+        // 映像側と同じ。渡す前に1局へ絞ってあるので、これで足りる (live.ts)
         '-probesize',
-        '400000',
+        '100000',
         '-i',
         'pipe:0',
         // 字幕をフィルタに通すと1枚ずつ映像フレームになる (sub2video)
@@ -358,13 +368,7 @@ class Captions {
 
     async run(): Promise<void> {
         try {
-            const stream = await openChannelStream(
-                this.channelType,
-                this.channel,
-                this.aborter.signal,
-                `live ${this.channelType}/${this.channel} 字幕`,
-                config.priority.live,
-            );
+            const stream = await this.open();
             const proc = Bun.spawn([config.ffmpeg, ...captionArgs(this.program, this.track)], {
                 stdin: 'pipe',
                 stdout: 'pipe',
@@ -384,15 +388,50 @@ class Captions {
         }
     }
 
+    /**
+     * TS をもらう。**空きが無ければ少し待って掛け直す。**
+     *
+     * 字幕は映像とは別に TS をもう1本もらうので、チャンネルを変える一瞬だけ
+     * **前のチャンネルと合わせて2本要る**ことがある。地上波は2本しかないので、
+     * 番組表集めが1本使っていると、そこで断られる (実機で
+     * `[captions] GR:T15: チューナーに空きがありません`)。
+     *
+     * 一度断られたら終わりにしていた頃は、**そのチャンネルの字幕がそれきり
+     * 出なかった** — 見ている側は局を選び直すまで戻せない。前のチャンネルが
+     * 離れるのを待てば済む話なので、掛け直す。
+     *
+     * 掛け直すのは空き待ちのときだけ。選局そのものが駄目なら何度やっても同じ
+     */
+    private async open(): Promise<ReadableStream<Uint8Array>> {
+        for (let tries = 0; ; tries++) {
+            try {
+                return await openChannelStream(
+                    this.channelType,
+                    this.channel,
+                    this.aborter.signal,
+                    `live ${this.channelType}/${this.channel} 字幕`,
+                    config.priority.live,
+                );
+            } catch (error) {
+                if (!(error instanceof TunerBusyError) || tries >= BUSY_TRIES || this.stopped) throw error;
+                await Bun.sleep(BUSY_WAIT);
+            }
+        }
+    }
+
+    /** その局のぶんだけ渡す。映像側と同じ絞り方 (`live.ts` の `encodeArgs`) */
     private async pump(
         stream: ReadableStream<Uint8Array>,
         proc: ReturnType<typeof Bun.spawn>,
     ): Promise<void> {
         const writer = proc.stdin as import('bun').FileSink;
+        const filter = this.program > 0 ? new ServiceFilter(this.program) : null;
         try {
             for await (const chunk of chunks(stream)) {
                 if (this.stopped) break;
-                writer.write(chunk);
+                const out = filter === null ? chunk : filter.filter(chunk);
+                if (out.length === 0) continue;
+                writer.write(out);
                 await writer.flush();
             }
         } finally {

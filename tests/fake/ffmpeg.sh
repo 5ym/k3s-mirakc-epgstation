@@ -58,6 +58,14 @@ if [ "$output" = "pipe:1" ]; then
     if [ -n "${FAKE_FFMPEG_ARGS_FILE:-}" ]; then
         printf -- '---\n%s\n' "$(printf '%s\n' "$@")" >> "$FAKE_FFMPEG_ARGS_FILE"
     fi
+
+    # **渡された TS の頭を残す。** ライブは1局に絞ってから ffmpeg へ渡すので
+    # (`server/live.ts` の pump)、渡ったものの PAT に局が1つしか無いことを
+    # テストから確かめられるようにする。**頭だけ** — 全部残すと際限なく太る
+    if [ -n "${FAKE_FFMPEG_TS_FILE:-}" ] &&
+        printf '%s\n' "$@" | grep -qx -- 'libx264'; then
+        exec tee >(head -c 200000 > "$FAKE_FFMPEG_TS_FILE" 2>/dev/null)
+    fi
     exec cat
 fi
 
