@@ -137,8 +137,12 @@
                     </button>
 
                     <!--
-                        戻れる範囲の中のどこに居るか。**放送の今に居れば右端。**
-                        押すとその時刻へ移る
+                        戻れる範囲の中のどこに居るか。押すとその時刻へ移る。
+
+                        **放送の今に居る間は右端に張り付かせる。** 実際には
+                        貯めているぶん (0.5秒ほど) 後ろに居るが、そこを描くと
+                        溜まりが増えるたびに摘みが左へ動く — 見ている人には
+                        「勝手に戻っている」としか映らない
                     -->
                     <input
                         type="range"
@@ -146,7 +150,7 @@
                         min={player.oldest}
                         max={player.newest}
                         step="0.1"
-                        value={player.position}
+                        value={player.live ? player.newest : player.position}
                         oninput={(event) => player.seek(Number(event.currentTarget.value))}
                         aria-label="再生位置"
                         data-testid="live-seek"

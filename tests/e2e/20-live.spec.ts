@@ -159,6 +159,18 @@ test.describe('ライブ視聴', () => {
         await expect(page.getByTestId('live-controls')).toBeVisible();
         await expect(page.getByTestId('live-edge')).toBeVisible();
         await expect(page.getByTestId('live-play')).toBeVisible();
+
+        /*
+         * **放送の今に居る間は右端に張り付く。** 実際には貯めているぶん後ろに
+         * 居るが、そこを描くと溜まりが増えるたびに摘みが左へ動く — 見ている人には
+         * 「勝手に戻っている」としか映らない
+         */
+        const bar = page.getByTestId('live-seek');
+        const at = await bar.evaluate((el) => {
+            const input = el as HTMLInputElement;
+            return { value: input.value, max: input.max };
+        });
+        expect(at.value).toBe(at.max);
     });
 
     /*
