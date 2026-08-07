@@ -77,13 +77,63 @@
     });
 
     /** 全画面。映像だけでなく操作列も一緒に大きくしたいので、箱ごと入れる */
+    let fullscreened = $state(false);
     function full(): void {
         const box = video?.parentElement;
         if (box === null || box === undefined) return;
         if (document.fullscreenElement === null) void box.requestFullscreen().catch(() => {});
         else void document.exitFullscreen().catch(() => {});
     }
+    $effect(() => {
+        const update = () => (fullscreened = document.fullscreenElement !== null);
+        document.addEventListener('fullscreenchange', update);
+        return () => document.removeEventListener('fullscreenchange', update);
+    });
+
+    /**
+     * 操作列を出しておく時間 (ms)。**絵の上に居座るものなので、触っていない間は
+     * 引っ込める。** 止めている間と、キーボードで触っている間は残す
+     */
+    const LINGER = 2500;
+    let touched = $state(Date.now());
+    let keyboard = $state(false);
+    let now = $state(Date.now());
+    /*
+     * **見るのは「触ったか」と「止めているか」だけ。** 再生できているかどうかを
+     * 混ぜていた頃は、繋いでいる間ずっと出たままになり、消える経路を
+     * 確かめようが無かった。繋いでいる間も、動かせばすぐ戻る
+     */
+    const controlsShown = $derived(player.paused || keyboard || now - touched < LINGER);
+    /** 消す時刻を跨ぐためだけの目覚まし。出ている間しか回さない */
+    $effect(() => {
+        if (controlsShown === false) return;
+        const timer = setInterval(() => (now = Date.now()), 250);
+        return () => clearInterval(timer);
+    });
+    const wake = () => {
+        touched = Date.now();
+        now = touched;
+    };
+
+    /**
+     * **アイコンは既存の画面と同じ書き方に揃える** (インラインの SVG)。
+     * 絵文字にしていた頃は、端末ごとに形も大きさも変わっていた
+     */
+    const PLAY = 'M8 5v14l11-7z';
+    const PAUSE = 'M6 19h4V5H6v14zm8-14v14h4V5h-4z';
+    const SOUND_ON =
+        'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z';
+    const SOUND_OFF =
+        'M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zM19 12c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z';
+    const EXPAND = 'M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z';
+    const SHRINK = 'M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z';
 </script>
+
+{#snippet icon(path: string)}
+    <svg viewBox="0 0 24 24" class="size-5" fill="currentColor" aria-hidden="true">
+        <path d={path} />
+    </svg>
+{/snippet}
 
 <!--
     **映像を左、局を右。** 動画を見ながら次を選べる並びで、YouTube の再生画面と
@@ -97,7 +147,16 @@
 <div class="flex flex-col gap-4 lg:h-full lg:min-h-0 lg:flex-row" data-testid="live">
     <div class="flex min-w-0 flex-1 flex-col lg:min-h-0">
         <!-- 映像は高さのほうを上限にする。横幅いっぱいにすると縦がはみ出す -->
-        <div class="bg-base-300 relative aspect-video max-h-full overflow-hidden rounded-lg">
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+            class="bg-base-300 relative aspect-video max-h-full overflow-hidden rounded-lg
+                   {controlsShown ? '' : 'cursor-none'}"
+            onpointermove={wake}
+            onpointerdown={wake}
+            onpointerleave={() => (touched = 0)}
+            onfocusin={() => (keyboard = true)}
+            onfocusout={() => (keyboard = false)}
+        >
             <!-- svelte-ignore a11y_media_has_caption -->
             <!-- 字幕は第2段階。放送の字幕は canvas に重ねる (docs/stream.md §5.2) -->
             <!--
@@ -122,18 +181,35 @@
                     絵が出る前から出しておく — 出たり消えたりすると、押そうとした
                     ところで動くことになる
                 -->
+                <!--
+                    **しばらく触らなければ消える。** 絵の上に居座るものなので、
+                    見ている間は引っ込んでいるほうがいい。止めている間と、
+                    キーボードで触っている間は残す
+                -->
                 <div
-                    class="absolute right-0 bottom-0 left-0 flex items-center gap-3
-                           bg-gradient-to-t from-black/80 to-transparent px-3 pt-8 pb-3"
+                    class="absolute right-0 bottom-0 left-0 flex items-center gap-2
+                           bg-gradient-to-t from-black/80 to-transparent px-3 pt-8 pb-3 text-white
+                           transition-opacity duration-200
+                           {controlsShown ? 'opacity-100' : 'pointer-events-none opacity-0'}"
                     data-testid="live-controls"
+                    data-shown={controlsShown}
                 >
                     <button
-                        class="btn btn-circle btn-sm btn-ghost text-white"
+                        class="btn btn-circle btn-sm btn-ghost hover:bg-white/20"
                         onclick={() => player.toggle()}
                         aria-label={player.paused ? '再生' : '一時停止'}
                         data-testid="live-play"
                     >
-                        {player.paused ? '▶' : '❚❚'}
+                        {@render icon(player.paused ? PLAY : PAUSE)}
+                    </button>
+
+                    <button
+                        class="btn btn-circle btn-sm btn-ghost hover:bg-white/20"
+                        onclick={() => (player.silenced ? player.unmute() : player.mute())}
+                        aria-label={player.silenced ? '音を出す' : '音を消す'}
+                        data-testid="live-sound"
+                    >
+                        {@render icon(player.silenced ? SOUND_OFF : SOUND_ON)}
                     </button>
 
                     <!--
@@ -146,7 +222,7 @@
                     -->
                     <input
                         type="range"
-                        class="range range-xs flex-1"
+                        class="range range-xs range-error mx-1 flex-1"
                         min={player.oldest}
                         max={player.newest}
                         step="0.1"
@@ -158,31 +234,25 @@
 
                     <!-- 放送の今に居るかどうか。離れていれば押して戻れる -->
                     <button
-                        class="btn btn-xs gap-1 {player.live ? 'btn-error' : 'btn-ghost text-white'}"
+                        class="btn btn-sm gap-1.5 {player.live ? 'btn-error' : 'btn-ghost hover:bg-white/20'}"
                         onclick={() => player.goLive()}
                         data-testid="live-edge"
                     >
-                        <span class="inline-block size-2 rounded-full {player.live ? 'bg-white' : 'bg-error'}"
+                        <span
+                            class="inline-block size-2 rounded-full {player.live
+                                ? 'bg-error-content'
+                                : 'bg-error'}"
                         ></span>
                         ライブ
                     </button>
 
                     <button
-                        class="btn btn-circle btn-sm btn-ghost text-white"
-                        onclick={() => (player.silenced ? player.unmute() : player.mute())}
-                        aria-label={player.silenced ? '音を出す' : '音を消す'}
-                        data-testid="live-sound"
-                    >
-                        {player.silenced ? '🔇' : '🔊'}
-                    </button>
-
-                    <button
-                        class="btn btn-circle btn-sm btn-ghost text-white"
+                        class="btn btn-circle btn-sm btn-ghost hover:bg-white/20"
                         onclick={() => full()}
-                        aria-label="全画面"
+                        aria-label={fullscreened ? '全画面をやめる' : '全画面'}
                         data-testid="live-full"
                     >
-                        ⛶
+                        {@render icon(fullscreened ? SHRINK : EXPAND)}
                     </button>
                 </div>
             {/if}

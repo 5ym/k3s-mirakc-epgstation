@@ -83,13 +83,17 @@ describe('ライブの焼き方', () => {
     });
 
     /*
-     * **開いてから絵が出るまでの待ちは、ほぼ解析待ち。** 既定の 5MB は実機の
-     * 放送で 2.2 秒ぶんにあたる (毎秒 2.1MB)。放送の PAT/PMT はおよそ 0.1 秒
-     * 周期なので、0.7 秒ぶんあれば選局直後のどこから始まっても何周ぶんかは入る
+     * **解析待ちは削れるが、床がある。** 実測した ffmpeg の立ち上がりは
+     * 1.5MB → 1429ms、800KB → 972ms、400KB → 約 700ms、200KB → 754ms。
+     * 750ms 前後で止まるのは、放送の MPEG-2 が GOP の頭を待つため。
+     *
+     * 下限は PAT/PMT が拾えること。実機の放送は毎秒 2.1MB なので、
+     * 0.1 秒周期の表を2周ぶん入れるには 300KB ほど要る
      */
-    test('解析待ちを詰める', () => {
-        const args = plain();
-        expect(args[args.indexOf('-probesize') + 1]).toBe('1500000');
+    test('解析待ちを詰める。ただし PAT/PMT が拾える量は残す', () => {
+        const bytes = Number(plain()[plain().indexOf('-probesize') + 1]);
+        expect(bytes).toBeGreaterThanOrEqual(300_000);
+        expect(bytes).toBeLessThanOrEqual(800_000);
     });
 
     /** 第2段階で字幕を映像と同じ物差しに並べるのに要る */

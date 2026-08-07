@@ -171,6 +171,36 @@ test.describe('ライブ視聴', () => {
             return { value: input.value, max: input.max };
         });
         expect(at.value).toBe(at.max);
+
+        /*
+         * **アイコンは既存の画面と同じ書き方に揃える** (インラインの SVG)。
+         * 絵文字にしていた頃は、端末ごとに形も大きさも変わっていた
+         */
+        expect(await page.getByTestId('live-play').locator('svg').count()).toBe(1);
+        expect(await page.getByTestId('live-sound').locator('svg').count()).toBe(1);
+        expect(await page.getByTestId('live-full').locator('svg').count()).toBe(1);
+    });
+
+    /*
+     * **しばらく触らなければ消える。** 絵の上に居座るものなので、見ている間は
+     * 引っ込んでいるほうがいい。止めている間は残す — 止めて眺めているときに
+     * 消えると、再開する場所が分からなくなる
+     */
+    test('操作列は触らないでいると消え、動かすと戻る', async ({ page }) => {
+        await goto(page, '/live');
+        const controls = page.getByTestId('live-controls');
+        await expect(controls).toHaveAttribute('data-shown', 'true');
+
+        await page.mouse.move(400, 300);
+        await expect(controls).toHaveAttribute('data-shown', 'true');
+        await expect(controls).toHaveAttribute('data-shown', 'false', { timeout: 6000 });
+        await page.mouse.move(420, 320);
+        await expect(controls).toHaveAttribute('data-shown', 'true');
+
+        // 止めている間は残す
+        await page.getByTestId('live-play').click();
+        await page.waitForTimeout(3500);
+        await expect(controls).toHaveAttribute('data-shown', 'true');
     });
 
     /*
