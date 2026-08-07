@@ -144,7 +144,11 @@ function videoArgs(
     };
 }
 
-const DUAL_MONO = 2;
+/**
+ * 番組表の `audio_type` が言う「二カ国語」。左右に別の言語が乗っている
+ * (ARIB STD-B32)。**録画もライブも、見分け方はここ1つ** (`live.ts` の `nowPlaying`)
+ */
+export const DUAL_MONO = 2;
 
 /**
  * 字幕に使うフォント。

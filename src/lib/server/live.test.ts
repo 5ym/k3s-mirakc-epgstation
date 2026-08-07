@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { encodeArgs } from './live';
 
+/** 実写・ステレオ・NHK総合1 (T27 に2局乗っている) */
+const plain = () => encodeArgs(1024, true, false);
+
 /**
  * **焼き方の指定は、間違えても絵は出る。** 出たうえで見づらいだけなので、
  * 気付くのに時間がかかる。実機で測って分かったものをここで固定する。
@@ -16,7 +19,7 @@ describe('ライブの焼き方', () => {
      * エンコーダ側の遅れは `-tune zerolatency` が見ている。
      */
     test('デコーダに低遅延を指図しない', () => {
-        expect(encodeArgs(true)).not.toContain('low_delay');
+        expect(plain()).not.toContain('low_delay');
     });
 
     /*
@@ -26,7 +29,7 @@ describe('ライブの焼き方', () => {
      * 実機では毎秒95個出ていた
      */
     test('0.2秒ごとに区切る', () => {
-        const args = encodeArgs(true);
+        const args = plain();
         expect(args.join(' ')).not.toContain('frag_every_frame');
         expect(args[args.indexOf('-frag_duration') + 1]).toBe('200000');
     });
@@ -36,12 +39,55 @@ describe('ライブの焼き方', () => {
      * 渡すと動きのある場面が櫛状になる。国内アニメだけコマ数を倍にしない
      */
     test('インタレを解く。国内アニメだけコマ数を倍にしない', () => {
-        expect(encodeArgs(true)[encodeArgs(true).indexOf('-vf') + 1]).toBe('bwdif');
-        expect(encodeArgs(false)[encodeArgs(false).indexOf('-vf') + 1]).toBe('bwdif=mode=send_frame');
+        const live = encodeArgs(1024, true, false);
+        const anime = encodeArgs(1024, false, false);
+        expect(live[live.indexOf('-vf') + 1]).toBe('bwdif');
+        expect(anime[anime.indexOf('-vf') + 1]).toBe('bwdif=mode=send_frame');
+    });
+
+    /*
+     * **局を名指しで選ぶ。** 1本の物理チャンネルに複数の局が乗っているので、
+     * `0:v:0` は「最初に見つけた映像」でしかない。実機の T26 には Eテレ1/2/3 と
+     * **ワンセグ** (320x180 の H.264) が並んでいて、それを掴む目まである
+     */
+    test('選んだ局の中から映像と音声を採る', () => {
+        const args = encodeArgs(1032, true, false);
+        expect(args).toContain('0:p:1032:v:0');
+        expect(args).toContain('0:p:1032:a:0');
+    });
+
+    /** 局が分からないときは従来どおり。**絵が出ないより、先頭の局のほうがまし** */
+    test('局が分からなければ最初に見つけた映像を採る', () => {
+        const args = encodeArgs(0, true, false);
+        expect(args).toContain('0:v:0');
+        expect(args).toContain('0:a:0');
+    });
+
+    /*
+     * **二カ国語は左右に別の言語。** そのままステレオにすると両方同時に鳴る。
+     * 録画は左右を2トラックに分けるが、こちらは器が1つなので主音声 (左) を採る
+     */
+    test('二カ国語のときは主音声だけを両耳へ', () => {
+        const args = encodeArgs(1024, true, true);
+        expect(args[args.indexOf('-af') + 1]).toBe('pan=stereo|c0=c0|c1=c0');
+    });
+
+    test('普通のステレオでは音をいじらない', () => {
+        expect(plain()).not.toContain('-af');
+    });
+
+    /*
+     * **開いてから絵が出るまでの待ちは、ほぼ解析待ち。** 既定の 5MB は実機の
+     * 放送で 2.2 秒ぶんにあたる (毎秒 2.1MB)。放送の PAT/PMT はおよそ 0.1 秒
+     * 周期なので、0.7 秒ぶんあれば選局直後のどこから始まっても何周ぶんかは入る
+     */
+    test('解析待ちを詰める', () => {
+        const args = plain();
+        expect(args[args.indexOf('-probesize') + 1]).toBe('1500000');
     });
 
     /** 第2段階で字幕を映像と同じ物差しに並べるのに要る */
     test('元TSの時刻を保つ', () => {
-        expect(encodeArgs(true)).toContain('-copyts');
+        expect(plain()).toContain('-copyts');
     });
 });

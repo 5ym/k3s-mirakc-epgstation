@@ -23,7 +23,7 @@ import { CHANNEL, type Notice } from '$lib/live';
 import { Fmp4Splitter } from '$lib/ts/fmp4';
 import { config } from './config';
 import { queryOne } from './db';
-import { deinterlace, smoothMotionFor } from './encoder';
+import { DUAL_MONO, deinterlace, smoothMotionFor } from './encoder';
 import { chunks } from './stream';
 import { openChannelStream } from './tuner';
 import type { Connection } from './ws';
@@ -37,6 +37,10 @@ import type { Connection } from './ws';
  * 書いているので、まず確実に出るほうで経路を通す。
  *
  * - `-fflags nobuffer` … 読む側で溜めない
+ * - `-probesize` … **開いてから絵が出るまでの待ちは、ほぼこれ。** 既定の 5MB は
+ *   実機の放送で 2.2 秒ぶんにあたる (毎秒 2.1MB)。1.5MB (0.7秒ぶん) まで削る。
+ *   放送の PAT/PMT はおよそ 0.1 秒周期なので、選局直後のどこから始まっても
+ *   何周ぶんかは入る
  * - `-tune zerolatency` … B フレームを作らない (作ると必ず遅れる)
  * - `-frag_duration` … 0.2秒ぶんずつ moof/mdat を出す。既定では ffmpeg が
  *   数秒溜めてから出すので、その場でライブでなくなる
@@ -65,15 +69,35 @@ import type { Connection } from './ws';
  * コマ数を倍にしないのも録画と揃える — 元が毎秒24コマ前後なので、倍にしても
  * 同じ絵が並ぶだけで、CPU だけ倍かかる。
  *
+ * ## 局を名指しで選ぶ
+ *
+ * **1本の物理チャンネルに複数の局が乗っている。** `0:v:0` は「最初に見つけた
+ * 映像」でしかないので、MX2 を選んでも MX1 の絵が出うる。実機の T26 を調べると
+ * 局が4つ (Eテレ1/2/3 と**ワンセグ**) 並んでいて、ワンセグは 320x180 の H.264 —
+ * それを掴む目まである。`0:p:<局>:v:0` なら選んだ局の中から選ぶ。
+ *
+ * ## デュアルモノ
+ *
+ * 二カ国語放送は左右に別の言語が乗っている (ARIB STD-B32)。そのままステレオに
+ * すると両方同時に鳴る。**録画と同じやり方で見分ける** — 番組表の `audio_type`
+ * を見て、左だけを両耳に配る (`encoder.ts` の `DUAL_MONO`)。録画は左右を
+ * 2トラックに分けるが、こちらは器が1つなので主音声を採る。
+ *
+ * @param serviceId どの局を出すか。0以下なら最初に見つけた映像 (従来どおり)
  * @param smooth 60コマ/秒で出すか。国内アニメだけ false
+ * @param dualMono 二カ国語放送か。左 (主音声) だけを両耳に配る
  */
-export function encodeArgs(smooth: boolean): string[] {
+export function encodeArgs(serviceId: number, smooth: boolean, dualMono: boolean): string[] {
+    const from = Number.isFinite(serviceId) && serviceId > 0 ? `0:p:${serviceId}` : '0';
     return [
         '-hide_banner',
         '-loglevel',
         'error',
         '-fflags',
         'nobuffer',
+        // 開いてから絵が出るまでの待ちは、ほぼこれ (上の説明)
+        '-probesize',
+        '1500000',
         '-copyts',
         '-i',
         'pipe:0',
@@ -81,7 +105,7 @@ export function encodeArgs(smooth: boolean): string[] {
         '-vf',
         deinterlace(smooth),
         '-map',
-        '0:v:0',
+        `${from}:v:0`,
         '-c:v',
         'libx264',
         '-preset',
@@ -91,7 +115,9 @@ export function encodeArgs(smooth: boolean): string[] {
         '-g',
         '60',
         '-map',
-        '0:a:0',
+        `${from}:a:0`,
+        // 二カ国語は左右に別の言語。主音声だけを両耳へ (上の説明)
+        ...(dualMono ? ['-af', 'pan=stereo|c0=c0|c1=c0'] : []),
         '-c:a',
         'aac',
         '-b:a',
@@ -138,8 +164,12 @@ class Session {
     constructor(
         readonly channelType: string,
         readonly channel: string,
+        /** どの局を出すか。物理チャンネル1本に複数の局が乗っている */
+        readonly serviceId: number,
         /** 60コマ/秒で出すか。国内アニメだけ false */
         readonly smooth: boolean,
+        /** 二カ国語放送か。左 (主音声) だけを両耳に配る */
+        readonly dualMono: boolean,
     ) {}
 
     get empty(): boolean {
@@ -180,11 +210,10 @@ class Session {
                 config.priority.live,
             );
 
-            const proc = Bun.spawn([config.ffmpeg, ...encodeArgs(this.smooth)], {
-                stdin: 'pipe',
-                stdout: 'pipe',
-                stderr: 'pipe',
-            });
+            const proc = Bun.spawn(
+                [config.ffmpeg, ...encodeArgs(this.serviceId, this.smooth, this.dualMono)],
+                { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' },
+            );
             this.proc = proc;
 
             /*
@@ -261,27 +290,35 @@ class Session {
         this.stopped = true;
         this.aborter.abort();
         this.proc?.kill();
-        sessions.delete(key(this.channelType, this.channel, this.smooth));
+        sessions.delete(key(this.channelType, this.channel, this.serviceId, this.smooth));
     }
 }
 
 /**
- * 焼いているものの目印。**コマ数まで含める。**
+ * 焼いているものの目印。**局とコマ数まで含める。**
  *
- * 同じチャンネルでも、国内アニメを見ている人と実写を見ている人ではコマ数が
- * 違う (1本の物理チャンネルに複数の局が乗っているため、同時に起こりうる)。
- * 混ぜると片方が意図しないコマ数で見ることになる。チューナーはエージェント側で
- * 相乗りになるので、増えるのは ffmpeg だけ。
+ * 1本の物理チャンネルに複数の局が乗っているので、チャンネルだけでは足りない —
+ * tsreadex に局を選ばせている以上、出てくる絵が局ごとに違う。コマ数も同じで、
+ * 国内アニメを見ている人と実写を見ている人では違う。混ぜると片方が意図しない
+ * ものを見ることになる。チューナーはエージェント側で相乗りになるので、
+ * 増えるのは tsreadex と ffmpeg だけ。
  */
-const key = (type: string, channel: string, smooth: boolean) => `${type}:${channel}:${smooth ? 60 : 30}`;
+const key = (type: string, channel: string, serviceId: number, smooth: boolean) =>
+    `${type}:${channel}:${serviceId}:${smooth ? 60 : 30}`;
 const sessions = new Map<string, Session>();
 
 /** 見に行く。既に同じものを焼いていれば相乗りする */
-function watch(channelType: string, channel: string, smooth: boolean, viewer: Viewer): Session {
-    const id = key(channelType, channel, smooth);
+function watch(
+    channelType: string,
+    channel: string,
+    serviceId: number,
+    now: { smooth: boolean; dualMono: boolean },
+    viewer: Viewer,
+): Session {
+    const id = key(channelType, channel, serviceId, now.smooth);
     let session = sessions.get(id);
     if (session === undefined) {
-        session = new Session(channelType, channel, smooth);
+        session = new Session(channelType, channel, serviceId, now.smooth, now.dualMono);
         sessions.set(id, session);
         // 畳むのは見ている人が居なくなったとき。ここでは待たない
         void session.run();
@@ -315,12 +352,13 @@ export function attend(connection: Connection): void {
         const serviceId = Number(message.serviceId);
         if (channelType === '' || channel === '') return;
 
-        const smooth = smoothMotion(serviceId);
+        const now = nowPlaying(serviceId);
         if (
             current !== null &&
             current.channelType === channelType &&
             current.channel === channel &&
-            current.smooth === smooth
+            current.serviceId === serviceId &&
+            current.smooth === now.smooth
         ) {
             return;
         }
@@ -340,28 +378,35 @@ export function attend(connection: Connection): void {
         viewer.ready = false;
         const notice: Notice = { type: 'tuned', channelType, channel, codecs: CODECS };
         connection.send(CHANNEL.control, 0n, new TextEncoder().encode(JSON.stringify(notice)));
-        current = watch(channelType, channel, smooth, viewer);
+        current = watch(channelType, channel, serviceId, now, viewer);
     };
 
     connection.onclose = leave;
 }
 
 /**
- * いま流れている番組から、60コマ/秒で出すかを決める。
+ * いま流れている番組から、焼き方を決める。**番組表を頼りにする。**
  *
- * **分からなければ実写として扱う** (録画と同じ。`smoothMotionFor`)。放送の
- * 大半は実写で、アニメを実写扱いにしても絵は変わらないが、逆は動きが落ちる。
+ * - コマ数 … 国内アニメだけ倍にしない (`smoothMotionFor`)。**分からなければ
+ *   実写として扱う** — 放送の大半は実写で、アニメを実写扱いにしても絵は
+ *   変わらないが、逆は動きが落ちる
+ * - 二カ国語 … `audio_type` が 2 ならデュアルモノ。**録画と同じ見分け方**
+ *   (`encoder.ts` の `DUAL_MONO`)。分からなければ普通のステレオとして扱う
  */
-function smoothMotion(serviceId: number): boolean {
-    if (!Number.isFinite(serviceId)) return true;
+function nowPlaying(serviceId: number): { smooth: boolean; dualMono: boolean } {
+    if (!Number.isFinite(serviceId)) return { smooth: true, dualMono: false };
     const at = Date.now();
-    const program = queryOne<{ genre_detail: string | null }>(
-        `SELECT genre_detail FROM programs WHERE service_id = ? AND start_at <= ? AND end_at > ?`,
+    const program = queryOne<{ genre_detail: string | null; audio_type: number | null }>(
+        `SELECT genre_detail, audio_type FROM programs
+         WHERE service_id = ? AND start_at <= ? AND end_at > ?`,
         serviceId,
         at,
         at,
     );
-    return smoothMotionFor(program?.genre_detail ?? null);
+    return {
+        smooth: smoothMotionFor(program?.genre_detail ?? null),
+        dualMono: program?.audio_type === DUAL_MONO,
+    };
 }
 
 /** テスト用。掴んだままのものを残さない */
