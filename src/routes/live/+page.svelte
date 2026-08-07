@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { livePlayer } from '$lib/live-player.svelte';
+    import { LIVE_CODECS } from '$lib/live';
     import { SPEEDS } from '$lib/ts/pacing';
     import { time } from '$lib/format';
     import type { LiveChannel } from './+page.server';
@@ -53,11 +54,21 @@
     const shown = $derived(picked ?? current?.type ?? types[0] ?? 'GR');
     const listed = $derived(channels.filter((c) => c.type === shown));
 
+    /**
+     * 局を選ぶ。
+     *
+     * **焼き方は引き継ぐ。** 絵の中身ではなく「その端末で出るか」の話なので、
+     * 局を選び直すたびに H.264 へ戻されては選んだ意味が無い。
+     *
+     * **音声は引き継がない。** あちらは番組ごとに構成が変わるもので、局が変われば
+     * 前の合言葉はもう指すものが無い (サーバが主音声に落とす)
+     */
     function select(channel: LiveChannel): void {
         void player.tune(video, {
             channelType: channel.type,
             channel: channel.channel,
             serviceId: channel.id,
+            codec: player.codec,
         });
     }
 
@@ -359,6 +370,55 @@
                         押すと焼き直しになるので絵が一瞬止まるが、チャンネルは
                         変わらないので前の絵を貼ったまま差し替わる
                     -->
+                    <!--
+                        **焼き方の切り替え。**
+
+                        絵の中身ではなく「その端末で出るかどうか」の話なので、
+                        音声とは別に並べる。AV1 は同じ絵で 15% ほど軽いが、
+                        出ないブラウザもある — 受け取れなければ H.264 に戻して、
+                        戻した理由を出す (`live-player.svelte.ts` の `start`)。
+
+                        押すと焼き直しになるので絵が一瞬止まるが、チャンネルは
+                        変わらないので前の絵を貼ったまま差し替わる
+                    -->
+                    <div class="dropdown dropdown-top">
+                        <button
+                            class="btn btn-sm gap-1.5 {OVERLAY}"
+                            aria-label="焼き方を選ぶ"
+                            data-testid="live-codec"
+                        >
+                            <span class="text-xs font-semibold">
+                                {LIVE_CODECS.find((c) => c.id === player.codec)?.label ?? 'H.264'}
+                            </span>
+                        </button>
+                        <ul
+                            class="dropdown-content menu bg-base-100 text-base-content rounded-box
+                                   z-10 mb-1 w-56 p-2 shadow-lg"
+                            data-testid="live-codec-menu"
+                        >
+                            {#each LIVE_CODECS as choice (choice.id)}
+                                <li>
+                                    <button
+                                        class={choice.id === player.codec ? 'menu-active' : ''}
+                                        onclick={(event) => {
+                                            player.setCodec(choice.id);
+                                            // 選んだら閉じる。開きっぱなしだと絵を覆う
+                                            event.currentTarget.blur();
+                                        }}
+                                        data-testid="live-codec-option"
+                                        data-codec={choice.id}
+                                        aria-current={choice.id === player.codec ? 'true' : undefined}
+                                    >
+                                        <span class="flex flex-col items-start">
+                                            <span>{choice.label}</span>
+                                            <span class="text-base-content/60 text-xs">{choice.note}</span>
+                                        </span>
+                                    </button>
+                                </li>
+                            {/each}
+                        </ul>
+                    </div>
+
                     {#if player.audios.length > 1}
                         <div class="dropdown dropdown-top">
                             <button
@@ -496,6 +556,24 @@
                 >
                     音を出す
                 </button>
+            {/if}
+
+            <!--
+                **頼まれたとおりにできなかったときの断り書き。**
+
+                失敗ではないので、絵は出ている。いまのところ「AV1 を出せない端末
+                なので H.264 に戻した」の1つだけ。黙って別の形にすると、なぜ
+                切り替えが効かないのか分からない
+            -->
+            {#if player.warning}
+                <div
+                    class="pointer-events-none absolute inset-x-0 top-0 flex justify-center p-2"
+                    data-testid="live-warning"
+                >
+                    <span class="rounded-box bg-black/60 px-3 py-1 text-xs text-white">
+                        {player.warning}
+                    </span>
+                </div>
             {/if}
 
             {#if player.state !== 'playing'}

@@ -12,6 +12,7 @@ import {
     CHANNEL,
     type Command,
     LAST_COOKIE,
+    type LiveCodec,
     type Notice,
     SOCKET_PATH,
     type Tuned,
@@ -103,6 +104,16 @@ export function livePlayer() {
     let audios = $state<AudioTrack[]>([]);
     /** いま鳴らしている音声 (`AudioTrack.id`) */
     let audio = $state('');
+    /** いま焼いてもらっている形。**サーバが返してきたものを持つ** */
+    let codec = $state<LiveCodec>('h264');
+    /**
+     * 断り書き。**失敗ではないが、頼まれたとおりにできなかったとき。**
+     *
+     * いまのところ「AV1 を出せない端末なので H.264 に戻した」の1つだけ。
+     * `message` と分けてあるのは、あちらが選局のたびに消えるため — 戻した理由は
+     * 戻した先が映り始めても残っていないと、なぜ変わったのか分からない
+     */
+    let warning = $state('');
     /** 前の絵を貼っているか。**次の絵が出るまでの黒を埋める** */
     let holding = $state(false);
     /** 字幕を出すか。**押して切り替えられる** (テレビの字幕ボタン) */
@@ -577,6 +588,30 @@ export function livePlayer() {
     }
 
     /**
+     * 焼き方を選び直す。**音声とまったく同じ扱い。**
+     *
+     * サーバは焼き方ごとに別の ffmpeg を回す (`server/live.ts` の目印) ので、
+     * 器から作り直しになる。チャンネルは変わらないのでチューナーは掴んだままで、
+     * かかるのは焼き始めのぶんだけ。**前の絵は貼っておく**ので、絵は止まるが
+     * 黒くはならない。
+     *
+     * **出るかどうかは端末次第。** AV1 を受け取れないブラウザもあるので、
+     * 器を作るところで断られたら、そう言って H.264 に戻せるようにする (`start`)
+     */
+    function setCodec(next: LiveCodec): void {
+        // 選び直したなら、前の断り書きは用済み
+        warning = '';
+        swapCodec(next);
+    }
+
+    /** 中身。**断り書きを消さない**ので、戻すときにも使える */
+    function swapCodec(next: LiveCodec): void {
+        if (tuned === null || element === null || next === codec) return;
+        // 局は変わらないので、待たせている字幕はそのまま使える
+        void tune(element, { ...tuned, codec: next }, true);
+    }
+
+    /**
      * 重ねるものの置き場を預かる。**画面が組み上がってから1回だけ。**
      *
      * @param frozen 切り替えの間、前の絵を貼っておく先 (`freeze`)
@@ -613,6 +648,7 @@ export function livePlayer() {
         message = '';
         tuned = target;
         audio = target.audio ?? '';
+        codec = target.codec ?? 'h264';
         quiet = Date.now() + GRACE;
         remember(target);
 
@@ -641,14 +677,13 @@ export function livePlayer() {
         socket = ws;
 
         ws.onopen = () => {
-            const command: Command = {
-                type: 'tune',
-                channelType: target.channelType,
-                channel: target.channel,
-                serviceId: target.serviceId,
-                audio: target.audio,
-            };
-            ws.send(JSON.stringify(command));
+            /*
+             * **`Tuned` をそのまま渡す。** 中身を書き写していた頃は、
+             * `Tuned` に足したものをここへ足し忘れると**繋ぎ直したときだけ
+             * 抜ける**という出方をした (焼き方を選んで開き直すと H.264 に
+             * 戻っていた。繋いだままの選び直しでは効くので、余計に分かりにくい)
+             */
+            ws.send(JSON.stringify({ type: 'tune', ...target } satisfies Command));
         };
 
         ws.onerror = () => {
@@ -682,7 +717,8 @@ export function livePlayer() {
                      */
                     audios = notice.audios;
                     audio = notice.audio;
-                    start(video, notice.codecs);
+                    codec = notice.codec;
+                    start(video, notice.codecs, notice.codec);
                 }
                 return;
             }
@@ -756,9 +792,20 @@ export function livePlayer() {
         };
     }
 
-    /** 器を用意する。`codecs` はサーバが焼き方から決めて送ってくる */
-    function start(video: HTMLVideoElement, codecs: string): void {
+    /**
+     * 器を用意する。`codecs` はサーバが焼き方から決めて送ってくる。
+     *
+     * **受け取れない形なら、H.264 へ戻す。** AV1 を選べるようにしてある以上、
+     * 出ない端末で選ばれることは普通に起きる。そこで諦めると**黒いまま**に
+     * なるので、確実に出るほうへ落として、そう言う
+     */
+    function start(video: HTMLVideoElement, codecs: string, baked: LiveCodec): void {
         if (!('MediaSource' in globalThis) || !MediaSource.isTypeSupported(codecs)) {
+            if (baked !== 'h264') {
+                warning = 'この端末では AV1 を再生できないので、H.264 に戻しました';
+                swapCodec('h264');
+                return;
+            }
             fail('この端末では再生できない形式です');
             return;
         }
@@ -861,6 +908,15 @@ export function livePlayer() {
         get audio() {
             return audio;
         },
+        /** いま焼いてもらっている形 */
+        get codec() {
+            return codec;
+        },
+        /** 頼まれたとおりにできなかったときの断り書き。無ければ空 */
+        get warning() {
+            return warning;
+        },
+        setCodec,
         /** 前の絵を貼っているか。**切り替えの間の黒を埋めている** */
         get holding() {
             return holding;

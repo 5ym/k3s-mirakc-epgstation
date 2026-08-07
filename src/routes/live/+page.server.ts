@@ -1,4 +1,4 @@
-import { LAST_COOKIE } from '$lib/live';
+import { LAST_COOKIE, type LiveCodec } from '$lib/live';
 import { queryAll } from '$lib/server/db';
 import { airing, CURRENT_SERVICES, SERVICE_ORDER, SERVICE_TYPE_ORDER } from '$lib/server/epg';
 import { warm } from '$lib/server/live';
@@ -40,7 +40,7 @@ export interface LiveChannel {
 function remembered(
     raw: string | undefined,
     channels: LiveChannel[],
-): { channel: LiveChannel; audio?: string } | null {
+): { channel: LiveChannel; audio?: string; codec?: LiveCodec } | null {
     if (raw === undefined) return null;
     try {
         const saved = JSON.parse(raw) as Record<string, unknown>;
@@ -48,7 +48,12 @@ function remembered(
             (channel) => channel.type === saved.channelType && channel.channel === saved.channel,
         );
         if (found === undefined) return null;
-        return { channel: found, audio: typeof saved.audio === 'string' ? saved.audio : undefined };
+        return {
+            channel: found,
+            audio: typeof saved.audio === 'string' ? saved.audio : undefined,
+            // 覚えていない形を渡さない。知らない値なら既定 (H.264) に落ちる
+            codec: saved.codec === 'av1' ? 'av1' : undefined,
+        };
     } catch {
         return null;
     }
@@ -107,7 +112,8 @@ export function load({ url, cookies }) {
      */
     const asked = Number(url.searchParams.get('service'));
     const named = channels.find((channel) => channel.id === asked);
-    const saved = named === undefined ? remembered(cookies.get(LAST_COOKIE), channels) : null;
+    const kept = remembered(cookies.get(LAST_COOKIE), channels);
+    const saved = named === undefined ? kept : null;
     const target = named ?? saved?.channel ?? channels[0];
 
     const start =
@@ -119,13 +125,21 @@ export function load({ url, cookies }) {
                   serviceId: target.id,
                   // 音声の控えは、同じ局に戻ったときだけ活かす
                   audio: saved?.audio,
+                  /*
+                   * **焼き方は局が変わっても引き継ぐ。** 音声と違って番組の中身で
+                   * 決まるものではなく、その端末で出るかどうかの話なので、
+                   * 局を選び直すたびに H.264 へ戻されては困る
+                   */
+                  codec: kept?.codec,
               };
 
     /*
      * **繋いでくる前に焼きはじめる** (`live.warm`)。画面が動き出して札を取り、
      * WebSocket が繋がるまでの 160ms を、ffmpeg の立ち上がりと重ねる
      */
-    if (start !== null) warm(start.channelType, start.channel, start.serviceId, start.audio);
+    if (start !== null) {
+        warm(start.channelType, start.channel, start.serviceId, start.audio, start.codec);
+    }
 
     return { channels, start };
 }

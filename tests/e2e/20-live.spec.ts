@@ -586,6 +586,66 @@ test.describe('ライブ視聴', () => {
     });
 
     /*
+     * **焼き方は見ながら選べる。**
+     *
+     * 絵の中身ではなく「その端末で出るか」の話なので、音声とは別に選ばせる。
+     * AV1 は同じ絵で 15% ほど軽い (実機で 3.3 → 2.8 Mbit/s) が、出ない
+     * ブラウザもある。
+     *
+     * **選び直したら焼き直しになる。** サーバは焼き方ごとに別の ffmpeg を回す
+     * ので、渡した引数がそのまま変わる
+     */
+    test('焼き方を選び直すと、その形で焼き直す', async ({ page, stack }) => {
+        rmSync(stack.liveArgsFile, { force: true });
+        await goto(page, '/live');
+        await page.getByTestId('live-channel').first().click();
+        await expect(page.getByTestId('live-title')).toBeVisible();
+        // 既定は H.264。どの端末でも出るほうから始める
+        expect(await ffmpegArgs(stack.liveArgsFile, 'video', expect)).toContain('libx264');
+
+        await page.getByTestId('live-codec').click();
+        await page.locator('[data-testid="live-codec-option"][data-codec="av1"]').click();
+
+        await expect(async () => {
+            const runs = readFileSync(stack.liveArgsFile, 'utf8')
+                .split('---\n')
+                .filter((run) => run.trim() !== '');
+            expect(
+                runs.some((run) => run.includes('libsvtav1')),
+                'AV1 で焼き直していない',
+            ).toBe(true);
+        }).toPass({ timeout: 15_000 });
+
+        // 押した形が切り替えに出ている。押しても表示が変わらないと効いたか分からない
+        await expect(page.getByTestId('live-codec')).toContainText('AV1');
+    });
+
+    /*
+     * **チャンネルを変えても、選んだ形は続く。**
+     *
+     * 音声と違って番組の中身で決まるものではなく、その端末で出るかどうかの話。
+     * 局を選び直すたびに H.264 へ戻されては、選んだ意味が無い
+     */
+    test('局を変えても焼き方は変わらない', async ({ page }) => {
+        await goto(page, '/live');
+        const channels = page.getByTestId('live-channel');
+        await channels.first().click();
+        await expect(page.getByTestId('live-title')).toBeVisible();
+
+        await page.getByTestId('live-codec').click();
+        await page.locator('[data-testid="live-codec-option"][data-codec="av1"]').click();
+        await expect(page.getByTestId('live-codec')).toContainText('AV1');
+
+        await channels.nth(1).click();
+        await expect(channels.nth(1)).toHaveAttribute('data-current', 'true');
+        await expect(page.getByTestId('live-codec')).toContainText('AV1');
+
+        // 開き直しても覚えている
+        await goto(page, '/live');
+        await expect(page.getByTestId('live-codec')).toContainText('AV1');
+    });
+
+    /*
      * **切り替えの間、前の絵を貼っておく場所を持っておく。**
      *
      * 選局にかかる 1.6 秒は削れない (電波の同期待ち 0.65秒 + 放送の MPEG-2 が

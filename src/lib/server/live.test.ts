@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { type AudioSide, audioTracks } from '$lib/arib';
-import { encodeArgs } from './live';
+import { codecsFor, encodeArgs } from './live';
 
 /** 1本目の音声をそのまま。番組表が何も言っていないときの既定 */
 const stereo = audioTracks([])[0];
@@ -165,5 +165,58 @@ describe('ライブの焼き方', () => {
     test('記録は失敗だけに絞る', () => {
         const args = plain();
         expect(args[args.indexOf('-loglevel') + 1]).toBe('error');
+    });
+});
+
+/**
+ * **焼き方は見ながら選べる** (`LiveCodec`)。絵の中身ではなく「その端末で出るか」
+ * の話なので、音声とは別に選ばせる。
+ *
+ * AV1 は設計 (stream.md §1) が最初から狙っていた形。実機は HW エンコーダを
+ * 持たないが 44 スレッドあり、同じ電波を 40 秒ずつ通した実測では落ちこぼれない:
+ *
+ *     x264 veryfast   1バイト目 729ms   焼けた尺 38.5秒/41秒   3.3 Mbit/s
+ *     AV1 preset 12   1バイト目 1177ms  焼けた尺 39.1秒/41秒   2.8 Mbit/s
+ */
+describe('焼き方を選ぶ', () => {
+    const av1 = () => encodeArgs(1024, true, stereo, 'av1');
+
+    test('既定は H.264。**どの端末でも出る**', () => {
+        expect(plain()).toContain('libx264');
+        expect(encodeArgs(1024, true, stereo, 'h264')).toContain('libx264');
+    });
+
+    test('AV1 を選ぶと SVT-AV1 で焼く', () => {
+        expect(av1()).toContain('libsvtav1');
+        expect(av1()).not.toContain('libx264');
+    });
+
+    /*
+     * **先読みを切る。** SVT-AV1 は既定で先を読むぶん貯めるので、付けないと
+     * その貯めがそのまま遅れになる。ライブは待たせないほうが優先
+     */
+    test('AV1 に先を読ませない', () => {
+        expect(av1().join(' ')).toContain('lookahead=0');
+    });
+
+    /*
+     * **鍵フレームの間隔は揃える。** 途中から入ってきた人が待つ長さはここで
+     * 決まるので、形を選び直したら待ちが変わる、では困る
+     */
+    test('鍵フレームの間隔は形を変えても同じ', () => {
+        const gap = (args: string[]) => args[args.indexOf('-g') + 1];
+        expect(gap(av1())).toBe(gap(plain()));
+    });
+
+    /*
+     * **MSE はこれが合っていないと受け取らない。** Chromium で実際に聞くと
+     * `avc1.640029` も `av01.0.08M.08` も通り、`mp2v.61` (放送そのまま) は通らない
+     */
+    test('ブラウザに渡す名前は形ごとに変わる', () => {
+        expect(codecsFor('h264')).toContain('avc1.');
+        expect(codecsFor('av1')).toContain('av01.');
+        // 音声はどちらも AAC。形を変えて音の出方まで変わっては困る
+        expect(codecsFor('h264')).toContain('mp4a.40.2');
+        expect(codecsFor('av1')).toContain('mp4a.40.2');
     });
 });

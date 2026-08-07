@@ -14,6 +14,25 @@
 import type { AudioTrack } from './arib';
 
 /**
+ * 焼き方。**見ながら切り替えられる** (`live/+page.svelte`)。
+ *
+ * - `h264` … いままでのもの。**どの端末でも出る**ので既定
+ * - `av1` … 同じ絵で 15% ほど軽い。実機 (Xeon E5-2696 v4) の実測で、
+ *   1080i を解いて60コマ/秒でも実時間に間に合う。立ち上がりは 0.45 秒ぶん遅い
+ *
+ * **生 (MPEG-2 のまま) は入っていない。** ブラウザに MPEG-2 の復号器が無い —
+ * 実測で `MediaSource.isTypeSupported('video/mp4; codecs="mp2v.61,mp4a.40.2"')` も
+ * `VideoDecoder.isConfigSupported({codec:'mp2v'})` も false ([stream.md](../../docs/stream.md) §6)
+ */
+export type LiveCodec = 'h264' | 'av1';
+
+/** 選べる焼き方。画面の切り替えに並べる順そのまま */
+export const LIVE_CODECS: { id: LiveCodec; label: string; note: string }[] = [
+    { id: 'h264', label: 'H.264', note: 'どの端末でも出る' },
+    { id: 'av1', label: 'AV1', note: '軽いが、出ない端末もある' },
+];
+
+/**
  * 選べる字幕1つぶん。**取り決めなので、ここに置く** — 組み立てるのは
  * サーバ (`server/captions.ts` の `TrackList`) だが、画面も同じ形で読む
  */
@@ -65,7 +84,10 @@ export type Notice =
           type: 'tuned';
           channelType: string;
           channel: string;
+          /** MSE に渡す codecs 文字列。焼き方から決まる */
           codecs: string;
+          /** いま焼いている形。画面の切り替えがどれを指すか */
+          codec: LiveCodec;
           /** いま焼いている音声 (`AudioTrack.id`) */
           audio: string;
           /** 選べる音声。1つしか無ければ画面は切り替えを出さない */
@@ -112,6 +134,13 @@ export type Command = {
      */
     audio?: string;
     /**
+     * どの形で焼くか。省くと `h264`。
+     *
+     * **音声と同じで、選び直すと焼き直しになる** (器から作り直し)。
+     * チャンネルは変わらないのでチューナーは掴んだまま
+     */
+    codec?: LiveCodec;
+    /**
      * どの字幕を出すか (`CaptionTrack.index`)。省くと1本目。
      *
      * **言語が複数ある放送はたまにある。** 音声と違い、こちらを選び直しても
@@ -131,6 +160,8 @@ export interface Tuned {
     serviceId: number;
     /** どの音声を出すか (`AudioTrack.id`)。省くと主音声 */
     audio?: string;
+    /** どの形で焼くか。省くと `h264` */
+    codec?: LiveCodec;
 }
 
 /**

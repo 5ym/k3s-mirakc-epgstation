@@ -20,7 +20,7 @@
  */
 
 import { type Audio, type AudioTrack, audioTracks, pickTrack } from '$lib/arib';
-import { CHANNEL, type Notice } from '$lib/live';
+import { CHANNEL, type LiveCodec, type Notice } from '$lib/live';
 import { Fmp4Splitter } from '$lib/ts/fmp4';
 import { ServiceFilter } from '$lib/ts/service-filter';
 import { frame, TROUBLE, watchCaptions } from './captions';
@@ -151,7 +151,12 @@ import type { Connection } from './ws';
  * @param smooth 60コマ/秒で出すか。国内アニメだけ false
  * @param audio どの音声を、どちら側で出すか
  */
-export function encodeArgs(program: number, smooth: boolean, audio: AudioTrack): string[] {
+export function encodeArgs(
+    program: number,
+    smooth: boolean,
+    audio: AudioTrack,
+    codec: LiveCodec = 'h264',
+): string[] {
     const from = Number.isFinite(program) && program > 0 ? `0:p:${program}` : '0';
     // デュアルモノは片側だけを両耳へ。そのままだと左右から別の言語が同時に鳴る
     const pan =
@@ -182,14 +187,7 @@ export function encodeArgs(program: number, smooth: boolean, audio: AudioTrack):
         deinterlace(smooth),
         '-map',
         `${from}:v:0`,
-        '-c:v',
-        'libx264',
-        '-preset',
-        'veryfast',
-        '-tune',
-        'zerolatency',
-        '-g',
-        '60',
+        ...videoArgs(codec),
         // 何本目の音声か。複数入っている放送では 0 が主とは限らない
         '-map',
         `${from}:a:${audio.stream}`,
@@ -214,13 +212,54 @@ export function encodeArgs(program: number, smooth: boolean, audio: AudioTrack):
 }
 
 /**
+ * 映像の焼き方。**見ている人が選べる** (`LiveCodec`)。
+ *
+ * ## H.264
+ *
+ * `-tune zerolatency` で B フレームを作らない (作ると必ず遅れる)。
+ * **どの端末でも出る**ので既定。
+ *
+ * ## AV1
+ *
+ * 設計 (stream.md §1) が最初から狙っていた形。実機は HW エンコーダを持たない
+ * (`ffmpeg -hwaccels` が空) が、**44スレッドあるので間に合う**。同じ電波を
+ * 40秒ずつ通した実測 (1080i を解いて60コマ/秒):
+ *
+ *     x264 veryfast   1バイト目 729ms   焼けた尺 38.5秒/41秒   3.3 Mbit/s
+ *     AV1 preset 12   1バイト目 1177ms  焼けた尺 39.1秒/41秒   2.8 Mbit/s
+ *
+ * **落ちこぼれない** (焼けた尺が実時間に付いていっている)。同じ絵で 15% 軽い
+ * かわりに、立ち上がりが 0.45 秒ぶん遅い。
+ *
+ * `lookahead=0` が要る。SVT-AV1 は既定で先を読むぶん貯めるので、付けないと
+ * その貯めがそのまま遅れになる。preset は 12 — これより速い 13 はもう
+ * 目に見えて粗く、遅い 10 は間に合わなくなる。
+ */
+function videoArgs(codec: LiveCodec): string[] {
+    if (codec === 'av1') {
+        // -g は H.264 と揃える。合流の待ちは鍵フレームの間隔で決まる
+        return ['-c:v', 'libsvtav1', '-preset', '12', '-g', '60', '-svtav1-params', 'lookahead=0'];
+    }
+    return ['-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency', '-g', '60'];
+}
+
+/**
  * ブラウザに渡す codecs 文字列。**MSE はこれが合っていないと受け取らない。**
  *
- * 中身から起こすのが本筋だが (moov を読めば分かる)、第1段階は焼き方を
- * こちらで決め打ちにしているので、その組に対応する値を返す。
- * コーデックを設定で選べるようにするときに、ここも一緒に動かす。
+ * 中身から起こすのが本筋だが (moov を読めば分かる)、焼き方はこちらで決めて
+ * いるので、その組に対応する値を返す。
+ *
+ * - `avc1.640029` … High profile / Level 4.1。1080p60 まで
+ * - `av01.0.08M.08` … Main profile / Level 4.0 / 8bit。同じく 1080p60 まで
+ *
+ * 音声はどちらも AAC。**AV1 に Opus を組み合わせるのは、まだ**  — 音声だけ
+ * 別に選べる形にしていないので、切り替えるたびに音の出方まで変わってしまう
  */
-export const CODECS = 'video/mp4; codecs="avc1.640029,mp4a.40.2"';
+export function codecsFor(codec: LiveCodec): string {
+    return codec === 'av1'
+        ? 'video/mp4; codecs="av01.0.08M.08,mp4a.40.2"'
+        : 'video/mp4; codecs="avc1.640029,mp4a.40.2"';
+}
 
 interface Viewer {
     connection: Connection;
@@ -248,6 +287,8 @@ class Session {
         readonly smooth: boolean,
         /** どの音声を、どちら側で出すか */
         readonly audio: AudioTrack,
+        /** どの形で焼くか。**見ている人が選ぶ** */
+        readonly codec: LiveCodec,
     ) {}
 
     get empty(): boolean {
@@ -307,11 +348,14 @@ class Session {
                 () => this.stopped,
             );
 
-            const proc = Bun.spawn([config.ffmpeg, ...encodeArgs(this.program, this.smooth, this.audio)], {
-                stdin: 'pipe',
-                stdout: 'pipe',
-                stderr: 'pipe',
-            });
+            const proc = Bun.spawn(
+                [config.ffmpeg, ...encodeArgs(this.program, this.smooth, this.audio, this.codec)],
+                {
+                    stdin: 'pipe',
+                    stdout: 'pipe',
+                    stderr: 'pipe',
+                },
+            );
             this.proc = proc;
 
             /*
@@ -437,7 +481,9 @@ class Session {
         this.stopped = true;
         this.aborter.abort();
         this.proc?.kill();
-        sessions.delete(key(this.channelType, this.channel, this.serviceId, this.smooth, this.audio));
+        sessions.delete(
+            key(this.channelType, this.channel, this.serviceId, this.smooth, this.audio, this.codec),
+        );
     }
 }
 
@@ -448,11 +494,18 @@ class Session {
  * 局を名指しで選んでいる以上、出てくる絵が局ごとに違う。コマ数も同じで、
  * 国内アニメを見ている人と実写を見ている人では違う。**音声も同じ** —
  * 二カ国語を主音声で見ている人と副音声で見ている人は別のものを焼いている。
+ * **焼き方 (H.264 / AV1) も同じ** — 選んだ形が違えば別のものになる。
  * 混ぜると片方が意図しないものを見ることになる。チューナーはエージェント側で
  * 相乗りになるので、増えるのは ffmpeg だけ。
  */
-const key = (type: string, channel: string, serviceId: number, smooth: boolean, audio: AudioTrack) =>
-    `${type}:${channel}:${serviceId}:${smooth ? 60 : 30}:${audio.id}`;
+const key = (
+    type: string,
+    channel: string,
+    serviceId: number,
+    smooth: boolean,
+    audio: AudioTrack,
+    codec: LiveCodec,
+) => `${type}:${channel}:${serviceId}:${smooth ? 60 : 30}:${audio.id}:${codec}`;
 const sessions = new Map<string, Session>();
 
 /** 見に行く。既に同じものを焼いていれば相乗りする */
@@ -461,12 +514,13 @@ function watch(
     channel: string,
     serviceId: number,
     now: NowPlaying,
+    codec: LiveCodec,
     viewer: Viewer,
 ): Session {
-    const id = key(channelType, channel, serviceId, now.smooth, now.audio);
+    const id = key(channelType, channel, serviceId, now.smooth, now.audio, codec);
     let session = sessions.get(id);
     if (session === undefined) {
-        session = new Session(channelType, channel, serviceId, now.program, now.smooth, now.audio);
+        session = new Session(channelType, channel, serviceId, now.program, now.smooth, now.audio, codec);
         sessions.set(id, session);
         // 畳むのは見ている人が居なくなったとき。ここでは待たない
         void session.run();
@@ -504,15 +558,21 @@ const WARM_WAIT = 8_000;
  * 待たない・投げない。掴めなくても画面はいつもどおり繋いでくるので、
  * そのとき改めて開くだけ。
  */
-export function warm(channelType: string, channel: string, serviceId: number, audio?: string): void {
+export function warm(
+    channelType: string,
+    channel: string,
+    serviceId: number,
+    audio?: string,
+    codec: LiveCodec = 'h264',
+): void {
     if (channelType === '' || channel === '' || !Number.isFinite(serviceId)) return;
 
     const now = nowPlaying(serviceId, audio);
-    const id = key(channelType, channel, serviceId, now.smooth, now.audio);
+    const id = key(channelType, channel, serviceId, now.smooth, now.audio, codec);
     // 既に焼いていれば何もしない。開き直すたびに増やさない
     if (sessions.has(id)) return;
 
-    const session = new Session(channelType, channel, serviceId, now.program, now.smooth, now.audio);
+    const session = new Session(channelType, channel, serviceId, now.program, now.smooth, now.audio, codec);
     sessions.set(id, session);
     void session.run();
 
@@ -588,6 +648,8 @@ export function attend(connection: Connection): void {
         const channel = typeof message.channel === 'string' ? message.channel : '';
         const serviceId = Number(message.serviceId);
         const audio = typeof message.audio === 'string' ? message.audio : undefined;
+        // 知らない形を頼まれたら H.264。**画面から来る値をそのまま信じない**
+        const codec: LiveCodec = message.codec === 'av1' ? 'av1' : 'h264';
         // 字幕は映像とは別の ffmpeg なので、選び直しても映像は焼き直しにならない
         const caption = Number.isInteger(message.caption) ? Math.max(0, Number(message.caption)) : 0;
         if (channelType === '' || channel === '') return;
@@ -629,7 +691,8 @@ export function attend(connection: Connection): void {
             current.channel === channel &&
             current.serviceId === serviceId &&
             current.smooth === now.smooth &&
-            current.audio.id === now.audio.id
+            current.audio.id === now.audio.id &&
+            current.codec === codec
         ) {
             return;
         }
@@ -651,12 +714,13 @@ export function attend(connection: Connection): void {
             type: 'tuned',
             channelType,
             channel,
-            codecs: CODECS,
+            codecs: codecsFor(codec),
+            codec,
             audio: now.audio.id,
             audios: now.audios,
         };
         connection.send(CHANNEL.control, 0n, new TextEncoder().encode(JSON.stringify(notice)));
-        current = watch(channelType, channel, serviceId, now, viewer);
+        current = watch(channelType, channel, serviceId, now, codec, viewer);
     };
 
     connection.onclose = () => {
