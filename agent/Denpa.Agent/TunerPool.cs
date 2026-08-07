@@ -342,16 +342,23 @@ public sealed class TunerPool(
     ///
     /// <list type="number">
     /// <item>**もうそのチャンネルに合っているもの**。選局し直さずに済む</item>
+    /// <item>**誰も読んでいないもの** (畳むのを待っているだけ)。いま居る本を使い続ける</item>
     /// <item>空いているもの</item>
-    /// <item>誰も読んでいないもの (畳むのを待っているだけ)</item>
     /// <item>自分より弱い相手が掴んでいるもの。いちばん弱いところから取る</item>
     /// </list>
     ///
     /// <para>
     /// **1番目が無いと、戻るたびに選局し直しになる。** 実機で測ると選局し直しは
-    /// 約 600ms、合っているものを使えば 10ms。ライブ視聴でチャンネルを行き来
-    /// すると毎回そのぶん待たされていた。合っているかどうかは
+    /// 約 600ms、合っているものを使えば 10ms。合っているかどうかは
     /// <see cref="Held.Channel"/> が覚えている (実体はアダプタごとに開いたまま)。
+    /// </para>
+    ///
+    /// <para>
+    /// **2番目を3番目より先にしてあるのは、1人の視聴で本を2冊塞がないため。**
+    /// 畳むのを待っているだけの本を放っておいて空いている本を取ると、余韻の
+    /// 5秒間だけ2冊が埋まる。地上波が2本しかない機材では、その隙に録画が
+    /// 2つ始まると弾かれる。**選局し直しの時間は変わらない** (どちらの本でも
+    /// 同じだけ掛かる) ので、失うのは「直前のチャンネルに合った本が残る」ことだけ。
     /// </para>
     /// </summary>
     private int? Pick(string type, string channel, int priority)
@@ -378,13 +385,14 @@ public sealed class TunerPool(
                 if (_held.TryGetValue(index, out var open) && open.Channel == channel) return index;
             }
         }
-        foreach (var index in usable)
-        {
-            if (!_leases.ContainsKey(index)) return index;
-        }
+        // 畳むのを待っているだけの本を先に使い回す。1人の視聴で2冊塞がないため
         foreach (var index in usable)
         {
             if (_leases.TryGetValue(index, out var idle) && idle.Sinks.Count == 0) return index;
+        }
+        foreach (var index in usable)
+        {
+            if (!_leases.ContainsKey(index)) return index;
         }
 
         int? weakest = null;
