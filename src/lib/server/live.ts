@@ -22,13 +22,16 @@
 import { type Audio, type AudioTrack, audioTracks, pickTrack } from '$lib/arib';
 import { CHANNEL, type Notice } from '$lib/live';
 import { Fmp4Splitter } from '$lib/ts/fmp4';
-import { frame, watchCaptions } from './captions';
+import { frame, readInfo, TROUBLE, watchCaptions } from './captions';
 import { config } from './config';
 import { queryOne } from './db';
 import { deinterlace, smoothMotionFor } from './encoder';
-import { chunks } from './stream';
+import { chunks, lines } from './stream';
 import { openChannelStream } from './tuner';
 import type { Connection } from './ws';
+
+/** `showinfo` の行。原点を拾ったあとは読み飛ばす (コマごとに来る) */
+const SHOWINFO = /Parsed_showinfo/;
 
 /**
  * 焼き方。**第1段階は H.264 + AAC。**
@@ -86,6 +89,20 @@ import type { Connection } from './ws';
  * コマ数を倍にしないのも録画と揃える — 元が毎秒24コマ前後なので、倍にしても
  * 同じ絵が並ぶだけで、CPU だけ倍かかる。
  *
+ * ## 時間軸の原点
+ *
+ * **mp4 は必ず 0 から始まる。** `-copyts` で放送の時刻を保っているのは
+ * ffmpeg の中までで、mp4 の多重化器は最初のパケットを 0 に詰め直す
+ * (`-avoid_negative_ts disabled` も `-muxdelay 0` も効かない。実機で確認)。
+ * 一方**字幕は放送の時刻で来る** (`captions.ts`) ので、そのまま比べると
+ * 2万秒ずれる — 実機で字幕が1枚も出ず、ここで詰まった。
+ *
+ * そこで `showinfo` を挟んで、**焼かれる1コマ目の放送時刻**を拾い、画面へ送る
+ * (`origin`)。画面はこれを引いて、再生位置と同じ物差しに乗せる。
+ *
+ * 入口の見出しに出る `start:` では足りない。実測で 19870.63 に対し、実際に
+ * 焼かれた1コマ目は 19871.08 だった — **0.46 秒ずれる**ので、字幕が早く出る。
+ *
  * ## 局を名指しで選ぶ
  *
  * **1本の物理チャンネルに複数の局が乗っている。** `0:v:0` は「最初に見つけた
@@ -123,8 +140,10 @@ export function encodeArgs(program: number, smooth: boolean, audio: AudioTrack):
               : null;
     return [
         '-hide_banner',
-        '-loglevel',
-        'error',
+        /*
+         * **`-loglevel` を下げない。** 下の `showinfo` は info で喋る。
+         * 騒がしいぶんは読む側で落とす (`Session.watch`)
+         */
         '-fflags',
         'nobuffer',
         // 立ち上がりの、削れる部分。これ以上小さくしても縮まない (上の説明)
@@ -133,9 +152,14 @@ export function encodeArgs(program: number, smooth: boolean, audio: AudioTrack):
         '-copyts',
         '-i',
         'pipe:0',
-        // インタレ解除。放送は 1080i なので、解かずに渡すと動きが櫛状になる
+        /*
+         * インタレ解除。放送は 1080i なので、解かずに渡すと動きが櫛状になる。
+         *
+         * **`showinfo` は字幕を合わせるために足してある。** 焼かれる1コマ目の
+         * 放送時刻が要る (下の「時間軸の原点」)。使うのは1行目だけ
+         */
         '-vf',
-        deinterlace(smooth),
+        `${deinterlace(smooth)},showinfo`,
         '-map',
         `${from}:v:0`,
         '-c:v',
@@ -191,6 +215,12 @@ class Session {
     private proc: ReturnType<typeof Bun.spawn> | null = null;
     /** 最後に流した init。途中から入ってきた人に真っ先に渡す */
     private init: Uint8Array | null = null;
+    /**
+     * 焼かれた1コマ目の放送時刻 (秒)。**字幕を合わせるのに要る** (上の説明)。
+     *
+     * 途中から入ってきた人にも渡す — これが無いと字幕を置く場所が決まらない
+     */
+    private origin: number | null = null;
     private stopped = false;
 
     constructor(
@@ -212,6 +242,7 @@ class Session {
 
     add(viewer: Viewer): void {
         this.viewers.add(viewer);
+        if (this.origin !== null) this.tellOne(viewer, { type: 'origin', at: this.origin });
         if (this.init !== null) this.hand(viewer, CHANNEL.videoInit, this.init);
     }
 
@@ -303,21 +334,38 @@ class Session {
     }
 
     /**
-     * ffmpeg の言い分を残す。**黙って死なせない。**
+     * ffmpeg の言い分から**時間軸の原点**を拾い、失敗だけ残す。
      *
      * 焼けない理由 (音声が無い・解像度が変わった) はここにしか出ない。
-     * 捨てていると「映像が出ない」としか分からなくなる
+     * 捨てていると「映像が出ない」としか分からなくなる。
+     *
+     * **原点は1行目だけ。** `showinfo` はコマごとに喋るので、拾ったら以降は見ない
+     * (`-loglevel` を下げられないぶん、残すのは失敗の行だけにする)
      */
     private async watch(proc: ReturnType<typeof Bun.spawn>): Promise<void> {
-        for await (const chunk of chunks(proc.stderr as ReadableStream<Uint8Array>)) {
-            const text = new TextDecoder().decode(chunk).trim();
-            if (text !== '') console.warn(`[live] ${this.channelType}:${this.channel} ffmpeg: ${text}`);
+        for await (const line of lines(proc.stderr as ReadableStream<Uint8Array>)) {
+            if (this.origin === null) {
+                const info = readInfo(line);
+                if (info !== null) {
+                    this.origin = info.at;
+                    this.tell({ type: 'origin', at: info.at });
+                    continue;
+                }
+            } else if (SHOWINFO.test(line)) {
+                continue;
+            }
+            if (TROUBLE.test(line)) {
+                console.warn(`[live] ${this.channelType}:${this.channel} ffmpeg: ${line.trim()}`);
+            }
         }
     }
 
     tell(notice: Notice): void {
-        const payload = new TextEncoder().encode(JSON.stringify(notice));
-        for (const viewer of this.viewers) viewer.connection.send(CHANNEL.control, 0n, payload);
+        for (const viewer of this.viewers) this.tellOne(viewer, notice);
+    }
+
+    private tellOne(viewer: Viewer, notice: Notice): void {
+        viewer.connection.send(CHANNEL.control, 0n, new TextEncoder().encode(JSON.stringify(notice)));
     }
 
     stop(): void {

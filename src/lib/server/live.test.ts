@@ -58,8 +58,9 @@ describe('ライブの焼き方', () => {
     test('インタレを解く。国内アニメだけコマ数を倍にしない', () => {
         const live = encodeArgs(1024, true, stereo);
         const anime = encodeArgs(1024, false, stereo);
-        expect(live[live.indexOf('-vf') + 1]).toBe('bwdif');
-        expect(anime[anime.indexOf('-vf') + 1]).toBe('bwdif=mode=send_frame');
+        // 後ろに付いている showinfo は原点を拾うためのもの (下のテスト)
+        expect(live[live.indexOf('-vf') + 1]).toStartWith('bwdif,');
+        expect(anime[anime.indexOf('-vf') + 1]).toStartWith('bwdif=mode=send_frame,');
     });
 
     /*
@@ -131,8 +132,36 @@ describe('ライブの焼き方', () => {
         expect(bytes).toBeLessThanOrEqual(800_000);
     });
 
-    /** 第2段階で字幕を映像と同じ物差しに並べるのに要る */
+    /** 字幕を映像と同じ物差しに並べるのに要る */
     test('元TSの時刻を保つ', () => {
         expect(plain()).toContain('-copyts');
+    });
+
+    /*
+     * **時間軸の原点が要る。**
+     *
+     * mp4 は必ず 0 から始まる (`-copyts` が効くのは ffmpeg の中までで、多重化器が
+     * 最初のパケットを 0 に詰め直す。`-avoid_negative_ts disabled` も `-muxdelay 0`
+     * も効かないことを実機で確かめた)。一方**字幕は放送の時刻で来る**ので、
+     * そのまま比べると2万秒ずれる — 実機で字幕が1枚も出ず、ここで詰まった。
+     *
+     * `showinfo` を挟んで、焼かれる1コマ目の放送時刻を拾う。**入口の見出しに出る
+     * `start:` では足りない** (実測で 0.46 秒ずれた)。
+     */
+    test('焼かれた1コマ目の時刻を拾えるようにする', () => {
+        const filter = plain()[plain().indexOf('-vf') + 1];
+        expect(filter).toContain('showinfo');
+        // インタレ解除より後に置く。前だと解く前のコマ数で喋る
+        expect(filter.indexOf('showinfo')).toBeGreaterThan(filter.indexOf('bwdif'));
+    });
+
+    /*
+     * **`-loglevel` を下げない。** `showinfo` は info で喋るので、`error` に絞ると
+     * 原点が1行も来ない。字幕側でも同じことを踏んだ (`captions.ts`)
+     */
+    test('showinfo が黙る高さまで記録を絞らない', () => {
+        const args = plain();
+        const at = args.indexOf('-loglevel');
+        if (at >= 0) expect(['info', 'verbose', 'debug']).toContain(args[at + 1]);
     });
 });

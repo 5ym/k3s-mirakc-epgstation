@@ -141,6 +141,17 @@ export function livePlayer() {
     /** いま重ねている1枚。同じものを描き直さない */
     let shown: Cue | null = null;
     /**
+     * 時間軸の原点 (放送の時刻、秒)。**字幕を映像に合わせるのに要る。**
+     *
+     * mp4 は必ず 0 から始まるので、`currentTime` は「焼き始めてから何秒か」で
+     * しかない。字幕は放送の時刻で来るので、引いて同じ物差しに乗せる。
+     * サーバが焼かれた1コマ目の時刻を送ってくる (`Notice` の `origin`)。
+     *
+     * **分かるまでは字幕を出さない。** 置く場所が決まらないので、出すと
+     * 合っていない時刻に出ることになる
+     */
+    let origin: number | null = null;
+    /**
      * 選局の代。**絵にし終わる頃には局が変わっていることがある。**
      *
      * PNG を `ImageBitmap` にするのは非同期なので、その間に選び直されると
@@ -230,7 +241,8 @@ export function livePlayer() {
      */
     function paint(at: number): boolean {
         if (overlay === null) return false;
-        const next = captions ? currentCue(cues, at) : null;
+        // 原点が分かるまでは置き場所が決まらない。出すと合っていない時刻に出る
+        const next = captions && origin !== null ? currentCue(cues, at + origin) : null;
         if (next === shown) return false;
         shown = next;
 
@@ -252,7 +264,8 @@ export function livePlayer() {
 
     /** 待たせているぶんを片付ける。**いま出している1枚は残す** (出しっぱなしのため) */
     function sweep(at: number): void {
-        const kept = trimCues(cues, at);
+        if (origin === null) return;
+        const kept = trimCues(cues, at + origin);
         if (kept.length === cues.length) return;
         for (const cue of cues) {
             if (kept.includes(cue) || cue === shown) continue;
@@ -492,6 +505,12 @@ export function livePlayer() {
         // 局や音声を選び直したら、追っかけていた場所はもう無い
         chasing = false;
         speed = 1;
+        /*
+         * **器を作り直すと原点も変わる。** 音声を選び直しただけでも ffmpeg は
+         * 起こし直しになるので、新しい `origin` が来るまで字幕は出さない
+         * (古いままだと、合っていない時刻に出る)
+         */
+        origin = null;
         oldest = 0;
         newest = 0;
         position = 0;
@@ -633,6 +652,9 @@ export function livePlayer() {
                 const notice = JSON.parse(new TextDecoder().decode(body)) as Notice;
                 if (notice.type === 'error') {
                     fail(notice.message);
+                } else if (notice.type === 'origin') {
+                    // これが来るまで字幕は出せない (置く場所が決まらない)
+                    origin = notice.at;
                 } else if (notice.type === 'tuned') {
                     /*
                      * **選べる音声はここで初めて分かる。** どれが選べるかは

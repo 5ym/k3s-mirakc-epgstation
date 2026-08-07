@@ -71,7 +71,7 @@ const MEAN = /mean:\[([\d\s]+)\]/;
 const SIGNATURE = [0x89, 0x50, 0x4e, 0x47];
 
 /** 記録に残す価値のある行。**それ以外は入り口の説明なので捨てる** */
-const TROUBLE = /error|Error|failed|Failed|Cannot|Unable|No such|Invalid data/;
+export const TROUBLE = /error|Error|failed|Failed|Cannot|Unable|No such|Invalid data/;
 
 /**
  * 字幕を絵で取り出す ffmpeg の引数。
