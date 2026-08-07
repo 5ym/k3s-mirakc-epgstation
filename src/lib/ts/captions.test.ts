@@ -1,7 +1,39 @@
 import { describe, expect, test } from 'bun:test';
-import { type Cue, currentCue, insertCue, KEEP_CUES, trimCues } from './captions';
+import { type Cue, captionAt, currentCue, insertCue, KEEP_CUES, trimCues } from './captions';
 
 const cue = (at: number): Cue => ({ at, bitmap: null });
+
+/**
+ * **合わせる先は「いま映っている絵」ではなく「いちばん新しく届いている映像」。**
+ *
+ * 再生位置に置くと、貯めている量 (実機で 159〜487ms) がまるごとずれに乗る。
+ * 「たまにぴったり、たまに何百ミリ秒かずれる」という出方をしていたのはこれ。
+ */
+describe('captionAt', () => {
+    test('いちばん新しい映像から、焼き方ぶんだけ先に置く', () => {
+        expect(captionAt(12.5, 12.0, 0.5)).toBeCloseTo(13.0);
+    });
+
+    /** 貯めている量が変わっても、置く先は動かない */
+    test('貯めている量に左右されない', () => {
+        expect(captionAt(12.5, 12.4, 0.5)).toBeCloseTo(captionAt(12.5, 12.0, 0.5));
+    });
+
+    /** まだ1つも届いていないうちは、再生位置しか手がかりが無い */
+    test('映像がまだ無ければ再生位置から数える', () => {
+        expect(captionAt(null, 3.0, 0.5)).toBeCloseTo(3.5);
+    });
+
+    /** 跳んだ直後など。追い越されていたら再生位置を採る (過去に置かない) */
+    test('再生位置のほうが先なら再生位置を採る', () => {
+        expect(captionAt(5.0, 9.0, 0.5)).toBeCloseTo(9.5);
+    });
+
+    /** 待たせる量が長いほど後ろに置かれる (焼き方ごとの値はサーバが決める) */
+    test('待たせる量が長いほど後ろに置く', () => {
+        expect(captionAt(10, 10, 1.4)).toBeGreaterThan(captionAt(10, 10, 0.5));
+    });
+});
 
 /**
  * **字幕は映像より早く届く。** 映像はエンコードを通るぶん遅れるが、字幕は

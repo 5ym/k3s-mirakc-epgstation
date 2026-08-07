@@ -338,6 +338,43 @@ export function codecsFor(codec: LiveCodec): string {
         : 'video/mp4; codecs="avc1.640029,mp4a.40.2"';
 }
 
+/**
+ * **字幕を出すまで待たせる量 (秒)。焼き方で決まるので、ここで決めて画面へ渡す。**
+ *
+ * 字幕は映像より先に出てくる。理由は2つあって、どちらも実機で測った。
+ *
+ * **1. 電波の中で、字幕が映像より先に来ている。** 字幕は「いつ出すか」を持って
+ * 流れてくるので、受け側が描く手間のぶん前もって送られる。同じ瞬間に届いて
+ * いる映像の PTS と比べた実測 (ffmpeg を通さず TS を直に読んだ値):
+ *
+ *     NHK総合 284ms   TBS 309ms   テレ朝 311ms   日テレ 327ms
+ *
+ * **2. 映像は焼くのに時間がかかる。字幕はかからない。** 電波が届いてから mp4 の
+ * 塊が出るまで (放送の時刻で突き合わせた実測):
+ *
+ *                         復号     焼いて包む
+ *     H.264 30コマ        117ms  +    78ms =  219ms
+ *     H.264 60コマ        138ms  +    97ms =  237ms
+ *     AV1   30コマ        113ms  +  1306ms = 1448ms
+ *     AV1   60コマ        165ms  +   984ms = 1149ms
+ *
+ * 足すと「同じ放送時刻の映像より字幕が先に出る量」になる。**両方の出口を
+ * 放送の時刻で直に突き合わせた値とも合う**:
+ *
+ *     H.264 30コマ -485ms   H.264 60コマ -497ms
+ *     AV1   30コマ -1687ms  AV1   60コマ -1398ms
+ *
+ * **AV1 が1秒以上重いのは SVT-AV1 が溜め込むため。** `lookahead=0` は指定済みで、
+ * 低遅延指定 (`pred-struct=1`) は実機で追いつかなくなった (出口が 6秒 → 22秒 と
+ * 離れていく)。コマ数で変わるのは、溜める量が枚数で決まっているから。
+ *
+ * H.264 はコマ数でほとんど動かないので1つにまとめる。
+ */
+export function captionLead(codec: LiveCodec, smooth: boolean): number {
+    if (codec !== 'av1') return 0.5;
+    return smooth ? 1.4 : 1.7;
+}
+
 interface Viewer {
     connection: Connection;
     /** init を渡したか。渡す前に中身を送っても MSE は捨てる */
@@ -793,6 +830,7 @@ export function attend(connection: Connection): void {
             channel,
             codecs: codecsFor(codec),
             codec,
+            lead: captionLead(codec, now.smooth),
             audio: now.audio.id,
             audios: now.audios,
         };

@@ -17,7 +17,7 @@ import {
     SOCKET_PATH,
     type Tuned,
 } from '$lib/live';
-import { type Cue, currentCue, insertCue, trimCues } from '$lib/ts/captions';
+import { type Cue, captionAt, currentCue, insertCue, trimCues } from '$lib/ts/captions';
 import { FLOOR, nextTarget, pacing } from '$lib/ts/pacing';
 
 export type LiveState = 'idle' | 'connecting' | 'playing' | 'error';
@@ -120,6 +120,13 @@ export function livePlayer() {
     let audio = $state('');
     /** いま焼いてもらっている形。**サーバが返してきたものを持つ** */
     let codec = $state<LiveCodec>('h264');
+    /**
+     * 字幕を出すまで待たせる量 (秒)。**サーバが焼き方から決めて寄越す。**
+     *
+     * 焼き方とコマ数で変わる (`server/live.ts` の `captionLead`)。
+     * 届く前の既定は H.264 のぶん
+     */
+    let lead = 0.5;
     /**
      * 断り書き。**失敗ではないが、頼まれたとおりにできなかったとき。**
      *
@@ -256,6 +263,16 @@ export function livePlayer() {
      * **絵は画面まるごとの大きさで来る** (1920x1080)。canvas を映像と同じ枠に
      * 敷いて、そこへ引き伸ばして描くので、位置合わせはブラウザ任せでよい
      */
+    /**
+     * いちばん新しく届いている映像の時刻。**まだ何も無ければ null。**
+     *
+     * 字幕を置く先に使う ([ts/captions.ts](./ts/captions.ts) の `captionAt`)
+     */
+    function edge(): number | null {
+        if (buffer === null || buffer.buffered.length === 0) return null;
+        return buffer.buffered.end(buffer.buffered.length - 1);
+    }
+
     function paint(at: number): boolean {
         if (overlay === null) return false;
         // 原点が分かるまでは置き場所が決まらない。出すと合っていない時刻に出る
@@ -328,8 +345,14 @@ export function livePlayer() {
         if (tenth(end) !== newest) newest = tenth(end);
         if (tenth(video.currentTime) !== position) position = tenth(video.currentTime);
 
-        // 字幕は再生位置に合わせて出す。変わったときだけ、待たせているぶんも片付ける
-        if (paint(video.currentTime)) sweep(video.currentTime);
+        /*
+         * 字幕は再生位置に合わせて出す。**片付けは毎回する** — 待たせている
+         * ぶんは先の時刻に積まれるので、止めて見ている間は出す番が来ない。
+         * 変わったときだけ片付けていた頃は、そのぶんが際限なく溜まった
+         * (1枚 1920x1080 なので、止めっぱなしだと効いてくる)
+         */
+        paint(video.currentTime);
+        sweep(video.currentTime);
 
         trim(end);
         settle();
@@ -748,6 +771,7 @@ export function livePlayer() {
                     audios = notice.audios;
                     audio = notice.audio;
                     codec = notice.codec;
+                    lead = notice.lead;
                     start(video, notice.codecs, notice.codec);
                 }
                 return;
@@ -786,19 +810,24 @@ export function livePlayer() {
             if (kind === CHANNEL.subtitle || kind === CHANNEL.subtitleClear) {
                 if (element === null) return;
                 /*
-                 * **届いた時点の再生位置に置く。**
+                 * **いちばん新しく届いている映像に合わせて、決まった量だけ待たせる**
+                 * ([ts/captions.ts](./ts/captions.ts) の `LEAD`)。
                  *
-                 * 字幕と映像は別の ffmpeg だが、同じ電波を同じ速さで読んでいるので
-                 * **出てくる時刻はほぼ揃う** (1本の中に両方入れて測ると ±0.1秒)。
-                 * だから「届いた = いま映っている絵のもの」で足りる。
+                 * 字幕は映像より先に出てくる — 電波の中で先に来ているうえ
+                 * (実機で 0.3秒)、映像はこちらで焼くのに時間がかかるため
+                 * (H.264 で 0.22秒、AV1 で 1.45秒)。届いた端から出すと、
+                 * その合計ぶん口が動く前に台詞が出る。
                  *
-                 * 絶対の時刻で合わせる道は2回外した。mp4 の 0 は多重化器の都合で
-                 * 決まる (音声のほうが先に溜まっているとそちらに合う) し、
-                 * 焼いている絵の時刻を送る道も、フィルタが符号器より先を走るぶん
-                 * ずれた (実機で 2.4秒 と 5秒)。**どちらもこちらの都合で動く量**で、
-                 * 頼る先として間違っていた
+                 * **合わせる先を再生位置にしない。** そこに置くと、貯めている量
+                 * (実機で 159〜487ms) がまるごとずれに乗ってしまう。いちばん
+                 * 新しい映像なら貯めている量に左右されない。
+                 *
+                 * 絶対の時刻で合わせる道は2回外している。mp4 の 0 は多重化器の
+                 * 都合で決まり (`-copyts` を付けても muxer が 0 へ寄せ直すのを
+                 * 実機で確かめた)、焼いている絵の時刻を送る道も、フィルタが
+                 * 符号器より先を走るぶんずれた (実機で 2.4秒 と 5秒)
                  */
-                const at = element.currentTime;
+                const at = captionAt(edge(), element.currentTime, lead);
 
                 if (kind === CHANNEL.subtitleClear) {
                     cues = insertCue(cues, { at, bitmap: null });

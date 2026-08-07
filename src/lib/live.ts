@@ -29,7 +29,12 @@ export type LiveCodec = 'h264' | 'av1';
 /** 選べる焼き方。画面の切り替えに並べる順そのまま */
 export const LIVE_CODECS: { id: LiveCodec; label: string; note: string }[] = [
     { id: 'h264', label: 'H.264', note: 'どの端末でも出る' },
-    { id: 'av1', label: 'AV1', note: '軽いが、出ない端末もある' },
+    /*
+     * **遅れることも書く。** SVT-AV1 は溜め込むので、電波が届いてから塊が出る
+     * までが H.264 の 0.22秒 に対し 1.1〜1.4秒 かかる (`server/live.ts` の
+     * `captionLead` に実測)。量は減るが、放送の今からは1秒ぶん離れる
+     */
+    { id: 'av1', label: 'AV1', note: '軽いが、1秒遅れる。出ない端末もある' },
 ];
 
 /**
@@ -88,6 +93,15 @@ export type Notice =
           codecs: string;
           /** いま焼いている形。画面の切り替えがどれを指すか */
           codec: LiveCodec;
+          /**
+           * 字幕を出すまで待たせる量 (秒)。**焼き方で決まるのでサーバが寄越す。**
+           *
+           * 字幕は映像より先に出てくる (電波の中で先に来ているうえ、映像は
+           * 焼くのに時間がかかる)。どれだけ先かは焼き方とコマ数で変わり、
+           * コマ数を決めているのはサーバなので、ここで決めて渡す
+           * (`server/live.ts` の `captionLead`)
+           */
+          lead: number;
           /** いま焼いている音声 (`AudioTrack.id`) */
           audio: string;
           /** 選べる音声。1つしか無ければ画面は切り替えを出さない */

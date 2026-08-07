@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { type AudioSide, audioTracks } from '$lib/arib';
-import { codecsFor, encodeArgs } from './live';
+import { captionLead, codecsFor, encodeArgs } from './live';
 
 /** 1本目の音声をそのまま。番組表が何も言っていないときの既定 */
 const stereo = audioTracks([])[0];
@@ -334,5 +334,26 @@ describe('コマ数の上限', () => {
         for (const codec of ['h264', 'av1'] as const) {
             expect(encodeArgs(1024, true, stereo, codec)).toContain('-fpsmax');
         }
+    });
+});
+
+/**
+ * **字幕を待たせる量。** 字幕は映像より先に出てくるので、そのぶん待たせる
+ * (`captionLead` に実測の内訳)。
+ */
+describe('字幕を待たせる量', () => {
+    /** 電波の中の先回り 0.3秒 + H.264 の焼き 0.22秒。実測の -485/-497ms と合う */
+    test('H.264 はコマ数で変わらない', () => {
+        expect(captionLead('h264', true)).toBeCloseTo(0.5);
+        expect(captionLead('h264', false)).toBeCloseTo(0.5);
+    });
+
+    /**
+     * **AV1 は1秒以上先に出る。** SVT-AV1 が溜め込むぶん映像が遅れるため。
+     * 溜める量は枚数で決まるので、コマ数を倍にすると待ちは縮む
+     */
+    test('AV1 は長く、コマ数が多いほど短い', () => {
+        expect(captionLead('av1', false)).toBeGreaterThan(captionLead('h264', false));
+        expect(captionLead('av1', true)).toBeLessThan(captionLead('av1', false));
     });
 });
