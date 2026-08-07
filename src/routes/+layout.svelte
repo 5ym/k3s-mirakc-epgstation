@@ -91,8 +91,16 @@
     <title>{title}</title>
 </svelte:head>
 
+<!--
+    **土台の高さも `dvh` で採る。** `100vh` はスマホでは**アドレスバーが
+    引っ込んだときの高さ**なので、バーが出ている間は中身が無くても画面より
+    高くなり、いつも少し下へ動く。`dvh` は「いま見えている高さ」。
+
+    `lg:` のほうは `vh` のままでよい — 引っ込むバーがあるのは携帯だけで、
+    あちらは掴んで動かす枠の基準に使っている
+-->
 <div
-    class="flex min-h-screen flex-col bg-base-200 {fill ? 'lg:h-screen lg:min-h-0 lg:overflow-hidden' : ''}"
+    class="flex min-h-[100dvh] flex-col bg-base-200 {fill ? 'lg:h-screen lg:min-h-0 lg:overflow-hidden' : ''}"
     data-hydrated={hydrated ? 'true' : undefined}
 >
     <div class="navbar bg-base-100 sticky top-0 z-40 shadow-sm">

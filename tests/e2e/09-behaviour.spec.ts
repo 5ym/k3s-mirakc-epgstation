@@ -106,6 +106,47 @@ test.describe('操作したときの反応', () => {
         expect(size.inner).toBe(size.scroll);
     });
 
+    /*
+     * **番組の詳細は、狭い画面でも画面の中に収まる。**
+     *
+     * daisyUI の既定は外枠が `inset: 0`、中身が `max-height: 100vh` で、どちらも
+     * **アドレスバーが引っ込んだときの高さ**を指す。スマホでバーが出ていると
+     * 中身が画面より高くなり、外枠の `overflow: clip` に上下とも切り落とされて
+     * **題名も閉じるボタンも見えなくなる** (実機の Android Chrome)。
+     *
+     * 直したのは `dvh` (いま見えている高さ) と、上下の余白。ここで確かめられるのは
+     * **余白のほう** — Playwright には引っ込むバーが無いので `dvh` と `vh` は同じ値
+     * になる。余白が無いと、バーの出入りがそのまま切り落としになる。
+     *
+     * **画面は思い切り低くする。** 偽の放送は説明文が短いので、普通の高さだと
+     * 中身が収まってしまい、直す前でも通ってしまう (実際に一度そうなった)
+     */
+    test('番組の詳細は、狭くて低い画面でも枠に収まる', async ({ page }) => {
+        const view = { width: 390, height: 380 };
+        await page.setViewportSize(view);
+        await goto(page, '/guide?type=GR');
+
+        // 説明がいちばん長いものを開く。短いものだと収まって当たり前になる
+        const cells = await page.getByTestId('grid-program').evaluateAll((nodes) =>
+            nodes.map((node) => ({
+                id: node.getAttribute('data-program-id') ?? '',
+                length: (node.textContent ?? '').length,
+            })),
+        );
+        const target = cells.sort((a, b) => b.length - a.length)[0];
+        await cellOf(page, target.id).getByTestId('program-button').click();
+
+        const detail = page.getByTestId('program-detail');
+        await expect(detail).toBeVisible();
+        const box = (await detail.locator('> div').first().boundingBox())!;
+
+        expect(box.y, '上が画面に貼り付いている (バーが出ると切れる)').toBeGreaterThanOrEqual(8);
+        expect(box.y + box.height, '下が画面からはみ出している').toBeLessThanOrEqual(view.height - 8);
+        // 題名は箱の中にある。中身が長くても、頭から読める
+        const title = (await detail.locator('h3').boundingBox())!;
+        expect(title.y).toBeGreaterThanOrEqual(box.y);
+    });
+
     test('放送波を切り替えると横位置が先頭に戻る', async ({ page }) => {
         // 局の並びは放送波ごとに別物なので、前の位置から始まると左端の局が隠れる
         await page.setViewportSize({ width: 320, height: 700 });

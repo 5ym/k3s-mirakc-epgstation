@@ -81,8 +81,21 @@
                 data-testid="detail-link">{part.text}</a
             >{:else}{part.text}{/if}{/each}{/snippet}
 
-<div class="modal modal-open" role="dialog" data-testid="program-detail">
-    <div class="modal-box max-w-2xl">
+<!--
+    **高さは `dvh` で採る。**
+
+    daisyUI の既定は、外枠が `position: fixed; inset: 0`、中身が `max-height: 100vh`。
+    どちらも**アドレスバーが引っ込んだときの高さ**を指すので、スマホでバーが
+    出ていると**中身が画面より高くなる**。外枠は `overflow: clip` なので、
+    はみ出したぶんは上下とも切り落とされ、**題名も閉じるボタンも見えなくなる**
+    (実機の Android Chrome)。
+
+    `dvh` は「いま見えている高さ」なので、バーの出入りにそのまま追従する。
+    上下に少し余白を置いて、中身はその中で巻き取らせる (`max-h-full` +
+    daisyUI の `overflow-y: auto`)。
+-->
+<div class="modal modal-open h-[100dvh] py-4" role="dialog" data-testid="program-detail">
+    <div class="modal-box max-h-full max-w-2xl">
         <h3 class="text-lg font-bold">{program.name}</h3>
         <p class="text-base-content/60 mt-1 text-sm">
             {program.service_name} ・ {dateTime(program.start_at)} 〜 {time(program.end_at)}
