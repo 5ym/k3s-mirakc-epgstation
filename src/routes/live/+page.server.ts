@@ -1,13 +1,12 @@
 import { queryAll } from '$lib/server/db';
-import { airing, CURRENT_SERVICES } from '$lib/server/epg';
+import { airing, CURRENT_SERVICES, SERVICE_ORDER, SERVICE_TYPE_ORDER } from '$lib/server/epg';
 import type { Service } from '$lib/types';
 
 /**
  * ライブ視聴で選べる局と、いま流れている番組。
  *
- * **番組表と同じ並びにする。** テレビと同じくリモコン番号順で、番号を持たない局
- * (BS/CS) は物理チャンネル順で後ろに続く。番組表で見つけた局を、ここでも同じ
- * 位置で探せるようにするため。
+ * **番組表と同じ並びにする** (`SERVICE_ORDER`)。番組表で見つけた局を、ここでも
+ * 同じ位置で探せるようにするため。
  *
  * 取り残しの局は出さない (`CURRENT_SERVICES` と `airing`)。出すと、選んでも
  * 映らない行が並ぶ — 終わったチャンネルの枠が SDT に残っていることがある。
@@ -19,7 +18,13 @@ export interface LiveChannel {
     type: string;
     /** 物理チャンネル。これで選局する */
     channel: string;
-    remoteControlKey: number | null;
+    /**
+     * テレビに出ている番号。**探すときの手掛かりはこれ。**
+     *
+     * 地上波はリモコン番号 (1〜12)。BS と CS は**サービスID がそのまま3桁番号**
+     * にあたる (BS朝日1=151、WOWOWプライム=191、時代劇専門ch=292)。
+     */
+    number: number | null;
     hasLogo: boolean;
     /** いま流れている番組。無いこともある (番組表がまだ薄い局) */
     now: { name: string; startAt: number; endAt: number } | null;
@@ -27,15 +32,10 @@ export interface LiveChannel {
 
 export function load() {
     const at = Date.now();
-    /*
-     * **地上波・BS・CS の順。** `ORDER BY type` にしていた頃は字の順に並んで
-     * BS が先頭に来ていた。テレビは地上波から始まるし、番組表の切り替えも
-     * その並びなので、ここだけ違うと探す場所がずれる。
-     */
+    // テレビと同じ並び (SERVICE_TYPE_ORDER / SERVICE_ORDER)。番組表とも揃えてある
     const services = queryAll<Service>(
         `SELECT * FROM services WHERE ${CURRENT_SERVICES}
-         ORDER BY CASE type WHEN 'GR' THEN 0 WHEN 'BS' THEN 1 ELSE 2 END,
-                  remote_control_key IS NULL, remote_control_key, channel, service_id`,
+         ORDER BY ${SERVICE_TYPE_ORDER}, ${SERVICE_ORDER}`,
     );
 
     /*
@@ -57,7 +57,8 @@ export function load() {
             name: service.name,
             type: service.type,
             channel: service.channel,
-            remoteControlKey: service.remote_control_key,
+            // 地上波はリモコン番号、BS/CS はサービスID がそのまま3桁番号
+            number: service.remote_control_key ?? (service.type === 'GR' ? null : service.service_id),
             hasLogo: service.has_logo === 1,
             now:
                 program === undefined

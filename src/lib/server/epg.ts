@@ -34,6 +34,21 @@ const DIGITAL_TV = 1;
 export const CURRENT_SERVICES = 'updated_at >= (SELECT MAX(updated_at) FROM services)';
 
 /**
+ * 局の並び。**テレビと同じ順にする。**
+ *
+ * リモコン番号を持つのは地上波だけ。**BS と CS はサービスID がそのまま
+ * テレビの3桁番号**にあたる (BS朝日1=151、BS-TBS=161、WOWOWプライム=191、
+ * 時代劇専門ch=292…)。物理チャンネル順に並べていた頃は、BS01_1 に乗っている
+ * BS-TBS (161) が BS01_3 の BS朝日 (151) より前に来て、テレビと食い違っていた。
+ *
+ * 地上波で同じリモコン番号の局が複数あるとき (NHK総合1と2) も、
+ * サービスID順で 1 → 2 になる。
+ */
+export const SERVICE_ORDER = 'remote_control_key IS NULL, remote_control_key, service_id';
+/** 種別ごとの順。地上波 → BS → CS。テレビの切り替えもこの順 */
+export const SERVICE_TYPE_ORDER = `CASE type WHEN 'GR' THEN 0 WHEN 'BS' THEN 1 ELSE 2 END`;
+
+/**
  * 番組表に出す局。**名前の付いた番組が1つも無い局は出さない。**
  *
  * 出したくないものが2種類ある。どちらも「枠はあるが放送していない」。

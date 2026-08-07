@@ -1,6 +1,6 @@
 import { fail } from '@sveltejs/kit';
 import { queryAll, queryOne } from '$lib/server/db';
-import { airing, CURRENT_SERVICES } from '$lib/server/epg';
+import { airing, CURRENT_SERVICES, SERVICE_ORDER } from '$lib/server/epg';
 import { playContext } from '$lib/server/play';
 import { cancel, reserve } from '$lib/server/reservations';
 import { RESERVATION_STATE } from '$lib/server/schema';
@@ -49,12 +49,11 @@ export async function load({ url, request }) {
     const start = broadcastDayStart(Number.isFinite(requested) && requested > 0 ? requested : Date.now());
     const end = start + WINDOW_HOURS * HOUR;
 
-    // テレビと同じ並びにする。リモコン番号を持つのは地上波だけなので、
-    // 持たない局は物理チャンネル順で後ろに続ける
+    // テレビと同じ並びにする (SERVICE_ORDER)。
     // 取り残しの局は出さない (CURRENT_SERVICES)。出すと番組表に空の列が並ぶ
     const services = queryAll<Service>(
         `SELECT * FROM services WHERE type = ? AND ${CURRENT_SERVICES}
-         ORDER BY remote_control_key IS NULL, remote_control_key, channel, service_id`,
+         ORDER BY ${SERVICE_ORDER}`,
         type,
     );
     const programs = queryAll<GridProgram>(

@@ -195,7 +195,8 @@
                     data-shown={controlsShown}
                 >
                     <button
-                        class="btn btn-circle btn-sm btn-ghost hover:bg-white/20"
+                        class="btn btn-circle btn-sm border-0 bg-black/45 text-white shadow-none
+                               hover:bg-black/70"
                         onclick={() => player.toggle()}
                         aria-label={player.paused ? '再生' : '一時停止'}
                         data-testid="live-play"
@@ -204,7 +205,8 @@
                     </button>
 
                     <button
-                        class="btn btn-circle btn-sm btn-ghost hover:bg-white/20"
+                        class="btn btn-circle btn-sm border-0 bg-black/45 text-white shadow-none
+                               hover:bg-black/70"
                         onclick={() => (player.silenced ? player.unmute() : player.mute())}
                         aria-label={player.silenced ? '音を出す' : '音を消す'}
                         data-testid="live-sound"
@@ -234,7 +236,9 @@
 
                     <!-- 放送の今に居るかどうか。離れていれば押して戻れる -->
                     <button
-                        class="btn btn-sm gap-1.5 {player.live ? 'btn-error' : 'btn-ghost hover:bg-white/20'}"
+                        class="btn btn-sm gap-1.5 border-0 shadow-none {player.live
+                            ? 'btn-error'
+                            : 'bg-black/45 text-white hover:bg-black/70'}"
                         onclick={() => player.goLive()}
                         data-testid="live-edge"
                     >
@@ -247,7 +251,8 @@
                     </button>
 
                     <button
-                        class="btn btn-circle btn-sm btn-ghost hover:bg-white/20"
+                        class="btn btn-circle btn-sm border-0 bg-black/45 text-white shadow-none
+                               hover:bg-black/70"
                         onclick={() => full()}
                         aria-label={fullscreened ? '全画面をやめる' : '全画面'}
                         data-testid="live-full"
@@ -367,6 +372,18 @@
                         data-current={current?.id === channel.id ? 'true' : 'false'}
                         data-channel="{channel.type}/{channel.channel}"
                     >
+                        <!--
+                            **テレビに出ている番号を添える。** 地上波はリモコン番号、
+                            BS/CS は3桁番号 (BS朝日1=151)。局名だけだと、テレビで
+                            覚えている番号から探せない
+                        -->
+                        <span
+                            class="text-base-content/50 w-7 shrink-0 text-right font-mono text-xs
+                                   tabular-nums"
+                            data-testid="live-number"
+                        >
+                            {channel.number ?? ''}
+                        </span>
                         {#if channel.hasLogo}
                             <img
                                 src="/api/services/{channel.id}/logo"
@@ -377,7 +394,7 @@
                             <span
                                 class="bg-base-300 flex size-8 shrink-0 items-center justify-center rounded text-xs"
                             >
-                                {channel.remoteControlKey ?? channel.type}
+                                {channel.type}
                             </span>
                         {/if}
                         <span class="min-w-0 flex-1">

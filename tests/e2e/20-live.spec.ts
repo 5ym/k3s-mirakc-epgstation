@@ -87,6 +87,28 @@ test.describe('ライブ視聴', () => {
     });
 
     /*
+     * **テレビに出ている番号を添える。** 地上波はリモコン番号、BS/CS は
+     * サービスID がそのまま3桁番号にあたる (BS朝日1=151)。局名だけだと、
+     * テレビで覚えている番号から探せない。
+     *
+     * 並び自体は SQL の話なので `epg.test.ts` で見ている
+     */
+    test('チャンネルにテレビと同じ番号が出る', async ({ page }) => {
+        await goto(page, '/live');
+        const first = page.getByTestId('live-channel').first();
+        await expect(first).toBeVisible();
+        // 地上波はリモコン番号
+        await expect(first.getByTestId('live-number')).toHaveText(/^\d+$/);
+
+        await page.getByTestId('live-type-BS').click();
+        await expect(page.getByTestId('live-channel').first()).toBeVisible();
+        // BS は3桁番号
+        await expect(page.getByTestId('live-channel').first().getByTestId('live-number')).toHaveText(
+            /^\d{3}$/,
+        );
+    });
+
+    /*
      * **押せると分かる形にする。** 平らに並べていた頃は、文字が並んでいるだけに
      * 見えて押せると気付けなかった。枠を持たせ、指の形を変える
      */

@@ -48,7 +48,7 @@ const server = Bun.serve({
 config.agentUrl = `http://127.0.0.1:${server.port}`;
 
 const { database } = await import('./db');
-const { airing, savePrograms, syncServicesOnly } = await import('./epg');
+const { airing, savePrograms, SERVICE_ORDER, SERVICE_TYPE_ORDER, syncServicesOnly } = await import('./epg');
 
 describe('syncServicesOnly', () => {
     test('番組表を待たずに局だけ取り込む', async () => {
@@ -274,5 +274,69 @@ describe('番組表に出す局', () => {
         const services = [service(1), service(2)];
 
         expect(airing(services, []).map((s) => s.id)).toEqual([1, 2]);
+    });
+});
+
+/**
+ * 局の並び。**テレビと同じ順にする。**
+ *
+ * リモコン番号を持つのは地上波だけで、BS と CS はサービスID がそのまま
+ * テレビの3桁番号にあたる。物理チャンネル順に並べていた頃は実機と食い違っていた。
+ */
+describe('SERVICE_ORDER', () => {
+    function put(
+        id: number,
+        serviceId: number,
+        type: string,
+        channel: string,
+        key: number | null,
+        name: string,
+    ) {
+        database()
+            .query(
+                `INSERT INTO services (id, service_id, network_id, name, type, service_type,
+                                       channel, remote_control_key, has_logo, updated_at)
+                 VALUES (?, ?, 4, ?, ?, 1, ?, ?, 0, 1)`,
+            )
+            .run(id, serviceId, name, type, channel, key);
+    }
+
+    const ordered = (sql: string) =>
+        (database().query(`SELECT name FROM services ORDER BY ${sql}`).all() as { name: string }[]).map(
+            (row) => row.name,
+        );
+
+    test('BS は物理チャンネルではなく3桁番号の順に並ぶ', () => {
+        database().query('DELETE FROM services').run();
+        // 実機の並び。BS-TBS (161) は BS朝日 (151) より前の中継に乗っている
+        put(400161, 161, 'BS', 'BS01_1', null, 'BS-TBS');
+        put(400151, 151, 'BS', 'BS01_3', null, 'BS朝日1');
+        put(400191, 191, 'BS', 'BS03_3', null, 'WOWOWプライム');
+
+        expect(ordered(SERVICE_ORDER)).toEqual(['BS朝日1', 'BS-TBS', 'WOWOWプライム']);
+        // 物理チャンネル順だと、テレビと食い違う
+        expect(ordered('channel, service_id')).toEqual(['BS-TBS', 'BS朝日1', 'WOWOWプライム']);
+    });
+
+    test('地上波はリモコン番号順。同じ番号ならサービスID順', () => {
+        database().query('DELETE FROM services').run();
+        put(3273601025, 1025, 'GR', 'T27', 1, 'NHK総合2');
+        put(3273601024, 1024, 'GR', 'T27', 1, 'NHK総合1');
+        put(3239123608, 23608, 'GR', 'T16', 9, 'TOKYO MX1');
+
+        expect(ordered(SERVICE_ORDER)).toEqual(['NHK総合1', 'NHK総合2', 'TOKYO MX1']);
+    });
+
+    test('地上波 → BS → CS の順。テレビの切り替えもこの順', () => {
+        database().query('DELETE FROM services').run();
+        put(400151, 151, 'BS', 'BS01_3', null, 'BS朝日1');
+        put(600292, 292, 'CS', 'CS04', null, '時代劇専門ch');
+        put(3239123608, 23608, 'GR', 'T16', 9, 'TOKYO MX1');
+
+        expect(ordered(`${SERVICE_TYPE_ORDER}, ${SERVICE_ORDER}`)).toEqual([
+            'TOKYO MX1',
+            'BS朝日1',
+            '時代劇専門ch',
+        ]);
     });
 });
