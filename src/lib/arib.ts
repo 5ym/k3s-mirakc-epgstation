@@ -253,6 +253,87 @@ export function audioLabel(audio: Audio): string {
     return langs.length === 0 ? type : `${type} (${langs.join('/')})`;
 }
 
+/**
+ * 番組表の `audio_type` が言う「二カ国語」。**左右に別の言語が乗っている**
+ * (ARIB STD-B32)。録画もライブも、見分け方はここ1つ
+ */
+export const DUAL_MONO = 2;
+
+/**
+ * どちらの音を出すか。
+ *
+ * `both` は入っているものをそのまま出す。デュアルモノで `both` を選ぶと
+ * 左右から別の言語が同時に鳴る — テレビの「主+副」と同じ状態
+ */
+export type AudioSide = 'main' | 'sub' | 'both';
+
+/** 選べる音声1つぶん */
+export interface AudioTrack {
+    /** 選ぶときの合言葉。`"0:main"` の形。**画面とサーバの間で渡す** */
+    id: string;
+    /** 何本目の音声か。ffmpeg の `-map 0:a:<これ>` に渡す */
+    stream: number;
+    side: AudioSide;
+    /** 「主音声 (日本語)」「音声2 ステレオ (英語)」 */
+    label: string;
+}
+
+/**
+ * 番組表の音声情報から、**選べるものを並べる。**
+ *
+ * 日本の放送で「多重音声」と呼ばれるものは2通りあり、見た目は同じでも中身が違う。
+ *
+ * - **デュアルモノ** … 音声は1本で、左に主音声・右に副音声が入っている
+ *   (二カ国語、解説放送)。分けるには左右のどちらかを両耳へ配り直す
+ * - **複数の音声** … 音声そのものが2本以上入っている。分けるにはどちらを
+ *   取り出すかを選ぶ
+ *
+ * どちらも「音声を選ぶ」1つの操作に見せたいので、**両方を平らに並べて**
+ * 1つの一覧にする。デュアルモノは1本から3つ (主・副・主+副) 出てくる。
+ *
+ * **番組表が何も言っていなければ1つだけ返す。** 音声が無いことはないので、
+ * 何も出せないより「そのまま出す」1つを置くほうが確か
+ */
+export function audioTracks(audios: Audio[]): AudioTrack[] {
+    // 音声が2本以上あるときだけ「音声1/音声2」を添える。1本のときは邪魔なだけ
+    const many = audios.length > 1;
+    const tracks: AudioTrack[] = [];
+
+    audios.forEach((audio, stream) => {
+        const head = many ? `音声${stream + 1} ` : '';
+        const langs = (audio.langs ?? []).map((lang) => LANGUAGE[lang] ?? lang);
+        const of = (index: number) => (langs[index] === undefined ? '' : ` (${langs[index]})`);
+
+        if (audio.componentType === DUAL_MONO) {
+            tracks.push(
+                { id: `${stream}:main`, stream, side: 'main', label: `${head}主音声${of(0)}` },
+                { id: `${stream}:sub`, stream, side: 'sub', label: `${head}副音声${of(1)}` },
+                { id: `${stream}:both`, stream, side: 'both', label: `${head}主+副` },
+            );
+        } else {
+            tracks.push({
+                id: `${stream}:both`,
+                stream,
+                side: 'both',
+                label: `${head}${audioLabel(audio)}`,
+            });
+        }
+    });
+
+    if (tracks.length === 0) return [{ id: '0:both', stream: 0, side: 'both', label: '音声' }];
+    return tracks;
+}
+
+/**
+ * 頼まれたものを選ぶ。**知らないものを頼まれたら先頭。**
+ *
+ * 番組が変われば音声の構成も変わる (二カ国語の映画が終わればステレオに戻る)。
+ * 前の番組の合言葉が残っていても、無いものは選べない
+ */
+export function pickTrack(tracks: AudioTrack[], wanted: string | undefined): AudioTrack {
+    return tracks.find((track) => track.id === wanted) ?? tracks[0];
+}
+
 const VIDEO_TYPE: Record<string, string> = {
     mpeg2: 'MPEG-2',
     'h.264': 'H.264',

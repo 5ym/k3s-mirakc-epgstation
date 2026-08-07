@@ -1,8 +1,19 @@
 import { describe, expect, test } from 'bun:test';
+import { type AudioSide, audioTracks } from '$lib/arib';
 import { encodeArgs } from './live';
 
+/** 1本目の音声をそのまま。番組表が何も言っていないときの既定 */
+const stereo = audioTracks([])[0];
+/** デュアルモノの中から選ぶ。0=主音声 1=副音声 2=主+副 */
+const dual = (side: AudioSide) => {
+    const tracks = audioTracks([{ componentType: 2, langs: ['jpn', 'eng'] }]);
+    const found = tracks.find((track) => track.side === side);
+    if (found === undefined) throw new Error(`デュアルモノに ${side} が無い`);
+    return found;
+};
+
 /** 実写・ステレオ・NHK総合1 (T27 に2局乗っている) */
-const plain = () => encodeArgs(1024, true, false);
+const plain = () => encodeArgs(1024, true, stereo);
 
 /**
  * **焼き方の指定は、間違えても絵は出る。** 出たうえで見づらいだけなので、
@@ -45,8 +56,8 @@ describe('ライブの焼き方', () => {
      * 渡すと動きのある場面が櫛状になる。国内アニメだけコマ数を倍にしない
      */
     test('インタレを解く。国内アニメだけコマ数を倍にしない', () => {
-        const live = encodeArgs(1024, true, false);
-        const anime = encodeArgs(1024, false, false);
+        const live = encodeArgs(1024, true, stereo);
+        const anime = encodeArgs(1024, false, stereo);
         expect(live[live.indexOf('-vf') + 1]).toBe('bwdif');
         expect(anime[anime.indexOf('-vf') + 1]).toBe('bwdif=mode=send_frame');
     });
@@ -57,29 +68,53 @@ describe('ライブの焼き方', () => {
      * **ワンセグ** (320x180 の H.264) が並んでいて、それを掴む目まである
      */
     test('選んだ局の中から映像と音声を採る', () => {
-        const args = encodeArgs(1032, true, false);
+        const args = encodeArgs(1032, true, stereo);
         expect(args).toContain('0:p:1032:v:0');
         expect(args).toContain('0:p:1032:a:0');
     });
 
     /** 局が分からないときは従来どおり。**絵が出ないより、先頭の局のほうがまし** */
     test('局が分からなければ最初に見つけた映像を採る', () => {
-        const args = encodeArgs(0, true, false);
+        const args = encodeArgs(0, true, stereo);
         expect(args).toContain('0:v:0');
         expect(args).toContain('0:a:0');
     });
 
     /*
      * **二カ国語は左右に別の言語。** そのままステレオにすると両方同時に鳴る。
-     * 録画は左右を2トラックに分けるが、こちらは器が1つなので主音声 (左) を採る
+     * 録画は左右を2トラックに分けるが、こちらは器が1つなので選ばれた側を両耳へ。
+     *
+     * 右 (`c1`) を左右に配るのが副音声。**左右を取り違えると、選んだのと逆の
+     * 言語が鳴る** — 絵は出るので、気付くのは音を聞いたときだけ
      */
-    test('二カ国語のときは主音声だけを両耳へ', () => {
-        const args = encodeArgs(1024, true, true);
-        expect(args[args.indexOf('-af') + 1]).toBe('pan=stereo|c0=c0|c1=c0');
+    test('二カ国語は選ばれた側だけを両耳へ', () => {
+        const main = encodeArgs(1024, true, dual('main'));
+        const sub = encodeArgs(1024, true, dual('sub'));
+        expect(main[main.indexOf('-af') + 1]).toBe('pan=stereo|c0=c0|c1=c0');
+        expect(sub[sub.indexOf('-af') + 1]).toBe('pan=stereo|c0=c1|c1=c1');
+    });
+
+    /** 「主+副」はテレビと同じで、左右から別の言語が同時に鳴る状態 */
+    test('主+副はそのまま出す', () => {
+        expect(encodeArgs(1024, true, dual('both'))).not.toContain('-af');
     });
 
     test('普通のステレオでは音をいじらない', () => {
         expect(plain()).not.toContain('-af');
+    });
+
+    /*
+     * **音声が2本以上入っている放送では、0 が選ばれるとは限らない。**
+     * 解説放送などは音声そのものが別に乗っているので、何本目かを名指しする
+     */
+    test('2本目の音声を選べる', () => {
+        const tracks = audioTracks([
+            { componentType: 3, langs: ['jpn'] },
+            { componentType: 3, langs: ['eng'] },
+        ]);
+        const args = encodeArgs(1032, true, tracks[1]);
+        expect(args).toContain('0:p:1032:a:1');
+        expect(args).not.toContain('0:p:1032:a:0');
     });
 
     /*

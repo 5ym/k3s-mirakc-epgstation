@@ -19,11 +19,12 @@
  * 最後に流した init を持っておいて、繋いできた人に真っ先に渡す。
  */
 
+import { type Audio, type AudioTrack, audioTracks, pickTrack } from '$lib/arib';
 import { CHANNEL, type Notice } from '$lib/live';
 import { Fmp4Splitter } from '$lib/ts/fmp4';
 import { config } from './config';
 import { queryOne } from './db';
-import { DUAL_MONO, deinterlace, smoothMotionFor } from './encoder';
+import { deinterlace, smoothMotionFor } from './encoder';
 import { chunks } from './stream';
 import { openChannelStream } from './tuner';
 import type { Connection } from './ws';
@@ -91,22 +92,36 @@ import type { Connection } from './ws';
  * 局が4つ (Eテレ1/2/3 と**ワンセグ**) 並んでいて、ワンセグは 320x180 の H.264 —
  * それを掴む目まである。`0:p:<局>:v:0` なら選んだ局の中から選ぶ。
  *
- * ## デュアルモノ
+ * ## 多重音声
  *
- * 二カ国語放送は左右に別の言語が乗っている (ARIB STD-B32)。そのままステレオに
- * すると両方同時に鳴る。**録画と同じやり方で見分ける** — 番組表の `audio_type`
- * を見て、左だけを両耳に配る (`encoder.ts` の `DUAL_MONO`)。録画は左右を
- * 2トラックに分けるが、こちらは器が1つなので主音声を採る。
+ * 「多重音声」と呼ばれるものは2通りある。**どちらも、焼くときに1本へ決める。**
+ *
+ * - **デュアルモノ** … 音声は1本で、左に主音声・右に副音声 (ARIB STD-B32)。
+ *   そのままステレオにすると両方同時に鳴るので、選ばれた側を両耳へ配り直す
+ *   (`pan`)。**録画と同じ見分け方** (`arib.ts` の `DUAL_MONO`)。録画は左右を
+ *   2トラックに分けるが、こちらは器が1つなので片方を採る
+ * - **複数の音声** … 音声そのものが2本以上入っている (解説放送など)。
+ *   `-map` で何本目かを名指しする
+ *
+ * 選べるものを組み立てるのは `arib.audioTracks`。**画面には平らな一覧に見せる** —
+ * 見ている人にとってはどちらも「音声を選ぶ」1つの操作でしかない。
  *
  * @param program **放送が名乗っている番号** (ARIB の service_id = TS の
  *   program_number)。`services.id` を渡してはいけない — あちらは
  *   `network_id * 100000 + service_id` の内部IDで、TS の中には出てこない。
  *   0以下なら最初に見つけた映像 (従来どおり)
  * @param smooth 60コマ/秒で出すか。国内アニメだけ false
- * @param dualMono 二カ国語放送か。左 (主音声) だけを両耳に配る
+ * @param audio どの音声を、どちら側で出すか
  */
-export function encodeArgs(program: number, smooth: boolean, dualMono: boolean): string[] {
+export function encodeArgs(program: number, smooth: boolean, audio: AudioTrack): string[] {
     const from = Number.isFinite(program) && program > 0 ? `0:p:${program}` : '0';
+    // デュアルモノは片側だけを両耳へ。そのままだと左右から別の言語が同時に鳴る
+    const pan =
+        audio.side === 'main'
+            ? 'pan=stereo|c0=c0|c1=c0'
+            : audio.side === 'sub'
+              ? 'pan=stereo|c0=c1|c1=c1'
+              : null;
     return [
         '-hide_banner',
         '-loglevel',
@@ -132,10 +147,10 @@ export function encodeArgs(program: number, smooth: boolean, dualMono: boolean):
         'zerolatency',
         '-g',
         '60',
+        // 何本目の音声か。複数入っている放送では 0 が主とは限らない
         '-map',
-        `${from}:a:0`,
-        // 二カ国語は左右に別の言語。主音声だけを両耳へ (上の説明)
-        ...(dualMono ? ['-af', 'pan=stereo|c0=c0|c1=c0'] : []),
+        `${from}:a:${audio.stream}`,
+        ...(pan === null ? [] : ['-af', pan]),
         '-c:a',
         'aac',
         '-b:a',
@@ -188,8 +203,8 @@ class Session {
         readonly program: number,
         /** 60コマ/秒で出すか。国内アニメだけ false */
         readonly smooth: boolean,
-        /** 二カ国語放送か。左 (主音声) だけを両耳に配る */
-        readonly dualMono: boolean,
+        /** どの音声を、どちら側で出すか */
+        readonly audio: AudioTrack,
     ) {}
 
     get empty(): boolean {
@@ -230,7 +245,7 @@ class Session {
                 config.priority.live,
             );
 
-            const proc = Bun.spawn([config.ffmpeg, ...encodeArgs(this.program, this.smooth, this.dualMono)], {
+            const proc = Bun.spawn([config.ffmpeg, ...encodeArgs(this.program, this.smooth, this.audio)], {
                 stdin: 'pipe',
                 stdout: 'pipe',
                 stderr: 'pipe',
@@ -311,21 +326,22 @@ class Session {
         this.stopped = true;
         this.aborter.abort();
         this.proc?.kill();
-        sessions.delete(key(this.channelType, this.channel, this.serviceId, this.smooth));
+        sessions.delete(key(this.channelType, this.channel, this.serviceId, this.smooth, this.audio));
     }
 }
 
 /**
- * 焼いているものの目印。**局とコマ数まで含める。**
+ * 焼いているものの目印。**局・コマ数・音声まで含める。**
  *
  * 1本の物理チャンネルに複数の局が乗っているので、チャンネルだけでは足りない —
- * tsreadex に局を選ばせている以上、出てくる絵が局ごとに違う。コマ数も同じで、
- * 国内アニメを見ている人と実写を見ている人では違う。混ぜると片方が意図しない
- * ものを見ることになる。チューナーはエージェント側で相乗りになるので、
- * 増えるのは tsreadex と ffmpeg だけ。
+ * 局を名指しで選んでいる以上、出てくる絵が局ごとに違う。コマ数も同じで、
+ * 国内アニメを見ている人と実写を見ている人では違う。**音声も同じ** —
+ * 二カ国語を主音声で見ている人と副音声で見ている人は別のものを焼いている。
+ * 混ぜると片方が意図しないものを見ることになる。チューナーはエージェント側で
+ * 相乗りになるので、増えるのは ffmpeg だけ。
  */
-const key = (type: string, channel: string, serviceId: number, smooth: boolean) =>
-    `${type}:${channel}:${serviceId}:${smooth ? 60 : 30}`;
+const key = (type: string, channel: string, serviceId: number, smooth: boolean, audio: AudioTrack) =>
+    `${type}:${channel}:${serviceId}:${smooth ? 60 : 30}:${audio.id}`;
 const sessions = new Map<string, Session>();
 
 /** 見に行く。既に同じものを焼いていれば相乗りする */
@@ -336,10 +352,10 @@ function watch(
     now: NowPlaying,
     viewer: Viewer,
 ): Session {
-    const id = key(channelType, channel, serviceId, now.smooth);
+    const id = key(channelType, channel, serviceId, now.smooth, now.audio);
     let session = sessions.get(id);
     if (session === undefined) {
-        session = new Session(channelType, channel, serviceId, now.program, now.smooth, now.dualMono);
+        session = new Session(channelType, channel, serviceId, now.program, now.smooth, now.audio);
         sessions.set(id, session);
         // 畳むのは見ている人が居なくなったとき。ここでは待たない
         void session.run();
@@ -371,15 +387,17 @@ export function attend(connection: Connection): void {
         const channelType = typeof message.channelType === 'string' ? message.channelType : '';
         const channel = typeof message.channel === 'string' ? message.channel : '';
         const serviceId = Number(message.serviceId);
+        const audio = typeof message.audio === 'string' ? message.audio : undefined;
         if (channelType === '' || channel === '') return;
 
-        const now = nowPlaying(serviceId);
+        const now = nowPlaying(serviceId, audio);
         if (
             current !== null &&
             current.channelType === channelType &&
             current.channel === channel &&
             current.serviceId === serviceId &&
-            current.smooth === now.smooth
+            current.smooth === now.smooth &&
+            current.audio.id === now.audio.id
         ) {
             return;
         }
@@ -397,7 +415,14 @@ export function attend(connection: Connection): void {
          * `tuned` も先に出す。器を作るのは画面側で、init はそれより先には使えない。
          */
         viewer.ready = false;
-        const notice: Notice = { type: 'tuned', channelType, channel, codecs: CODECS };
+        const notice: Notice = {
+            type: 'tuned',
+            channelType,
+            channel,
+            codecs: CODECS,
+            audio: now.audio.id,
+            audios: now.audios,
+        };
         connection.send(CHANNEL.control, 0n, new TextEncoder().encode(JSON.stringify(notice)));
         current = watch(channelType, channel, serviceId, now, viewer);
     };
@@ -413,7 +438,10 @@ export interface NowPlaying {
      */
     program: number;
     smooth: boolean;
-    dualMono: boolean;
+    /** 選べる音声。画面へそのまま送る */
+    audios: AudioTrack[];
+    /** そのうち焼くもの */
+    audio: AudioTrack;
 }
 
 /**
@@ -425,30 +453,61 @@ export interface NowPlaying {
  * - コマ数 … 国内アニメだけ倍にしない (`smoothMotionFor`)。**分からなければ
  *   実写として扱う** — 放送の大半は実写で、アニメを実写扱いにしても絵は
  *   変わらないが、逆は動きが落ちる
- * - 二カ国語 … `audio_type` が 2 ならデュアルモノ。**録画と同じ見分け方**
- *   (`encoder.ts` の `DUAL_MONO`)。分からなければ普通のステレオとして扱う
+ * - 音声 … 番組表の `audios` から、選べるものを組み立てる (`arib.audioTracks`)。
+ *   **古い行には `audios` が入っていない**ので、そのときは `audio_type` だけで
+ *   デュアルモノかどうかを見る。どちらも無ければ「そのまま出す」1つ
  *
  * @param serviceId 局の内部ID (`services.id`)。画面から届くのはこれ
+ * @param wanted 画面が頼んできた音声 (`AudioTrack.id`)。無いものなら先頭
  */
-function nowPlaying(serviceId: number): NowPlaying {
-    if (!Number.isFinite(serviceId)) return { program: 0, smooth: true, dualMono: false };
+function nowPlaying(serviceId: number, wanted: string | undefined): NowPlaying {
+    const decide = (program: number, genres: string | null, audios: Audio[]): NowPlaying => {
+        const tracks = audioTracks(audios);
+        return {
+            program,
+            smooth: smoothMotionFor(genres),
+            audios: tracks,
+            audio: pickTrack(tracks, wanted),
+        };
+    };
+
+    if (!Number.isFinite(serviceId)) return decide(0, null, []);
     const at = Date.now();
     const service = queryOne<{ service_id: number }>(
         `SELECT service_id FROM services WHERE id = ?`,
         serviceId,
     );
-    const program = queryOne<{ genre_detail: string | null; audio_type: number | null }>(
-        `SELECT genre_detail, audio_type FROM programs
+    const program = queryOne<{
+        genre_detail: string | null;
+        audio_type: number | null;
+        audios: string | null;
+    }>(
+        `SELECT genre_detail, audio_type, audios FROM programs
          WHERE service_id = ? AND start_at <= ? AND end_at > ?`,
         serviceId,
         at,
         at,
     );
-    return {
-        program: service?.service_id ?? 0,
-        smooth: smoothMotionFor(program?.genre_detail ?? null),
-        dualMono: program?.audio_type === DUAL_MONO,
-    };
+
+    return decide(service?.service_id ?? 0, program?.genre_detail ?? null, parseAudios(program));
+}
+
+/**
+ * 番組表が持っている音声の構成を読む。**壊れていても止まらない。**
+ *
+ * `audios` は放送から拾ったものを JSON で持っているだけなので、形が違うことは
+ * ありうる。読めなければ `audio_type` に落とし、それも無ければ何も無いことにする —
+ * どの道 `audioTracks` が「そのまま出す」1つを返す
+ */
+function parseAudios(row: { audio_type: number | null; audios: string | null } | undefined): Audio[] {
+    if (row === undefined) return [];
+    try {
+        const parsed: unknown = JSON.parse(row.audios ?? 'null');
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed as Audio[];
+    } catch {
+        // 読めなかった。下の `audio_type` で見る
+    }
+    return row.audio_type === null ? [] : [{ componentType: row.audio_type }];
 }
 
 /** テスト用。掴んだままのものを残さない */

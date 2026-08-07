@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { audioLabel, genreLabel, genreName, videoLabel } from './arib';
+import { audioLabel, audioTracks, genreLabel, genreName, pickTrack, videoLabel } from './arib';
 
 /**
  * ルールの条件に出す名前。
@@ -58,6 +58,89 @@ describe('audioLabel', () => {
 
     test('知らない種別は番号のまま残す', () => {
         expect(audioLabel({ componentType: 99, langs: ['xyz'] })).toBe('種別99 (xyz)');
+    });
+});
+
+/**
+ * ライブ視聴の音声切り替えが読む一覧。
+ *
+ * 「多重音声」と呼ばれるものは**中身の違う2通り**が同じ名前で呼ばれている。
+ * 見ている人にとってはどちらも「音声を選ぶ」1つの操作なので、平らに並べる。
+ */
+describe('audioTracks', () => {
+    /** 普通のステレオ。選ぶものが無いので1つだけ = 画面は切り替えを出さない */
+    test('1本のステレオは1つだけ', () => {
+        const tracks = audioTracks([{ componentType: 3, langs: ['jpn'] }]);
+        expect(tracks).toHaveLength(1);
+        expect(tracks[0]).toMatchObject({ stream: 0, side: 'both', label: 'ステレオ (日本語)' });
+    });
+
+    /*
+     * **デュアルモノは1本から3つ出る。** 音声は1本しか無く、左に主音声・右に
+     * 副音声が入っている。テレビの「音声切換」と同じ3択に見せる
+     */
+    test('デュアルモノは主・副・主+副の3つ', () => {
+        const tracks = audioTracks([{ componentType: 2, langs: ['jpn', 'eng'] }]);
+        expect(tracks.map((track) => track.label)).toEqual(['主音声 (日本語)', '副音声 (英語)', '主+副']);
+        // どれも同じ1本を指す。分けるのは左右の配り直し
+        expect(tracks.every((track) => track.stream === 0)).toBe(true);
+        expect(tracks.map((track) => track.side)).toEqual(['main', 'sub', 'both']);
+    });
+
+    /** 言語が1つしか載っていないことはある。**それでも主/副は選ばせる** */
+    test('言語が足りなくても主副は出す', () => {
+        const tracks = audioTracks([{ componentType: 2, langs: ['jpn'] }]);
+        expect(tracks.map((track) => track.label)).toEqual(['主音声 (日本語)', '副音声', '主+副']);
+    });
+
+    /** 音声そのものが2本以上。解説放送など。何本目かを添えないと見分けられない */
+    test('音声が2本あれば番号を添える', () => {
+        const tracks = audioTracks([
+            { componentType: 3, langs: ['jpn'] },
+            { componentType: 3, langs: ['eng'] },
+        ]);
+        expect(tracks.map((track) => track.label)).toEqual([
+            '音声1 ステレオ (日本語)',
+            '音声2 ステレオ (英語)',
+        ]);
+        expect(tracks.map((track) => track.stream)).toEqual([0, 1]);
+    });
+
+    /** 2本目がデュアルモノということもある。**どちらの数え方も同時に効く** */
+    test('2本目がデュアルモノでも展開する', () => {
+        const tracks = audioTracks([
+            { componentType: 3, langs: ['jpn'] },
+            { componentType: 2, langs: ['jpn', 'eng'] },
+        ]);
+        expect(tracks).toHaveLength(4);
+        expect(tracks.slice(1).every((track) => track.stream === 1)).toBe(true);
+        expect(tracks[1].label).toBe('音声2 主音声 (日本語)');
+    });
+
+    /*
+     * **番組表が何も言っていなくても1つ返す。** 音声が無い放送は無いので、
+     * 何も出せないより「そのまま出す」1つを置くほうが確か
+     */
+    test('何も分からなければそのまま出す1つ', () => {
+        expect(audioTracks([])).toEqual([{ id: '0:both', stream: 0, side: 'both', label: '音声' }]);
+    });
+});
+
+/**
+ * **番組が変われば音声の構成も変わる。** 二カ国語の映画が終わればステレオに
+ * 戻るので、覚えていた合言葉が選べなくなる。無いものを頼まれたら先頭に落とす —
+ * 落とさないと、番組が変わった瞬間に音が出なくなる
+ */
+describe('pickTrack', () => {
+    const tracks = audioTracks([{ componentType: 2, langs: ['jpn', 'eng'] }]);
+
+    test('頼まれたものを選ぶ', () => {
+        expect(pickTrack(tracks, '0:sub').side).toBe('sub');
+    });
+
+    test('無いものを頼まれたら先頭', () => {
+        expect(pickTrack(tracks, '1:sub').id).toBe('0:main');
+        expect(pickTrack(tracks, undefined).id).toBe('0:main');
     });
 });
 

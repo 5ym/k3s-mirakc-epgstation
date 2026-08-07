@@ -6,6 +6,7 @@
  * 同じ1本に字幕もデータ放送も相乗りする作りなので、種別で振り分ける。
  */
 
+import type { AudioTrack } from '$lib/arib';
 import { CHANNEL, type Command, type Notice, SOCKET_PATH } from '$lib/live';
 import { FLOOR, nextTarget, pacing } from '$lib/ts/pacing';
 
@@ -31,12 +32,21 @@ const SETTLE_EVERY = 5_000;
  * のとは別ものなので、混ぜると遅延が伸びたまま戻らない
  */
 const GRACE = 3_000;
+/**
+ * 前の絵を貼っておく上限 (ms)。**次が出なくても、いつかは剥がす。**
+ *
+ * 貼りっぱなしにすると、選局に失敗したときに「前のチャンネルが止まっている」
+ * 画面が残る。壊れているのに動いて見えるのがいちばん悪い
+ */
+const HOLD_MOST = 6_000;
 
 export interface Tuned {
     channelType: string;
     channel: string;
     /** どの局を選んだか。いま流れている番組からコマ数を決めるのに要る */
     serviceId: number;
+    /** どの音声を出すか (`AudioTrack.id`)。省くと主音声 */
+    audio?: string;
 }
 
 /** 前回見ていたチャンネル。**初手はここから開く** */
@@ -44,9 +54,19 @@ export function lastChannel(): Tuned | null {
     try {
         const saved: unknown = JSON.parse(localStorage.getItem(LAST) ?? 'null');
         if (typeof saved !== 'object' || saved === null) return null;
-        const { channelType, channel, serviceId } = saved as Record<string, unknown>;
+        const { channelType, channel, serviceId, audio } = saved as Record<string, unknown>;
         if (typeof channelType !== 'string' || typeof channel !== 'string') return null;
-        return { channelType, channel, serviceId: Number(serviceId) };
+        /*
+         * **音声も覚えておく。** 番組が変われば構成も変わる (二カ国語の映画が
+         * 終わればステレオに戻る) が、サーバは無いものを頼まれたら先頭に落とす
+         * (`arib.pickTrack`) ので、古い合言葉が残っていても困らない
+         */
+        return {
+            channelType,
+            channel,
+            serviceId: Number(serviceId),
+            audio: typeof audio === 'string' ? audio : undefined,
+        };
     } catch {
         return null;
     }
@@ -79,12 +99,22 @@ export function livePlayer() {
     let oldest = $state(0);
     let newest = $state(0);
     let position = $state(0);
+    /** 選べる音声。1つしか無ければ画面は切り替えを出さない */
+    let audios = $state<AudioTrack[]>([]);
+    /** いま鳴らしている音声 (`AudioTrack.id`) */
+    let audio = $state('');
+    /** 前の絵を貼っているか。**次の絵が出るまでの黒を埋める** */
+    let holding = $state(false);
 
     let socket: WebSocket | null = null;
     let source: MediaSource | null = null;
     let buffer: SourceBuffer | null = null;
     /** いま鳴らしている器。押して音を出すのに要る */
     let element: HTMLVideoElement | null = null;
+    /** 前の絵の写し先。画面から預かる */
+    let still: HTMLCanvasElement | null = null;
+    /** 貼りっぱなしを避けるための目覚まし */
+    let holdTimer: ReturnType<typeof setTimeout> | null = null;
     /** もう再生を始めたか。始めるまでは貯める */
     let running = false;
     /** 最後に詰まった時刻。無事が続いたかを見る */
@@ -106,6 +136,54 @@ export function livePlayer() {
      * 前のが終わる前に呼ぶと `InvalidStateError` で止まる
      */
     const pending: Uint8Array[] = [];
+
+    /**
+     * 前の絵を写して、次が出るまで貼っておく。**切り替えの間の黒を埋める。**
+     *
+     * 選局にかかる 1.6 秒は削れない — 電波の同期待ち (0.65秒) と、放送の MPEG-2 が
+     * GOP の頭を待つぶん (0.75秒) で、どちらもこちらの都合では動かない。
+     * **待ち時間そのものは変わらないが、黒い画面を見せずに済む。**
+     *
+     * 器を作り直すと `<video>` は何も映さなくなるので、その前に1枚だけ
+     * canvas へ写し取って上に重ねる。動画ではなく静止画なので、止まって見える —
+     * それは正しい。実際に止まっている
+     */
+    function freeze(): void {
+        if (element === null || still === null) return;
+        // まだ1枚も出ていない (初めて開いたとき)。写すものが無い
+        if (element.readyState < 2 || element.videoWidth === 0) return;
+        const ctx = still.getContext('2d');
+        if (ctx === null) return;
+        still.width = element.videoWidth;
+        still.height = element.videoHeight;
+        ctx.drawImage(element, 0, 0, still.width, still.height);
+        holding = true;
+        if (holdTimer !== null) clearTimeout(holdTimer);
+        holdTimer = setTimeout(thaw, HOLD_MOST);
+    }
+
+    /** 剥がす。**次の絵が実際に出てから** (`onFrame`) */
+    function thaw(): void {
+        if (holdTimer !== null) {
+            clearTimeout(holdTimer);
+            holdTimer = null;
+        }
+        if (holding) holding = false;
+    }
+
+    /**
+     * 次の絵が画面に出たら呼ぶ。
+     *
+     * `play()` が返っただけでは**まだ何も映っていない**ので、そこで剥がすと
+     * 一瞬黒くなる。`requestVideoFrameCallback` は「1枚映した」ところで来る。
+     * 持っていないブラウザでは `timeupdate` で代える (1枚ぶん遅いが実害は無い)
+     */
+    function onFrame(video: HTMLVideoElement, done: () => void): void {
+        const request = (video as HTMLVideoElement & { requestVideoFrameCallback?(cb: () => void): number })
+            .requestVideoFrameCallback;
+        if (typeof request === 'function') request.call(video, done);
+        else video.addEventListener('timeupdate', done, { once: true });
+    }
 
     function drain(): void {
         if (buffer === null || buffer.updating || pending.length === 0) return;
@@ -172,6 +250,8 @@ export function livePlayer() {
             running = true;
             state = 'playing';
             void play(video);
+            // 1枚映ってから前の絵を剥がす。ここで剥がすと一瞬黒くなる
+            onFrame(video, thaw);
         }
     }
 
@@ -279,9 +359,13 @@ export function livePlayer() {
         quiet = Date.now() + GRACE;
     }
 
-    function reset(): void {
-        socket?.close();
-        socket = null;
+    /**
+     * 再生の状態だけ初期に戻す。**繋ぎ直さない。**
+     *
+     * 音声を選び直したときはサーバが焼き直すので、器は作り直すが繋ぎ直す
+     * 必要は無い (`setAudio`)。器を作り直す `start` からも通る
+     */
+    function clear(): void {
         buffer = null;
         source = null;
         running = false;
@@ -294,12 +378,60 @@ export function livePlayer() {
         pending.length = 0;
     }
 
-    async function tune(video: HTMLVideoElement, target: Tuned): Promise<void> {
+    function reset(): void {
+        socket?.close();
+        socket = null;
+        clear();
+    }
+
+    /** 画面を離れる。**貼った絵も剥がす** — 戻ってきたときに残っていては困る */
+    function stop(): void {
+        reset();
+        thaw();
+    }
+
+    /** 出せなかったことにする。**貼った絵は剥がす** — 動いて見えるほうが悪い */
+    function fail(text: string): void {
+        state = 'error';
+        message = text;
+        thaw();
+    }
+
+    /**
+     * 音声を選び直す。**繋ぎ直さずに頼み直す。**
+     *
+     * サーバは音声ごとに別の ffmpeg を回す (`live.ts` の目印) ので、選び直すと
+     * 器から作り直しになる。チャンネルは変わらないのでチューナーは掴んだままで、
+     * かかるのは焼き始めのぶんだけ。**前の絵は貼っておく**ので、絵は止まるが
+     * 黒くはならない
+     */
+    function setAudio(id: string): void {
+        if (tuned === null || element === null || id === audio) return;
+        const next: Tuned = { ...tuned, audio: id };
+        // 繋がっていなければ普通に選局し直す (繋ぐところからやる)
+        if (socket === null || socket.readyState !== WebSocket.OPEN) {
+            void tune(element, next);
+            return;
+        }
+        freeze();
+        tuned = next;
+        audio = id;
+        state = 'connecting';
+        quiet = Date.now() + GRACE;
+        localStorage.setItem(LAST, JSON.stringify(next));
+        socket.send(JSON.stringify({ type: 'tune', ...next } satisfies Command));
+    }
+
+    async function tune(video: HTMLVideoElement, target: Tuned, canvas?: HTMLCanvasElement): Promise<void> {
+        element = video;
+        if (canvas !== undefined) still = canvas;
+        // 次の絵が出るまで前の絵を貼る。**閉じる前に写す** (閉じると何も映らなくなる)
+        freeze();
         reset();
         state = 'connecting';
         message = '';
         tuned = target;
-        element = video;
+        audio = target.audio ?? '';
         quiet = Date.now() + GRACE;
         localStorage.setItem(LAST, JSON.stringify(target));
 
@@ -313,8 +445,7 @@ export function livePlayer() {
             if (!res.ok) throw new Error(String(res.status));
             ticket = ((await res.json()) as { ticket: string }).ticket;
         } catch {
-            state = 'error';
-            message = '繋ぐ許可を取れませんでした';
+            fail('繋ぐ許可を取れませんでした');
             return;
         }
 
@@ -329,15 +460,13 @@ export function livePlayer() {
                 channelType: target.channelType,
                 channel: target.channel,
                 serviceId: target.serviceId,
+                audio: target.audio,
             };
             ws.send(JSON.stringify(command));
         };
 
         ws.onerror = () => {
-            if (state !== 'playing') {
-                state = 'error';
-                message = '繋がりませんでした';
-            }
+            if (state !== 'playing') fail('繋がりませんでした');
         };
 
         ws.onclose = () => {
@@ -352,9 +481,14 @@ export function livePlayer() {
             if (kind === CHANNEL.control) {
                 const notice = JSON.parse(new TextDecoder().decode(body)) as Notice;
                 if (notice.type === 'error') {
-                    state = 'error';
-                    message = notice.message;
+                    fail(notice.message);
                 } else if (notice.type === 'tuned') {
+                    /*
+                     * **選べる音声はここで初めて分かる。** どれが選べるかは
+                     * いま流れている番組次第なので、局の一覧からは決められない
+                     */
+                    audios = notice.audios;
+                    audio = notice.audio;
                     start(video, notice.codecs);
                 }
                 return;
@@ -384,13 +518,17 @@ export function livePlayer() {
     /** 器を用意する。`codecs` はサーバが焼き方から決めて送ってくる */
     function start(video: HTMLVideoElement, codecs: string): void {
         if (!('MediaSource' in globalThis) || !MediaSource.isTypeSupported(codecs)) {
-            state = 'error';
-            message = 'この端末では再生できない形式です';
+            fail('この端末では再生できない形式です');
             return;
         }
+        /*
+         * **前の器の名残を落とす。** 音声を選び直したときは繋ぎ直さないので
+         * (`setAudio`)、ここを通っても `reset` は挟まらない。古い SourceBuffer に
+         * 足しに行くと中身が混ざって止まる
+         */
+        clear();
         const media = new MediaSource();
         source = media;
-        running = false;
         video.src = URL.createObjectURL(media);
         media.addEventListener(
             'sourceopen',
@@ -474,12 +612,25 @@ export function livePlayer() {
         get position() {
             return position;
         },
+        /** 選べる音声。1つしか無ければ切り替えを出さない */
+        get audios() {
+            return audios;
+        },
+        /** いま鳴らしている音声 (`AudioTrack.id`) */
+        get audio() {
+            return audio;
+        },
+        /** 前の絵を貼っているか。**切り替えの間の黒を埋めている** */
+        get holding() {
+            return holding;
+        },
         seek,
         toggle,
         goLive,
         mute,
         tune,
         unmute,
-        stop: reset,
+        setAudio,
+        stop,
     };
 }

@@ -10,6 +10,8 @@
 
     const player = livePlayer();
     let video: HTMLVideoElement;
+    /** 切り替えの間、前の絵を貼っておく先 (`live-player` の `freeze`) */
+    let still: HTMLCanvasElement;
 
     /**
      * **前回見ていたチャンネルで開く。** 覚えていない (初めて開いた) ときは
@@ -25,11 +27,17 @@
                 : channels.find((c) => c.type === saved.channelType && c.channel === saved.channel);
         const target = found ?? channels[0];
         if (target !== undefined) {
-            void player.tune(video, {
-                channelType: target.type,
-                channel: target.channel,
-                serviceId: target.id,
-            });
+            void player.tune(
+                video,
+                {
+                    channelType: target.type,
+                    channel: target.channel,
+                    serviceId: target.id,
+                    // 音声の控えは、同じ局に戻ったときだけ活かす
+                    audio: found === undefined ? undefined : saved?.audio,
+                },
+                still,
+            );
         }
         return () => player.stop();
     });
@@ -53,11 +61,15 @@
     const listed = $derived(channels.filter((c) => c.type === shown));
 
     function select(channel: LiveChannel): void {
-        void player.tune(video, {
-            channelType: channel.type,
-            channel: channel.channel,
-            serviceId: channel.id,
-        });
+        void player.tune(
+            video,
+            {
+                channelType: channel.type,
+                channel: channel.channel,
+                serviceId: channel.id,
+            },
+            still,
+        );
     }
 
     /**
@@ -125,6 +137,7 @@
         'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z';
     const SOUND_OFF =
         'M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zM19 12c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z';
+    const AUDIO = 'M7 18h2V6H7v12zm4 4h2V2h-2v20zm-8-8h2v-4H3v4zm12 4h2V6h-2v12zm4-8v4h2v-4h-2z';
     const EXPAND = 'M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z';
     const SHRINK = 'M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z';
 </script>
@@ -173,6 +186,24 @@
             <video bind:this={video} class="h-full w-full bg-black" playsinline data-testid="live-video"
             ></video>
 
+            <!--
+                **切り替えの間、前の絵を貼っておく。** 器を作り直すと `<video>` は
+                何も映さなくなるので、そのままだと 1.6 秒ほど真っ黒になる。
+                待ち時間そのものは削れない (電波の同期待ちと GOP の頭待ち) が、
+                黒い画面を見せずに済む。
+
+                絵は止まって見えるが、それは正しい — 実際に止まっている
+            -->
+            <canvas
+                bind:this={still}
+                class="pointer-events-none absolute inset-0 h-full w-full object-contain
+                       transition-opacity duration-150
+                       {player.holding ? 'opacity-100' : 'opacity-0'}"
+                data-testid="live-still"
+                data-holding={player.holding}
+                aria-hidden="true"
+            ></canvas>
+
             {#if player.tuned !== null && player.state !== 'error'}
                 <!--
                     自前の操作列。**放送の今に居るときは右端に張り付く。**
@@ -213,6 +244,55 @@
                     >
                         {@render icon(player.silenced ? SOUND_OFF : SOUND_ON)}
                     </button>
+
+                    <!--
+                        **音声の選び直し。選べるものが2つ以上あるときだけ出す。**
+
+                        二カ国語 (1本の中に主/副が左右で入っている) と、音声が
+                        2本以上入っているものの両方がここに平らに並ぶ — 見ている
+                        人にとってはどちらも「音声を選ぶ」1つの操作でしかない。
+
+                        押すと焼き直しになるので絵が一瞬止まるが、チャンネルは
+                        変わらないので前の絵を貼ったまま差し替わる
+                    -->
+                    {#if player.audios.length > 1}
+                        <div class="dropdown dropdown-top">
+                            <button
+                                class="btn btn-sm gap-1.5 border-0 bg-black/45 text-white shadow-none
+                                       hover:bg-black/70"
+                                aria-label="音声を選ぶ"
+                                data-testid="live-audio"
+                            >
+                                {@render icon(AUDIO)}
+                                <span class="hidden max-w-28 truncate sm:inline">
+                                    {player.audios.find((a) => a.id === player.audio)?.label ?? '音声'}
+                                </span>
+                            </button>
+                            <ul
+                                class="dropdown-content menu bg-base-100 text-base-content rounded-box
+                                       z-10 mb-1 w-52 p-2 shadow-lg"
+                                data-testid="live-audio-menu"
+                            >
+                                {#each player.audios as track (track.id)}
+                                    <li>
+                                        <button
+                                            class={track.id === player.audio ? 'menu-active' : ''}
+                                            onclick={(event) => {
+                                                player.setAudio(track.id);
+                                                // 選んだら閉じる。開きっぱなしだと絵を覆う
+                                                event.currentTarget.blur();
+                                            }}
+                                            data-testid="live-audio-option"
+                                            data-audio={track.id}
+                                            aria-current={track.id === player.audio ? 'true' : undefined}
+                                        >
+                                            {track.label}
+                                        </button>
+                                    </li>
+                                {/each}
+                            </ul>
+                        </div>
+                    {/if}
 
                     <!--
                         戻れる範囲の中のどこに居るか。押すとその時刻へ移る。

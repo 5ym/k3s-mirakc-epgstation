@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { DUAL_MONO } from '$lib/arib';
 import { encodeSource } from '../source';
 import type { EncodeJob, EncodePhase, Recording, VideoCodec } from '../types';
 import {
@@ -144,11 +145,11 @@ function videoArgs(
     };
 }
 
-/**
- * 番組表の `audio_type` が言う「二カ国語」。左右に別の言語が乗っている
- * (ARIB STD-B32)。**録画もライブも、見分け方はここ1つ** (`live.ts` の `nowPlaying`)
+/*
+ * 「二カ国語」の見分け方は `$lib/arib` に1つだけ置いてある。**録画もライブも同じ** —
+ * ライブは選べる音声を組み立てるのに同じ判定を使う (`arib.audioTracks`)
  */
-export const DUAL_MONO = 2;
+export { DUAL_MONO };
 
 /**
  * 字幕に使うフォント。

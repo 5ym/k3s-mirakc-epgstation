@@ -10,6 +10,8 @@
  * そちらでは使わない。
  */
 
+import type { AudioTrack } from './arib';
+
 /** 多重化の種別。番号は stream.md §5.3 の表そのまま */
 export const CHANNEL = {
     /** 映像の init セグメント (ftyp + moov) */
@@ -30,9 +32,24 @@ export const CHANNEL = {
     control: 0x40,
 } as const;
 
-/** サーバ→ブラウザの知らせ。`control` に JSON で載る */
+/**
+ * サーバ→ブラウザの知らせ。`control` に JSON で載る。
+ *
+ * **選べる音声は、繋いだあとでないと分からない。** どれが選べるかは
+ * いま流れている番組次第 (二カ国語の映画が終わればステレオに戻る) なので、
+ * 画面が持っている局の一覧からは決められない。選局のたびに現物を送る
+ */
 export type Notice =
-    | { type: 'tuned'; channelType: string; channel: string; codecs: string }
+    | {
+          type: 'tuned';
+          channelType: string;
+          channel: string;
+          codecs: string;
+          /** いま焼いている音声 (`AudioTrack.id`) */
+          audio: string;
+          /** 選べる音声。1つしか無ければ画面は切り替えを出さない */
+          audios: AudioTrack[];
+      }
     | { type: 'error'; message: string };
 
 /**
@@ -41,8 +58,25 @@ export type Notice =
  * **局まで渡す。** 物理チャンネルだけでは、いま流れている番組が引けない
  * (1本の中に複数の局が乗っている)。番組が引けないと、インタレ解除で
  * コマ数を倍にするかどうかを決められない (国内アニメだけ倍にしない)。
+ *
+ * **音声もここで頼む。** 選び直しは焼き直しになる (下の説明) ので、
+ * 選局と同じ指示に乗せる
  */
-export type Command = { type: 'tune'; channelType: string; channel: string; serviceId: number };
+export type Command = {
+    type: 'tune';
+    channelType: string;
+    channel: string;
+    serviceId: number;
+    /**
+     * どの音声を出すか (`AudioTrack.id`)。省くと先頭 = 主音声。
+     *
+     * **選ぶのはサーバ側。** 音声を全部まとめて送って画面で切り替える手もあるが、
+     * MSE は1つの器に複数の音声を入れた fMP4 を、ブラウザによっては
+     * 切り替えられない (`audioTracks` の実装がまちまち)。焼くときに1本に
+     * 決めてしまえば、どのブラウザでも同じように鳴る
+     */
+    audio?: string;
+};
 
 /** WebSocket の宛先 */
 export const SOCKET_PATH = '/api/live/socket';

@@ -322,6 +322,57 @@ test.describe('ライブ視聴', () => {
     });
 
     /*
+     * **音声は番組表を見て組み立てる。**
+     *
+     * 選べるものは番組ごとに違う (二カ国語なら主/副/主+副、解説放送なら音声1/音声2)
+     * ので、いま流れている番組から起こす (`arib.audioTracks`)。偽の放送は普通の
+     * ステレオしか流していないので、**選ぶものは1つ**になるのが正しい。
+     *
+     * 左右の配り直し (`-af pan=...`) が出ていたら、ステレオをデュアルモノと
+     * 取り違えている — **絵は出るので、気付くのは音を聞いたときだけ**
+     */
+    test('普通のステレオでは音をいじらず、切り替えも出さない', async ({ page, stack }) => {
+        await goto(page, '/live');
+        await page.getByTestId('live-channel').first().click();
+        await expect(page.getByTestId('live-title')).toBeVisible();
+
+        await expect(() => {
+            expect(existsSync(stack.liveArgsFile)).toBe(true);
+        }).toPass({ timeout: 15_000 });
+        const args = readFileSync(stack.liveArgsFile, 'utf8').split('\n');
+
+        expect(args).not.toContain('-af');
+        // 1本目の音声をそのまま。何本目かを名指ししていること自体は要る
+        expect(args.some((a) => a.endsWith(':a:0'))).toBe(true);
+
+        // 選ぶものが1つしか無いのに切り替えを出すと、押しても何も起きない操作が並ぶ
+        await expect(page.getByTestId('live-audio')).toHaveCount(0);
+    });
+
+    /*
+     * **切り替えの間、前の絵を貼っておく場所を持っておく。**
+     *
+     * 選局にかかる 1.6 秒は削れない (電波の同期待ち 0.65秒 + 放送の MPEG-2 が
+     * GOP の頭を待つ 0.75秒)。待ちは変わらないが、その間を真っ黒にしないために
+     * 直前の1枚を canvas へ写して重ねる。
+     *
+     * 貼っていない間は**押す邪魔をしてはいけない** — 映像の上に敷くものなので、
+     * 透けているだけでは足りず、当たり判定も抜けている必要がある
+     */
+    test('切り替え中に貼る絵は、操作の邪魔をしない', async ({ page }) => {
+        await goto(page, '/live');
+        await page.getByTestId('live-channel').first().click();
+
+        const still = page.getByTestId('live-still');
+        await expect(still).toHaveAttribute('data-holding', 'false');
+        await expect(still).toHaveCSS('pointer-events', 'none');
+        // 映像と同じ場所に重なっていること。ずれていると絵が飛んで見える
+        const box = await still.boundingBox();
+        const video = await page.getByTestId('live-video').boundingBox();
+        expect(box).toEqual(video);
+    });
+
+    /*
      * **前回見ていたチャンネルで開く。** テレビを点けたときと同じ振る舞いで、
      * 毎回いちばん上の局から始まると、いつも選び直すことになる
      */
