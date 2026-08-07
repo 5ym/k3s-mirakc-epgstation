@@ -57,6 +57,10 @@ function describe(use: string): string {
     const scan = use.match(/^scan (\S+)$/);
     if (scan !== null) return `チャンネルスキャン (${scan[1]})`;
 
+    // 字幕は別の ffmpeg なので、同じ局で2つ並ぶ。どちらか分かるようにする
+    const live = use.match(/^live (\S+)(?: (字幕))?$/);
+    if (live !== null) return live[2] === undefined ? `ライブ視聴 (${live[1]})` : `ライブの字幕 (${live[1]})`;
+
     return use;
 }
 

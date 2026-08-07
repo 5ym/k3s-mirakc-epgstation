@@ -1,15 +1,53 @@
 import { existsSync, readFileSync } from 'node:fs';
+import type { Locator } from '@playwright/test';
 import { SERVICES } from '../fake/services';
 import { expect, goto, syncEpg, test } from './helpers';
 
 /**
- * ライブ視聴の第1段階 ([docs/stream.md](../../docs/stream.md) §4 の1番目)。
+ * 偽 ffmpeg が残した引数を1回ぶんずつに切って、探しているものを選ぶ。
+ *
+ * **ライブ視聴は ffmpeg を2本起こす** — 映像と字幕。同じファイルに順に足して
+ * いくので (`tests/fake/ffmpeg.sh`)、どちらを見たいかで選び分ける
+ */
+async function ffmpegArgs(
+    file: string,
+    kind: 'video' | 'captions',
+    expect_: typeof expect,
+): Promise<string[]> {
+    let found: string[] | undefined;
+    await expect_(() => {
+        expect_(existsSync(file)).toBe(true);
+        const runs = readFileSync(file, 'utf8')
+            .split('---\n')
+            .filter((run) => run.trim() !== '')
+            .map((run) => run.split('\n'));
+        const wanted = kind === 'video' ? 'libx264' : 'image2pipe';
+        found = runs.find((run) => run.includes(wanted));
+        expect_(found, `${kind} の ffmpeg が起きていない`).toBeDefined();
+    }).toPass({ timeout: 15_000 });
+    return found ?? [];
+}
+
+/**
+ * 2つが寸分同じ枠に居ること。**組み上がりを待つ。**
+ *
+ * 開いた直後は幅が決まりきっていないので、1回だけ見比べると稀に外れる
+ * (実際に flaky で落ちた)
+ */
+async function sameBox(a: Locator, b: Locator, expect_: typeof expect): Promise<void> {
+    await expect_(async () => {
+        expect_(await a.boundingBox()).toEqual(await b.boundingBox());
+    }).toPass({ timeout: 5_000 });
+}
+
+/**
+ * ライブ視聴 ([docs/stream.md](../../docs/stream.md) §4)。映像・音声・字幕まで。
  *
  * **絵が出るところまでは見ない。** E2E の ffmpeg は偽物で、流れてくるのも
- * 本物の TS ではないため、MSE が受け取れる fMP4 にはならない。ここで固定するのは
- * その手前まで — **札を取り、WebSocket が繋がり、チューナーを掴み、選んだ局が
- * 「いま映しているもの」になる**という経路。ここが通っていれば、あとは
- * 焼いたものが正しいかどうかの話になる。
+ * 本物の TS ではないため、MSE が受け取れる fMP4 にはならず、字幕も1枚も出ない。
+ * ここで固定するのはその手前まで — **札を取り、WebSocket が繋がり、チューナーを
+ * 掴み、選んだ局が「いま映しているもの」になる**という経路と、**ffmpeg に何を
+ * 渡したか**。焼いたものが正しいかどうかは実機で測る話になる。
  */
 test.describe('ライブ視聴', () => {
     test.beforeEach(async ({ request }) => {
@@ -307,10 +345,7 @@ test.describe('ライブ視聴', () => {
         await target.click();
         await expect(page.getByTestId('live-title')).toBeVisible();
 
-        await expect(() => {
-            expect(existsSync(stack.liveArgsFile)).toBe(true);
-        }).toPass({ timeout: 15_000 });
-        const args = readFileSync(stack.liveArgsFile, 'utf8').split('\n');
+        const args = await ffmpegArgs(stack.liveArgsFile, 'video', expect);
 
         // 名指ししている先が、内部IDではなく放送の番号になっていること
         const video = args.find((a) => a.startsWith('0:p:') && a.endsWith(':v:0'));
@@ -336,10 +371,7 @@ test.describe('ライブ視聴', () => {
         await page.getByTestId('live-channel').first().click();
         await expect(page.getByTestId('live-title')).toBeVisible();
 
-        await expect(() => {
-            expect(existsSync(stack.liveArgsFile)).toBe(true);
-        }).toPass({ timeout: 15_000 });
-        const args = readFileSync(stack.liveArgsFile, 'utf8').split('\n');
+        const args = await ffmpegArgs(stack.liveArgsFile, 'video', expect);
 
         expect(args).not.toContain('-af');
         // 1本目の音声をそのまま。何本目かを名指ししていること自体は要る
@@ -367,9 +399,58 @@ test.describe('ライブ視聴', () => {
         await expect(still).toHaveAttribute('data-holding', 'false');
         await expect(still).toHaveCSS('pointer-events', 'none');
         // 映像と同じ場所に重なっていること。ずれていると絵が飛んで見える
-        const box = await still.boundingBox();
-        const video = await page.getByTestId('live-video').boundingBox();
-        expect(box).toEqual(video);
+        await sameBox(still, page.getByTestId('live-video'), expect);
+    });
+
+    /*
+     * **放送の字幕は絵で来る。** 文字ではないので `<track>` ではなく canvas に重ねる
+     * (放送に乗っているのは文字と描き方の指定で、テレビはそれを見て毎回自分で描く。
+     * サーバ側で libaribcaption に描かせたものを送るので、録画で見る字幕と同じ絵になる)。
+     *
+     * 偽の放送に字幕は乗っていないので、ここで見られるのは敷き方まで。
+     * **映像と寸分同じ枠に、当たり判定を抜いて敷く** — ずれると字幕が飛び、
+     * 抜けていないと下の操作列が押せなくなる。
+     */
+    test('字幕を重ねる場所は、映像と同じ枠で、押す邪魔をしない', async ({ page }) => {
+        await goto(page, '/live');
+        await page.getByTestId('live-channel').first().click();
+
+        const captions = page.getByTestId('live-captions');
+        await expect(captions).toHaveCSS('pointer-events', 'none');
+        await sameBox(captions, page.getByTestId('live-video'), expect);
+
+        // 字幕の来ていない番組で切り替えを出すと、押しても何も起きない操作が並ぶ
+        await expect(captions).toHaveAttribute('data-on', 'false');
+        await expect(page.getByTestId('live-caption')).toHaveCount(0);
+    });
+
+    /*
+     * **字幕は映像とは別の ffmpeg で取り出す。** 局を選ぶと2本起きる。
+     *
+     * ここで固定するのは、間違えても**絵は出てしまう**種類の指定。
+     *
+     * - `-copyts` … 無いと ffmpeg は字幕1枚目を 0 秒として数え直す
+     *   (フィルタに入れるのが字幕1本だけで、基準になる映像がこちら側に無い)。
+     *   映像と同じ物差しでなくなるので、字幕が丸ごとずれる
+     * - `-canvas_size` … 無いと libaribcaption は 1440x1080 とみなすので、
+     *   1920x1080 の放送では字幕だけ横に伸びる
+     * - PNG で受ける … 生の RGBA だと毎秒 13MB 流れる。実機で測ると PNG のほうが
+     *   速い (30秒ぶんで 1.05秒 対 1.94秒)
+     */
+    test('字幕は別の ffmpeg で、映像と同じ物差しで取り出す', async ({ page, stack }) => {
+        await goto(page, '/live');
+        await page.getByTestId('live-channel').first().click();
+        await expect(page.getByTestId('live-title')).toBeVisible();
+
+        const args = await ffmpegArgs(stack.liveArgsFile, 'captions', expect);
+        expect(args).toContain('-copyts');
+        expect(args[args.indexOf('-canvas_size') + 1]).toMatch(/^\d+x\d+$/);
+        expect(args[args.indexOf('-sub_type') + 1]).toBe('bitmap');
+        expect(args).not.toContain('rawvideo');
+
+        // 字幕も局を名指しする。1本の物理チャンネルに複数の局が乗っている
+        const filter = args[args.indexOf('-filter_complex') + 1];
+        expect(filter).toMatch(/^\[0:p:\d+:s:0\]showinfo/);
     });
 
     /*

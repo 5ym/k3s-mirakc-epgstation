@@ -3,9 +3,9 @@
  *
  *     エージェント (MPEG-TS) → ffmpeg (fMP4) → 割る → WebSocket → MSE
  *
- * [stream.md](../../../docs/stream.md) §4 の1番目にあたる。字幕 (§5.2) と
- * データ放送 (§5.5) は同じ WebSocket に相乗りさせる作りにしてあるが、
- * ここではまだ映像と音声しか流さない。
+ * [stream.md](../../../docs/stream.md) §4 の1番目にあたる。**字幕は同じ
+ * WebSocket に相乗りする** (`captions.ts`)。あちらは局までで決まるので、
+ * 焼き方 (コマ数・音声) では分けない。データ放送 (§5.5) はまだ。
  *
  * ## 同じチャンネルは1本で焼く
  *
@@ -22,6 +22,7 @@
 import { type Audio, type AudioTrack, audioTracks, pickTrack } from '$lib/arib';
 import { CHANNEL, type Notice } from '$lib/live';
 import { Fmp4Splitter } from '$lib/ts/fmp4';
+import { frame, watchCaptions } from './captions';
 import { config } from './config';
 import { queryOne } from './db';
 import { deinterlace, smoothMotionFor } from './encoder';
@@ -371,6 +372,9 @@ function watch(
 export function attend(connection: Connection): void {
     const viewer: Viewer = { connection, ready: false };
     let current: Session | null = null;
+    /** いま字幕を受けている局。**焼き方が変わっても、局が同じなら切らない** */
+    let captionKey = '';
+    let dropCaptions: (() => void) | null = null;
 
     const leave = () => {
         if (current === null) return;
@@ -378,6 +382,24 @@ export function attend(connection: Connection): void {
         // **最後の1人が抜けたら畳む。** 残すとチューナーを掴んだままになる
         if (current.empty) current.stop();
         current = null;
+    };
+
+    /**
+     * 字幕を受け直す。**局が同じなら何もしない。**
+     *
+     * 字幕は局で決まるので、音声を選び直しただけで切ってはいけない。
+     * 切ると ffmpeg を起こし直すことになり、次の字幕が出るまで数十秒あく
+     * (字幕は次が来るまで出しっぱなしのものなので、途切れがそのまま見える)
+     */
+    const followCaptions = (channelType: string, channel: string, serviceId: number, program: number) => {
+        const id = `${channelType}:${channel}:${serviceId}`;
+        if (id === captionKey) return;
+        dropCaptions?.();
+        captionKey = id;
+        dropCaptions = watchCaptions(channelType, channel, serviceId, program, (caption) => {
+            const { kind, pts, data } = frame(caption);
+            connection.send(kind, pts, data);
+        });
     };
 
     connection.onmessage = (message) => {
@@ -423,9 +445,16 @@ export function attend(connection: Connection): void {
         };
         connection.send(CHANNEL.control, 0n, new TextEncoder().encode(JSON.stringify(notice)));
         current = watch(channelType, channel, serviceId, now, viewer);
+        // 字幕は局で決まる。焼き方が変わっただけなら切らない
+        followCaptions(channelType, channel, serviceId, now.program);
     };
 
-    connection.onclose = leave;
+    connection.onclose = () => {
+        leave();
+        dropCaptions?.();
+        dropCaptions = null;
+        captionKey = '';
+    };
 }
 
 export interface NowPlaying {

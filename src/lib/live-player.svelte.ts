@@ -8,6 +8,7 @@
 
 import type { AudioTrack } from '$lib/arib';
 import { CHANNEL, type Command, type Notice, SOCKET_PATH } from '$lib/live';
+import { type Cue, currentCue, insertCue, trimCues } from '$lib/ts/captions';
 import { FLOOR, nextTarget, pacing } from '$lib/ts/pacing';
 
 export type LiveState = 'idle' | 'connecting' | 'playing' | 'error';
@@ -105,6 +106,10 @@ export function livePlayer() {
     let audio = $state('');
     /** 前の絵を貼っているか。**次の絵が出るまでの黒を埋める** */
     let holding = $state(false);
+    /** 字幕を出すか。**押して切り替えられる** (テレビの字幕ボタン) */
+    let captions = $state(true);
+    /** 字幕が流れてきているか。来ていない番組では切り替えを出さない */
+    let hasCaptions = $state(false);
 
     let socket: WebSocket | null = null;
     let source: MediaSource | null = null;
@@ -113,8 +118,26 @@ export function livePlayer() {
     let element: HTMLVideoElement | null = null;
     /** 前の絵の写し先。画面から預かる */
     let still: HTMLCanvasElement | null = null;
+    /** 字幕を重ねる先。画面から預かる */
+    let overlay: HTMLCanvasElement | null = null;
     /** 貼りっぱなしを避けるための目覚まし */
     let holdTimer: ReturnType<typeof setTimeout> | null = null;
+    /**
+     * 待たせている字幕。**時刻の順に並べておく** ([ts/captions.ts](./ts/captions.ts))。
+     *
+     * 字幕は映像より早く届く (エンコードを通らないため) ので、届いた端から
+     * 出すと口が動く前に台詞が出る。再生位置が追いつくまで持っておく
+     */
+    let cues: Cue[] = [];
+    /** いま重ねている1枚。同じものを描き直さない */
+    let shown: Cue | null = null;
+    /**
+     * 選局の代。**絵にし終わる頃には局が変わっていることがある。**
+     *
+     * PNG を `ImageBitmap` にするのは非同期なので、その間に選び直されると
+     * 前の局の字幕が新しい局の上に出る。番号が変わっていたら捨てる
+     */
+    let generation = 0;
     /** もう再生を始めたか。始めるまでは貯める */
     let running = false;
     /** 最後に詰まった時刻。無事が続いたかを見る */
@@ -186,6 +209,49 @@ export function livePlayer() {
         else video.addEventListener('timeupdate', done, { once: true });
     }
 
+    /**
+     * 字幕を重ねる。**再生位置に合う1枚だけ描く。**
+     *
+     * 字幕は次が来るまで出しっぱなしなので、選ぶのは「時刻が再生位置を
+     * 追い越していない中の、最後の1つ」([ts/captions.ts](./ts/captions.ts))。
+     * 跳んだ直後もこれで追いつく。
+     *
+     * **絵は画面まるごとの大きさで来る** (1920x1080)。canvas を映像と同じ枠に
+     * 敷いて、そこへ引き伸ばして描くので、位置合わせはブラウザ任せでよい
+     */
+    function paint(at: number): boolean {
+        if (overlay === null) return false;
+        const next = captions ? currentCue(cues, at) : null;
+        if (next === shown) return false;
+        shown = next;
+
+        const ctx = overlay.getContext('2d');
+        if (ctx === null) return true;
+        const bitmap = next?.bitmap ?? null;
+        if (bitmap === null) {
+            ctx.clearRect(0, 0, overlay.width, overlay.height);
+            return true;
+        }
+        if (overlay.width !== bitmap.width || overlay.height !== bitmap.height) {
+            overlay.width = bitmap.width;
+            overlay.height = bitmap.height;
+        }
+        ctx.clearRect(0, 0, overlay.width, overlay.height);
+        ctx.drawImage(bitmap, 0, 0);
+        return true;
+    }
+
+    /** 待たせているぶんを片付ける。**いま出している1枚は残す** (出しっぱなしのため) */
+    function sweep(at: number): void {
+        const kept = trimCues(cues, at);
+        if (kept.length === cues.length) return;
+        for (const cue of cues) {
+            if (kept.includes(cue) || cue === shown) continue;
+            cue.bitmap?.close();
+        }
+        cues = kept;
+    }
+
     function drain(): void {
         if (buffer === null || buffer.updating || pending.length === 0) return;
         const next = pending.shift();
@@ -223,6 +289,9 @@ export function livePlayer() {
         if (tenth(buffer.buffered.start(0)) !== oldest) oldest = tenth(buffer.buffered.start(0));
         if (tenth(end) !== newest) newest = tenth(end);
         if (tenth(video.currentTime) !== position) position = tenth(video.currentTime);
+
+        // 字幕は再生位置に合わせて出す。変わったときだけ、待たせているぶんも片付ける
+        if (paint(video.currentTime)) sweep(video.currentTime);
 
         trim(end);
         settle();
@@ -382,7 +451,28 @@ export function livePlayer() {
     function reset(): void {
         socket?.close();
         socket = null;
+        clearCaptions();
         clear();
+    }
+
+    /**
+     * 待たせている字幕を捨てる。**局を変えるときだけ。**
+     *
+     * 音声を選び直したときは通さない — サーバ側の字幕は局で決まるので回り続けて
+     * おり (`captions.ts`)、ここで捨てると次の字幕まで何も出なくなる。
+     * 映像の時刻も変わらない (どちらも `-copyts`) ので、待たせているぶんは
+     * そのまま使える
+     */
+    function clearCaptions(): void {
+        generation++;
+        for (const cue of cues) cue.bitmap?.close();
+        cues = [];
+        shown = null;
+        hasCaptions = false;
+        const ctx = overlay?.getContext('2d');
+        if (ctx !== null && ctx !== undefined && overlay !== null) {
+            ctx.clearRect(0, 0, overlay.width, overlay.height);
+        }
     }
 
     /** 画面を離れる。**貼った絵も剥がす** — 戻ってきたときに残っていては困る */
@@ -423,9 +513,19 @@ export function livePlayer() {
         socket.send(JSON.stringify({ type: 'tune', ...next } satisfies Command));
     }
 
-    async function tune(video: HTMLVideoElement, target: Tuned, canvas?: HTMLCanvasElement): Promise<void> {
+    /**
+     * 重ねるものの置き場を預かる。**画面が組み上がってから1回だけ。**
+     *
+     * @param frozen 切り替えの間、前の絵を貼っておく先 (`freeze`)
+     * @param subtitles 字幕を重ねる先 (`paint`)
+     */
+    function attach(frozen: HTMLCanvasElement, subtitles: HTMLCanvasElement): void {
+        still = frozen;
+        overlay = subtitles;
+    }
+
+    async function tune(video: HTMLVideoElement, target: Tuned): Promise<void> {
         element = video;
-        if (canvas !== undefined) still = canvas;
         // 次の絵が出るまで前の絵を貼る。**閉じる前に写す** (閉じると何も映らなくなる)
         freeze();
         reset();
@@ -512,6 +612,41 @@ export function livePlayer() {
             if (kind === CHANNEL.videoInit || kind === CHANNEL.videoMedia) {
                 pending.push(body);
                 drain();
+                return;
+            }
+
+            /*
+             * **字幕。** 頭の8バイトは置き場所 ([stream.md](../../docs/stream.md) §5.3)。
+             * いまは画面まるごとが来るので使わないが、**あとで切り抜くようにしても
+             * ここを変えずに済む**ように読んでおく。
+             *
+             * 時刻は多重化の頭 (90kHz) に載っている。元TSの時刻そのままなので
+             * (`-copyts`)、再生位置と直に比べられる
+             */
+            if (kind === CHANNEL.subtitle || kind === CHANNEL.subtitleClear) {
+                if (!hasCaptions) hasCaptions = true;
+                const at = Number(new DataView(data).getBigUint64(1)) / 90000;
+                if (kind === CHANNEL.subtitleClear) {
+                    cues = insertCue(cues, { at, bitmap: null });
+                    return;
+                }
+                /*
+                 * **絵にするのは非同期。** 待っている間に選局が変わることが
+                 * あるので、そのときは捨てる (`generation`)
+                 */
+                const mine = generation;
+                const png = new Uint8Array(data, 9 + 8);
+                void createImageBitmap(new Blob([png as BlobPart], { type: 'image/png' }))
+                    .then((bitmap) => {
+                        if (mine !== generation) {
+                            bitmap.close();
+                            return;
+                        }
+                        cues = insertCue(cues, { at, bitmap });
+                    })
+                    .catch(() => {
+                        /* 壊れた1枚。次が来る */
+                    });
             }
         };
     }
@@ -625,6 +760,20 @@ export function livePlayer() {
         get holding() {
             return holding;
         },
+        /** 字幕を出しているか */
+        get captions() {
+            return captions;
+        },
+        /** 字幕が流れてきているか。来ていない番組では切り替えを出さない */
+        get hasCaptions() {
+            return hasCaptions;
+        },
+        /** 字幕の出し入れ。テレビの字幕ボタンと同じ */
+        toggleCaptions() {
+            captions = !captions;
+            if (element !== null) paint(element.currentTime);
+        },
+        attach,
         seek,
         toggle,
         goLive,

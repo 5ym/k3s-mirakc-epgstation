@@ -12,6 +12,8 @@
     let video: HTMLVideoElement;
     /** 切り替えの間、前の絵を貼っておく先 (`live-player` の `freeze`) */
     let still: HTMLCanvasElement;
+    /** 放送の字幕を重ねる先 (`live-player` の `paint`) */
+    let overlay: HTMLCanvasElement;
 
     /**
      * **前回見ていたチャンネルで開く。** 覚えていない (初めて開いた) ときは
@@ -20,6 +22,8 @@
      * 局が入れ替わって前回のものが消えていることがあるので、居るかどうかは見る。
      */
     onMount(() => {
+        // 重ねるものの置き場を先に渡す。選局はこのあと
+        player.attach(still, overlay);
         const saved = lastChannel();
         const found =
             saved === null
@@ -27,17 +31,13 @@
                 : channels.find((c) => c.type === saved.channelType && c.channel === saved.channel);
         const target = found ?? channels[0];
         if (target !== undefined) {
-            void player.tune(
-                video,
-                {
-                    channelType: target.type,
-                    channel: target.channel,
-                    serviceId: target.id,
-                    // 音声の控えは、同じ局に戻ったときだけ活かす
-                    audio: found === undefined ? undefined : saved?.audio,
-                },
-                still,
-            );
+            void player.tune(video, {
+                channelType: target.type,
+                channel: target.channel,
+                serviceId: target.id,
+                // 音声の控えは、同じ局に戻ったときだけ活かす
+                audio: found === undefined ? undefined : saved?.audio,
+            });
         }
         return () => player.stop();
     });
@@ -61,15 +61,11 @@
     const listed = $derived(channels.filter((c) => c.type === shown));
 
     function select(channel: LiveChannel): void {
-        void player.tune(
-            video,
-            {
-                channelType: channel.type,
-                channel: channel.channel,
-                serviceId: channel.id,
-            },
-            still,
-        );
+        void player.tune(video, {
+            channelType: channel.type,
+            channel: channel.channel,
+            serviceId: channel.id,
+        });
     }
 
     /**
@@ -146,6 +142,8 @@
     const SOUND_OFF =
         'M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zM19 12c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z';
     const AUDIO = 'M7 18h2V6H7v12zm4 4h2V2h-2v20zm-8-8h2v-4H3v4zm12 4h2V6h-2v12zm4-8v4h2v-4h-2z';
+    const CAPTION =
+        'M19 4H5c-1.11 0-2 .9-2 2v12c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-8 7H9.5v-.5h-2v3h2V13H11v1c0 .55-.45 1-1 1H7c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1zm7 0h-1.5v-.5h-2v3h2V13H18v1c0 .55-.45 1-1 1h-3c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1z';
     const EXPAND = 'M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z';
     const SHRINK = 'M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z';
 </script>
@@ -179,7 +177,10 @@
             onfocusout={() => (keyboard = false)}
         >
             <!-- svelte-ignore a11y_media_has_caption -->
-            <!-- 字幕は第2段階。放送の字幕は canvas に重ねる (docs/stream.md §5.2) -->
+            <!--
+                字幕は `<track>` ではない。放送の字幕は文字ではなく**絵**として
+                届くので (docs/stream.md §5.2)、下の canvas に重ねる
+            -->
             <!--
                 **`autoplay` と `muted` は付けない。** 鳴らし始めるのは
                 `live-player` の役目で、音ありで断られたときだけ自分で黙る。
@@ -209,6 +210,24 @@
                        {player.holding ? 'opacity-100' : 'opacity-0'}"
                 data-testid="live-still"
                 data-holding={player.holding}
+                aria-hidden="true"
+            ></canvas>
+
+            <!--
+                **放送の字幕。** 文字ではなく絵で届く (放送に乗っているのは文字と
+                描き方の指定で、テレビはそれを見て毎回自分で描いている)。
+                サーバが libaribcaption に描かせたものを重ねるので、**録画で見る
+                字幕と同じ絵**になる。
+
+                絵は画面まるごと (1920x1080) で来るので、映像と同じ枠に敷いて
+                引き伸ばすだけでよい。位置合わせはブラウザ任せ。
+                **前の絵より上に置く** — 切り替え中は字幕も一緒に止まってほしい
+            -->
+            <canvas
+                bind:this={overlay}
+                class="pointer-events-none absolute inset-0 h-full w-full object-contain"
+                data-testid="live-captions"
+                data-on={player.captions && player.hasCaptions}
                 aria-hidden="true"
             ></canvas>
 
@@ -250,6 +269,27 @@
                     >
                         {@render icon(player.silenced ? SOUND_OFF : SOUND_ON)}
                     </button>
+
+                    <!--
+                        **字幕の出し入れ。流れてきている番組でだけ出す。**
+
+                        字幕の無い番組で押せる形にしておくと、押しても何も起きない
+                        操作が並ぶ。テレビの字幕ボタンと同じで、出しているかどうかは
+                        色で分かるようにする
+                    -->
+                    {#if player.hasCaptions}
+                        <button
+                            class="btn btn-circle btn-sm {player.captions
+                                ? 'border-0 shadow-none btn-primary'
+                                : OVERLAY}"
+                            onclick={() => player.toggleCaptions()}
+                            aria-label={player.captions ? '字幕を消す' : '字幕を出す'}
+                            aria-pressed={player.captions}
+                            data-testid="live-caption"
+                        >
+                            {@render icon(CAPTION)}
+                        </button>
+                    {/if}
 
                     <!--
                         **音声の選び直し。選べるものが2つ以上あるときだけ出す。**
