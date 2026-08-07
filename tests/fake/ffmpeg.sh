@@ -33,6 +33,18 @@ fi
 # ライブ配信(TS): stdin をそのまま stdout に流し続ける。
 # 中身は本物のTSではないが、「切るまで流れ続ける」という性質だけは同じ
 if [ "$output" = "pipe:1" ]; then
+    # E2E から「映像側は入口で落ちる」と指示するための目印。
+    #
+    # 実機の tvk (T15) で出た形をそのまま真似る — 局が3つ相乗りしている TS で
+    # -probesize が足りず、-map が解決できないまま降りる。**1バイトも出さずに
+    # 降りるので、伝えないと画面は前の絵を貼ったまま6秒たって黒くなるだけ**。
+    # 字幕側は落とさない (映像だけが死ぬ形を試したい)
+    if [ -f "${FAKE_FFMPEG_LIVE_FAIL_FILE:-/nonexistent}" ] &&
+        printf '%s\n' "$@" | grep -qx -- 'libx264'; then
+        echo "Failed to set value '0:p:24632:v:0' for option 'map': Invalid argument" >&2
+        echo "Error opening output files: Invalid argument" >&2
+        exit 1
+    fi
     # **何を渡されたかを残す。** 焼き方の指定は間違えても E2E では絵が要らないぶん
     # 素通りするので、テストから中身を見られるようにしておく。
     #

@@ -231,6 +231,17 @@ class Session {
         return this.viewers.size === 0;
     }
 
+    /**
+     * まだ焼いているか。**畳んだものを掴んだままにしないため。**
+     *
+     * ffmpeg が降りると畳まれて一覧からも消えるが、**繋いでいる側は同じものを
+     * 指したまま**になる。同じ局を選び直しても「もう見ている」と見なされて
+     * 何も起きず、**「やり直す」を押しても直らない**
+     */
+    get alive(): boolean {
+        return !this.stopped;
+    }
+
     add(viewer: Viewer): void {
         this.viewers.add(viewer);
         if (this.init !== null) this.hand(viewer, CHANNEL.videoInit, this.init);
@@ -275,17 +286,42 @@ class Session {
             /*
              * **流し込みと汲み出しを同時に回す。** 順にやると、ffmpeg の
              * 出力を誰も読まないまま入力を書き続けることになり、パイプが詰まって
-             * 両方止まる (放送は止まってくれない)
+             * 両方止まる (放送は止まってくれない)。
+             *
+             * **終わりは ffmpeg の終了で見る。** 汲み出しは相手が死ねば
+             * すぐ終わるが、**流し込みは終わらない** — 書き込み先が閉じても
+             * 例外にならないことがあり、放送は止まらないので回り続ける。
+             * 3つ揃うのを待っていると、死んだことに永久に気づかない
              */
-            await Promise.all([this.pump(stream, proc), this.drain(proc), this.watch(proc)]);
+            const running = Promise.all([this.pump(stream, proc), this.drain(proc), this.watch(proc)]);
+            await Promise.race([running, proc.exited]);
+            // ここまで来たのは ffmpeg が自分で降りたとき。畳んだのなら stopped が立つ
+            this.died(label, `ffmpeg が終了しました (${proc.exitCode ?? '不明'})`, '映像を出せませんでした');
         } catch (error) {
-            if (!this.stopped) {
-                console.warn(`[live] ${label}: ${error}`);
-                this.tell({ type: 'error', message: '選局できませんでした' });
-            }
+            this.died(label, String(error), '選局できませんでした');
         } finally {
             this.stop();
         }
+    }
+
+    /**
+     * 焼けなくなったことを、**見ている人に伝える。**
+     *
+     * 伝えずに消えていた頃は、ffmpeg が入口で落ちても画面には何も出ず、
+     * **前の絵が貼られたまま6秒たって黒くなる**だけだった (`live-player` の
+     * `HOLD_MOST`)。見た目は「切り替えが 6 秒かかった」で、実際には
+     * 失敗しているのに、そうとは分からない出方をする。
+     *
+     * 実機で出たのは tvk (T15) — 局が3つ相乗りしている TS で、`-probesize` が
+     * 足りずに `-map 0:p:24632:v:0` を解決できないまま ffmpeg が降りていた。
+     *
+     * こちらから畳んだとき (`stop`) は言わない。見ている人が居なくなったか、
+     * 選び直されたかで、どちらも知らせるようなことではない
+     */
+    private died(label: string, why: string, message: string): void {
+        if (this.stopped) return;
+        console.warn(`[live] ${label}: ${why}`);
+        this.tell({ type: 'error', message });
     }
 
     /** エージェントから来た TS を ffmpeg へ */
@@ -517,8 +553,16 @@ export function attend(connection: Connection): void {
          */
         followCaptions(channelType, channel, serviceId, now.program, caption);
 
+        /*
+         * **同じものを焼いているなら、そのまま。**
+         *
+         * ただし**畳まれていないことを確かめる** — ffmpeg が降りたセッションを
+         * 指したままだと「もう見ている」と見なされ、選び直しても「やり直す」を
+         * 押しても新しく起こさない。画面は待ち続けるだけになる
+         */
         if (
             current !== null &&
+            current.alive &&
             current.channelType === channelType &&
             current.channel === channel &&
             current.serviceId === serviceId &&
