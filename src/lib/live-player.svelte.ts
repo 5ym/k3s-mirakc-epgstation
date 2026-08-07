@@ -40,6 +40,12 @@ export function livePlayer() {
     let tuned = $state<Tuned | null>(null);
     /** 音を止められているか。**自動再生を断られたときだけ立つ** */
     let silenced = $state(false);
+    /**
+     * 放送からどれだけ遅れているか (秒)。**受け取った最後の絵と、いま映して
+     * いる絵の差。** ここが遅延の大半で、焼き方より効く。出しているのは、
+     * 詰まりが増えていないかを見ながら詰めていくため
+     */
+    let delay = $state<number | null>(null);
 
     let socket: WebSocket | null = null;
     let source: MediaSource | null = null;
@@ -75,9 +81,17 @@ export function livePlayer() {
      */
     function pace(video: HTMLVideoElement): void {
         if (buffer === null || buffer.updating || buffer.buffered.length === 0) return;
+        const end = buffer.buffered.end(buffer.buffered.length - 1);
+        /*
+         * **0.1秒刻みにする。** 塊は毎秒20個届くので、そのたびに書き換えると
+         * 画面を無駄に描き直すことになる
+         */
+        const behind = running ? Math.round((end - video.currentTime) * 10) / 10 : null;
+        if (behind !== delay) delay = behind;
+
         const next = pacing({
             start: buffer.buffered.start(0),
-            end: buffer.buffered.end(buffer.buffered.length - 1),
+            end,
             at: video.currentTime,
             playing: running,
         });
@@ -129,6 +143,7 @@ export function livePlayer() {
         buffer = null;
         source = null;
         running = false;
+        delay = null;
         pending.length = 0;
     }
 
@@ -272,6 +287,10 @@ export function livePlayer() {
         /** 音を止められているか。押して出してもらう */
         get silenced() {
             return silenced;
+        },
+        /** 放送からどれだけ遅れているか (秒)。再生していないときは null */
+        get delay() {
+            return delay;
         },
         tune,
         unmute,

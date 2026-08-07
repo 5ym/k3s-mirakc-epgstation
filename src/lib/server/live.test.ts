@@ -26,12 +26,18 @@ describe('ライブの焼き方', () => {
      * **コマごとに切らない。** `frag_every_frame` だと映像だけ・音声だけの塊が
      * 交互に並び (トラックごとにコマの間隔が違うため)、受け側の MSE が
      * それぞれを別の区切りとして扱って映像と音声を別々に並べ直す。
-     * 実機では毎秒95個出ていた
+     * 実機では毎秒95個出ていた。
+     *
+     * **細かさの下限は音声のコマが決める。** AAC は 1024 標本 = 約 21ms なので、
+     * それより短く切ると音声の入らない塊が出る (実機で 16ms にすると
+     * 塊あたりのトラック数が 1.94 → 1.74 に落ちた)
      */
-    test('0.2秒ごとに区切る', () => {
+    test('音声のコマより短く区切らない', () => {
         const args = plain();
         expect(args.join(' ')).not.toContain('frag_every_frame');
-        expect(args[args.indexOf('-frag_duration') + 1]).toBe('200000');
+        const µs = Number(args[args.indexOf('-frag_duration') + 1]);
+        expect(µs).toBeGreaterThanOrEqual(25_000);
+        expect(µs).toBeLessThanOrEqual(200_000);
     });
 
     /*

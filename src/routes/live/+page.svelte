@@ -138,6 +138,13 @@
                     {#if current.now}
                         ・ {time(current.now.startAt)} 〜 {time(current.now.endAt)}
                     {/if}
+                    <!--
+                        **放送からどれだけ遅れているか。** 詰めていく作業をするのに、
+                        見えないと当てずっぽうになる
+                    -->
+                    {#if player.delay !== null}
+                        ・ <span data-testid="live-delay">遅延 {player.delay.toFixed(1)}秒</span>
+                    {/if}
                 </p>
             </div>
         {/if}
