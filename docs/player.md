@@ -104,6 +104,6 @@ PWA_NAMES=dp.doany.io=denpa,dp.l.doany.io=denpa 宅内
 
 ## ライブ視聴
 
-**放送中のものをそのまま観るのは、いまはできません。** 配る口がまだありません。
-denpa 側に作る話は [stream.md](stream.md) に、なぜ無いのかは
-[architecture.md](architecture.md#ライブ視聴) にあります。
+**放送中のものは、ブラウザでそのまま観られます** (`/live`)。ここで用意する
+`denpa://` の登録は要りません — 外部プレイヤーへ渡すのは録画したファイルだけで、
+ライブは denpa が焼いてブラウザへ流します ([stream.md](stream.md))。

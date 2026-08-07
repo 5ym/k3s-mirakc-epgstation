@@ -12,10 +12,21 @@
 | 口 | 守り方 |
 | --- | --- |
 | `/api/recordings/<id>/file` と `/dav` | **ベーシック認証だけ** |
+| `/api/live/socket` | **使い捨ての札** (下記)。ここだけ SvelteKit に届きません |
 | それ以外 (画面と API) | **OIDC** (設定してあれば)。無ければベーシック認証 |
 | `/login` `/login/callback` `/login/out` `/logout` | 素通し |
 | `/api/health` | 素通し |
 | `/manifest.webmanifest` | 素通し |
+
+**`/api/live/socket` だけは前段の `Bun.serve` が受けます** (`server.js`)。bun の
+`node:http` では WebSocket の握手ができないためで、SvelteKit の `hooks.server.ts` には
+届かない = **ここに書いてある守り方が効きません**。
+
+**ブラウザは WebSocket の握手に `Authorization` を付けてくれない**ので、そのままだと
+チューナーを掴む口が素通しになります。画面が先に `POST /api/live/ticket` で
+使い捨ての札を取り、それを URL に付けて繋ぎます。**札の発行は普通の HTTP** なので、
+ベーシック認証も OIDC も信頼した網もそのまま効きます。1回使ったら消し (URL は履歴にも
+ログにも残る)、寿命は30秒 (`src/lib/server/tickets.ts`、[stream.md](stream.md#繋ぐときの認証))。
 
 **`/api/health` を守ると Pod が再起動を繰り返します。** Kubernetes の `livenessProbe`
 が叩く口で、掛ける範囲を選べるのをやめたときに実際に踏みました

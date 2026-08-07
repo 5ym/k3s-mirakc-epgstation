@@ -1,7 +1,8 @@
 # denpa
 
 テレビを録って観るためのもの。**チューナーエージェント(選局)** と
-**denpa(番組表・予約・録画・エンコード・配信)** の2つだけで、メディアサーバは置きません。
+**denpa(番組表・予約・録画・エンコード・配信・ライブ視聴)** の2つだけで、
+メディアサーバは置きません。
 
 ```text
 チューナー ── エージェント ── denpa ── 録画(mkv) ─┬─→ VLC / Infuse (URLスキーム)
@@ -66,7 +67,19 @@ kubectl apply -f k3s/
 **namespace・StorageClass・Ingress のホスト名**を書き換えてから当ててください。
 必要なものは [docs/architecture.md](docs/architecture.md#クラスタ側の前提条件)。
 
-## 再生
+## いま流れているものを観る
+
+**「ライブ」を開くと、放送中のものがそのまま観られます。** 左に映像、右にチャンネル
+(番組表と同じ並び)。**前回見ていた局から開く**ので、テレビを点けたときと同じです。
+
+- **遅延は 0.5 秒前後**。宅外から見て止まるようなら、自分で貯めを伸ばして戻します
+- **止めた所から見られます。** 止めている間も受け取り続けるので、電話に出て
+  戻ってきても追いつけます (5分ぶん)
+- **音声を選べます。** 二カ国語の主音声/副音声も、解説放送のような音声1/音声2 も
+- 字幕とデータ放送はまだ出ません ([docs/stream.md](docs/stream.md))
+- **有料放送は映りません。** ライブの経路にはスクランブル解除が入っていません
+
+## 録画を再生する
 
 **録画一覧の行を押すと**端末のプレイヤーが起動します。ブラウザは MPEG-2 も
 AV1+Opus の mkv も素直には再生できないためです。番組の中身を読みたいときは
@@ -166,10 +179,10 @@ OIDC_GROUP=...   # このグループに居る人だけ通す (省くと入れ�
 - [docs/app.md](docs/app.md) — **どこに何があるか** (ファイル・環境変数・画面・状態遷移)
 - [docs/data.md](docs/data.md) — エージェントに都度聞くもの / denpa が持つもの
 - [docs/development.md](docs/development.md) — **手を入れるとき** (開発環境・テスト)
-- [docs/player.md](docs/player.md) — `denpa://` の登録、ライブ視聴の繋ぎ方
+- [docs/player.md](docs/player.md) — `denpa://` の登録、ホーム画面に置く
 - [docs/agent.md](docs/agent.md) — チューナーを掴むところ (エージェント・取り合い・B-CAS)
 - [docs/encode.md](docs/encode.md) — CM とエンコード (字幕・AV1・CM検出)
 - [docs/auth.md](docs/auth.md) — **誰を通すか** (OIDC でのログイン・ベーシック認証)
 - [docs/migrate.md](docs/migrate.md) — **EPGStation からの引き継ぎ**
 - [docs/roadmap.md](docs/roadmap.md) — これから入れるもの
-- [docs/stream.md](docs/stream.md) — ライブ視聴の設計 (未実装)
+- [docs/stream.md](docs/stream.md) — **ライブ視聴** (放送中のものを観る)

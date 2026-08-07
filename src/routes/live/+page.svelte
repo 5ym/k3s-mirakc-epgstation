@@ -128,6 +128,14 @@
     };
 
     /**
+     * 絵の上に置くボタンの色。**自分で決める。**
+     *
+     * `btn-ghost` にしていた頃は daisyUI が主題の文字色を当てるので、暗い絵と
+     * 下の黒いぼかしに**アイコンが沈んで見えなく**なっていた
+     */
+    const OVERLAY = 'border-0 bg-black/45 text-white shadow-none hover:bg-black/70';
+
+    /**
      * **アイコンは既存の画面と同じ書き方に揃える** (インラインの SVG)。
      * 絵文字にしていた頃は、端末ごとに形も大きさも変わっていた
      */
@@ -226,8 +234,7 @@
                     data-shown={controlsShown}
                 >
                     <button
-                        class="btn btn-circle btn-sm border-0 bg-black/45 text-white shadow-none
-                               hover:bg-black/70"
+                        class="btn btn-circle btn-sm {OVERLAY}"
                         onclick={() => player.toggle()}
                         aria-label={player.paused ? '再生' : '一時停止'}
                         data-testid="live-play"
@@ -236,8 +243,7 @@
                     </button>
 
                     <button
-                        class="btn btn-circle btn-sm border-0 bg-black/45 text-white shadow-none
-                               hover:bg-black/70"
+                        class="btn btn-circle btn-sm {OVERLAY}"
                         onclick={() => (player.silenced ? player.unmute() : player.mute())}
                         aria-label={player.silenced ? '音を出す' : '音を消す'}
                         data-testid="live-sound"
@@ -258,8 +264,7 @@
                     {#if player.audios.length > 1}
                         <div class="dropdown dropdown-top">
                             <button
-                                class="btn btn-sm gap-1.5 border-0 bg-black/45 text-white shadow-none
-                                       hover:bg-black/70"
+                                class="btn btn-sm gap-1.5 {OVERLAY}"
                                 aria-label="音声を選ぶ"
                                 data-testid="live-audio"
                             >
@@ -316,9 +321,7 @@
 
                     <!-- 放送の今に居るかどうか。離れていれば押して戻れる -->
                     <button
-                        class="btn btn-sm gap-1.5 border-0 shadow-none {player.live
-                            ? 'btn-error'
-                            : 'bg-black/45 text-white hover:bg-black/70'}"
+                        class="btn btn-sm gap-1.5 {player.live ? 'border-0 shadow-none btn-error' : OVERLAY}"
                         onclick={() => player.goLive()}
                         data-testid="live-edge"
                     >
@@ -331,8 +334,7 @@
                     </button>
 
                     <button
-                        class="btn btn-circle btn-sm border-0 bg-black/45 text-white shadow-none
-                               hover:bg-black/70"
+                        class="btn btn-circle btn-sm {OVERLAY}"
                         onclick={() => full()}
                         aria-label={fullscreened ? '全画面をやめる' : '全画面'}
                         data-testid="live-full"
@@ -452,18 +454,20 @@
         -->
         <ul class="flex-1 space-y-1 overflow-y-auto lg:min-h-0" data-testid="live-channels">
             {#each listed as channel (channel.id)}
+                <!-- いま映しているものかどうかは、この行の中で5回使う -->
+                {@const tuned = current?.id === channel.id}
                 <li>
                     <button
                         bind:this={rows[channel.id]}
                         class="flex w-full cursor-pointer items-center gap-3 rounded-lg border p-2 text-left
                                transition-colors
-                               {current?.id === channel.id
+                               {tuned
                             ? 'border-primary bg-primary/15 ring-primary/40 ring-1'
                             : 'border-base-300 hover:border-base-content/30 hover:bg-base-200'}"
                         onclick={() => select(channel)}
-                        aria-current={current?.id === channel.id ? 'true' : undefined}
+                        aria-current={tuned ? 'true' : undefined}
                         data-testid="live-channel"
-                        data-current={current?.id === channel.id ? 'true' : 'false'}
+                        data-current={tuned ? 'true' : 'false'}
                         data-channel="{channel.type}/{channel.channel}"
                     >
                         <!--
@@ -494,7 +498,7 @@
                         <span class="min-w-0 flex-1">
                             <span
                                 class="block truncate text-sm font-medium
-                                       {current?.id === channel.id ? 'text-primary' : ''}"
+                                       {tuned ? 'text-primary' : ''}"
                             >
                                 {channel.name}
                             </span>
@@ -505,7 +509,7 @@
                             {/if}
                         </span>
                         <!-- いま映しているもの。色だけだと、色の見え方が違う人に伝わらない -->
-                        {#if current?.id === channel.id}
+                        {#if tuned}
                             <span class="badge badge-primary badge-sm shrink-0">視聴中</span>
                         {/if}
                     </button>

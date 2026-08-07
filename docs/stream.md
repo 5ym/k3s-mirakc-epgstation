@@ -41,13 +41,12 @@
         ┌─────────────┘      │      └─────────────┐
         ▼                    ▼                    ▼
 ┌───────────────┐   ┌────────────────┐   ┌──────────────────┐
-│ tsreadex      │   │ ffmpeg          │   │ psisiarc         │
-│   ↓           │   │ + libaribcaption│   │ PSI/SI +         │
-│ ffmpeg /      │   │ (sub2video)     │   │ データカルーセル  │
-│ QSVEncC 等    │   │   ↓             │   │                  │
-│   ↓           │   │ 字幕の絵 (RGBA) │   │                  │
-│ AV1 + Opus    │   │ + PTS           │   │ .psc ストリーム   │
-│ fMP4 チャンク  │   │                 │   │                  │
+│ ffmpeg /      │   │ ffmpeg          │   │ psisiarc         │
+│ QSVEncC 等    │   │ + libaribcaption│   │ PSI/SI +         │
+│   ↓           │   │ (sub2video)     │   │ データカルーセル  │
+│ AV1 + Opus    │   │   ↓             │   │                  │
+│ fMP4 チャンク  │   │ 字幕の絵 (RGBA) │   │ .psc ストリーム   │
+│               │   │ + PTS           │   │                  │
 └───────┬───────┘   └────────┬────────┘   └─────────┬────────┘
         │                    │                      │
         └────────────────────┼──────────────────────┘
@@ -127,7 +126,6 @@ PGS を送るのと変わらず、クライアントに書くコードが無く�
 
 | 役割 | 採用 | ★ | 備考 |
 | --- | --- | --- | --- |
-| TS 整形 | xtne6f/tsreadex | 41 | デュアルモノ無劣化分離、PID固定 |
 | エンコード | FFmpeg（将来 QSVEncC/NVEncC/VCEEncC） | — | CLI パイプラインで差し替え可能 |
 | 字幕の描画 | xqq/libaribcaption | 127 | `-sub_type bitmap` + sub2video。録画側と同じ。denpa の ffmpeg は `--enable-libaribcaption` で組んである |
 | データ放送抽出 | xtne6f/psisiarc | 19 | PSI/SI + カルーセルを .psc に圧縮 |
@@ -136,6 +134,9 @@ PGS を送るのと変わらず、クライアントに書くコードが無く�
 | WebRTC 化（任意） | bluenviron/mediamtx | 19,690 | AV1 over WebRTC / WHEP |
 
 ★は 2026-08-02 時点。日本の放送関連ツールはスター数が2桁だが**代替が存在しない**ため、数値で評価しないこと。
+
+**TS 整形の `tsreadex` は入れかけて外した。** 挟む理由として挙げたものが、どれも
+ffmpeg 単体で足りた（[§4](#tsreadex-は挟まない)）。
 
 **mpegts.js と aribb24.js は使わない。** どちらも「H.264 + MPEG-TS をブラウザで直接再生し、
 字幕も TS の中から拾う」構成のための部品で、fMP4 + サイドチャネルにすると出番が無くなる。
@@ -282,34 +283,33 @@ MSE は1つの器に複数の音声を入れた fMP4 を、ブラウザによっ
 
 ### 5.1 エンコード
 
+**いま回している形は `src/lib/server/live.ts` の `encodeArgs` にあります。** 1本の
+ffmpeg が映像と音声を1つの pipe へ多重化し、`Fmp4Splitter` が `moof`+`mdat` ごとに
+割って WebSocket へ流します。
+
 ```bash
-tsreadex -x 18/38/39 -n -1 -a 13 -b 5 -c 1 -u 1 - \
-| ffmpeg -copyts -i - \
-    -map 0:v:0 -c:v libsvtav1 -g 120 -preset 11 \
-      -svtav1-params "pred-struct=1:lookahead=0" \
-      -f mp4 -movflags +empty_moov+frag_every_frame+default_base_moof \
-      -flush_packets 1 pipe:3 \
-    -map 0:a:0 -c:a libopus -b:a 128k -application lowdelay -frame_duration 20 \
-      -f mp4 -movflags +empty_moov+frag_every_frame+default_base_moof \
-      -flush_packets 1 pipe:4
+ffmpeg -fflags nobuffer -probesize 400000 -copyts -i pipe:0 \
+    -vf bwdif \
+    -map 0:p:<局>:v:0 -c:v libx264 -preset veryfast -tune zerolatency -g 60 \
+    -map 0:p:<局>:a:<何本目> [-af pan=stereo|c0=c0|c1=c0] \
+      -c:a aac -b:a 192k -ac 2 \
+    -f mp4 -movflags +empty_moov+default_base_moof \
+    -frag_duration 50000 -flush_packets 1 pipe:1
 ```
 
-- `frag_every_frame` によりフレーム単位の moof/mdat が出力され、バッファ遅延がほぼ消える
-- トラックごとに別 pipe へ出すのは、クライアントで SourceBuffer を分けるため
-- 複数音声・複数映像は `-map` と pipe を増やす
-- Node 側は `spawn(..., { stdio: ['pipe','pipe','pipe','pipe','pipe'] })`
-- **`-copyts` 必須**（元TSの90kHz PTSを維持し、字幕・データ放送と同一時間軸に揃える）
+**なぜこの形かは [§4](#第1段階に入っているもの) にあります** — コーデックの選び方、
+`-frag_duration` の刻み（音声のコマが下限を決める）、`-flags low_delay` を付けない理由、
+局と音声の名指し。実測した値は `encodeArgs` の説明に置いてあり、**ここには写しません**
+（写すと必ず片方が古くなる。実際 `-frag_duration` の値がここだけ古いまま残っていた）。
 
-> **第1段階は1本の pipe に多重化している**（実装の都合。SourceBuffer も1つ）。
-> このとき `frag_every_frame` は使えない — 映像だけ・音声だけの moof が交互に並び、
-> MSE がそれぞれを別の区切りとして扱うため、映像と音声が別々に並べ直されて
-> 絵が絶えず引っかかる。代わりに `-frag_duration 200000`（0.2秒）で切り、
-> 1つの塊に両トラックを入れている。トラックごとに pipe を分ける形（上の設計）へ
-> 移せば `frag_every_frame` に戻せる。
->
-> あわせて、クライアント側の SourceBuffer は `segments`（既定）で使う。
-> `sequence` は「届いた順に詰める」動きなので、1つ取りこぼすと以降ずっとずれる。
-> 再生位置の面倒（貯めてから出す・離れたら速める）は `src/lib/ts/pacing.ts`。
+- **`-copyts` 必須**（元TSの90kHz PTSを維持し、字幕・データ放送と同一時間軸に揃える）
+- クライアント側の SourceBuffer は `segments`（既定）で使う。`sequence` は
+  「届いた順に詰める」動きなので、1つ取りこぼすと以降ずっとずれる。
+  再生位置の面倒（貯めてから出す・離れたら速める）は `src/lib/ts/pacing.ts`
+
+**将来トラックごとに pipe を分けるなら**、`-movflags +frag_every_frame` に戻せます。
+1本に多重化している間は使えません（[§4](#第1段階に入っているもの)）。複数映像も
+そのときの話で、いまは映像1本・音声1本に決め打っています。
 
 AV1 のリアルタイムエンコードはソフトウェアでは厳しい。実運用では
 `av1_nvenc`（RTX40以降）/ `av1_qsv`（Arc・Meteor Lake以降）/ `av1_amf`（RDNA3以降）を前提とする。

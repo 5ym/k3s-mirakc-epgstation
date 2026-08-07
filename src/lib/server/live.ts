@@ -106,10 +106,8 @@ import type { Connection } from './ws';
  * 選べるものを組み立てるのは `arib.audioTracks`。**画面には平らな一覧に見せる** —
  * 見ている人にとってはどちらも「音声を選ぶ」1つの操作でしかない。
  *
- * @param program **放送が名乗っている番号** (ARIB の service_id = TS の
- *   program_number)。`services.id` を渡してはいけない — あちらは
- *   `network_id * 100000 + service_id` の内部IDで、TS の中には出てこない。
- *   0以下なら最初に見つけた映像 (従来どおり)
+ * @param program 放送が名乗っている番号 (`NowPlaying.program`)。0以下なら
+ *   最初に見つけた映像 (従来どおり)
  * @param smooth 60コマ/秒で出すか。国内アニメだけ false
  * @param audio どの音声を、どちら側で出すか
  */
@@ -434,7 +432,8 @@ export interface NowPlaying {
     /**
      * 放送が名乗っている番号 (ARIB の service_id = TS の program_number)。
      * **`services.id` とは別物** — あちらは `network_id * 100000 + service_id` の
-     * 内部IDで、TS の中には出てこない。ffmpeg に渡すのはこちら
+     * 内部IDで、TS の中には出てこない。**内部IDを渡すと** ffmpeg はその番号の局を
+     * 探して見つけられず、**絵も音も出ない** (実機でやった)。ffmpeg に渡すのはこちら
      */
     program: number;
     smooth: boolean;
@@ -447,9 +446,7 @@ export interface NowPlaying {
 /**
  * いま流れている番組から、焼き方を決める。**番組表を頼りにする。**
  *
- * - 局の番号 … ffmpeg に名指しさせる `program_number`。**内部IDを渡しては
- *   いけない** (`services.id` は `network_id * 100000 + service_id`)。渡すと
- *   ffmpeg はその番号の局を探して見つけられず、絵も音も出ない
+ * - 局の番号 … ffmpeg に名指しさせる `program_number` (`NowPlaying.program`)
  * - コマ数 … 国内アニメだけ倍にしない (`smoothMotionFor`)。**分からなければ
  *   実写として扱う** — 放送の大半は実写で、アニメを実写扱いにしても絵は
  *   変わらないが、逆は動きが落ちる
