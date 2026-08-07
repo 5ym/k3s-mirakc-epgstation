@@ -31,7 +31,7 @@ describe('再生位置の決め方', () => {
      * それ自体が「かくつき」になる
      */
     test('少し離れたら、跳ばずに速めて詰める', () => {
-        const late = pacing({ start: 100, end: 100 + TARGET * 3, at: 100, playing: true });
+        const late = pacing({ start: 100, end: 100 + TARGET * 2, at: 100, playing: true });
         expect(late.seek).toBeNull();
         expect(late.rate).toBeGreaterThan(1);
     });
@@ -48,11 +48,21 @@ describe('再生位置の決め方', () => {
     });
 
     /*
+     * **狙いの近くに居着かせる。** 帯を広く採っていた頃は、実機で 0.4 秒を
+     * 狙って 0.70 秒に居着いていた (始めた直後は必ず狙いより溜まるので、
+     * 放っておくと下りてこない)。狙いの2倍まで来たら詰めにかかる
+     */
+    test('狙いの2倍まで溜まったら詰めにかかる', () => {
+        const drifted = pacing({ start: 100, end: 100 + TARGET * 2, at: 100, playing: true });
+        expect(drifted.rate).toBeGreaterThan(1);
+    });
+
+    /*
      * **戻す境目と速める境目を離してある。** 同じ値だと、そのあたりで
      * 速める・戻すを往復して、かえって見づらくなる
      */
     test('境目の間では速さをいじらない', () => {
-        const between = pacing({ start: 100, end: 100 + TARGET * 2, at: 100, playing: true });
+        const between = pacing({ start: 100, end: 100 + TARGET * 1.3, at: 100, playing: true });
         expect(between.rate).toBeNull();
         expect(between.seek).toBeNull();
     });

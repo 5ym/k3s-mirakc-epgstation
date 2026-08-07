@@ -59,10 +59,16 @@ export function pacing({ start, end, at, playing }: Buffered): Pacing {
     const lag = end - at;
     // 大きく離れた。**詰めきれないので跳ぶ** — 別のタブから戻ってきたとき
     if (lag > JUMP) return { seek: end - TARGET, play: true, rate: 1 };
-    // 少し離れた。速めて詰める。跳ばないので音は切れない
-    if (lag > TARGET * 2.5) return { seek: null, play: true, rate: CATCH_UP };
+    /*
+     * 少し離れた。速めて詰める。跳ばないので音は切れない。
+     *
+     * **帯を狭く採る。** 2.5倍まで放っておいた頃は、実機で 0.4 秒を狙って
+     * 0.70 秒に居着いていた — 始めた直後は必ず狙いより溜まる (再生を頼んでから
+     * 実際に絵が出るまでの間にも届く) ので、放っておくとそこから下りてこない。
+     */
+    if (lag > TARGET * 1.5) return { seek: null, play: true, rate: CATCH_UP };
     // 追いついた。戻す。**溜まりを使い切る前に戻す**ので、少し余裕を残す
-    if (lag <= TARGET * 1.2) return { seek: null, play: true, rate: 1 };
+    if (lag <= TARGET * 1.1) return { seek: null, play: true, rate: 1 };
     // その間。速さは今のまま (ここで戻すと、速める・戻すを往復する)
     return { seek: null, play: true, rate: null };
 }
