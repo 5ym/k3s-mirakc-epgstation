@@ -46,7 +46,18 @@ test.describe('操作したときの反応', () => {
         await expect(detail.getByTestId('detail-genre').first()).toHaveText('アニメ／特撮 > 国内アニメ');
         await expect(detail.getByTestId('detail-genre').nth(1)).toHaveText('拡張');
         await expect(detail.getByTestId('detail-video')).toHaveText('1080i MPEG-2');
-        await expect(detail.getByTestId('detail-audio')).toHaveText('ステレオ (日本語)');
+        /*
+         * **音声が2本あるなら、見分けが付くように出す。**
+         *
+         * 解説放送や二重音声は、種別も言語も同じ音声が2本並ぶ。符号だけを見て
+         * いた頃は**「ステレオ (日本語)」が2つ**出ていて、どちらが何なのか
+         * 分からなかった (実機の日テレ「金曜ロードショー[解]」)。放送のほうは
+         * `audio_component_descriptor` の `text_char` に名前を書いている
+         */
+        await expect(detail.getByTestId('detail-audio')).toHaveText([
+            '主音声ステレオ (日本語)',
+            '解説ステレオ (日本語)',
+        ]);
         // どの局のものかは詳細だけ見ても分かるようにする。
         // 先頭に来るのがどちらの局かは時刻次第なので、地上波のどちらかであればよい
         await expect(detail).toContainText(/TOKYO MX|フジテレビ/);

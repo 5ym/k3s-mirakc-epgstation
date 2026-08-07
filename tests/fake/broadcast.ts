@@ -113,7 +113,17 @@ export function programsFor(service: FakeService): SynthEvent[] {
                 [14, 0],
                 [14, 0],
             ],
-            audioType: 3,
+            /*
+             * **音声を2本にしておく。** 本物にもよくある形で (解説放送・二重音声)、
+             * どちらも `component_type=3` の日本語なので、**符号だけでは
+             * 「ステレオ (日本語)」が2つ並ぶ**。見分けが付くのは放送が付けた
+             * 名前だけ — 実機の日テレ「金曜ロードショー[解]」がまさにこれで、
+             * 番組表の詳細に同じ札が2つ出ていた
+             */
+            audios: [
+                { type: 3, text: '主音声ステレオ' },
+                { type: 3, text: '解説ステレオ', main: false },
+            ],
             video: [0x01, 0xb1],
         });
     }

@@ -80,11 +80,46 @@ describe('EIT の解析', () => {
     });
 
     test('ジャンル・音声・映像', () => {
-        const parsed = parseEit(section([event({ genres: [[7, 0]], audioType: 3, video: [0x01, 0xb1] })]));
+        const parsed = parseEit(
+            section([event({ genres: [[7, 0]], audios: [{ type: 3 }], video: [0x01, 0xb1] })]),
+        );
         const found = parsed?.events[0];
         expect(found?.genres).toEqual([{ lv1: 7, lv2: 0 }]);
-        expect(found?.audios).toEqual([{ componentType: 3, langs: ['jpn'], samplingRate: 48000 }]);
+        expect(found?.audios).toEqual([
+            { componentType: 3, langs: ['jpn'], samplingRate: 48000, main: true },
+        ]);
         expect(found?.video).toEqual({ type: 'mpeg2', resolution: '1080i' });
+    });
+
+    /*
+     * **放送が付けた名前まで読む。**
+     *
+     * 解説放送や二重音声は、種別も言語も同じ音声が2本並ぶ。実機の日テレ
+     * 「金曜ロードショー[解]」はどちらも `component_type=3 lang=jpn` で、
+     * 見分けが付くのは `text_char` の「主音声ステレオ」「解説ステレオ」だけ。
+     * 読み落としていた頃は、番組表の詳細に**同じ札が2つ**出ていた
+     */
+    test('音声が名乗っている名前と、どちらが主音声か', () => {
+        const parsed = parseEit(
+            section([
+                event({
+                    audios: [
+                        { type: 3, text: '主音声ステレオ' },
+                        { type: 3, text: '解説ステレオ', main: false },
+                    ],
+                }),
+            ]),
+        );
+        expect(parsed?.events[0]?.audios).toEqual([
+            { componentType: 3, langs: ['jpn'], samplingRate: 48000, text: '主音声ステレオ', main: true },
+            { componentType: 3, langs: ['jpn'], samplingRate: 48000, text: '解説ステレオ', main: false },
+        ]);
+    });
+
+    /** 名乗らない放送のほうが多い。**空の名前は持たない** (札に空白が出る) */
+    test('名乗らなければ名前は持たない', () => {
+        const parsed = parseEit(section([event({ audios: [{ type: 3 }] })]));
+        expect(parsed?.events[0]?.audios[0]).not.toHaveProperty('text');
     });
 
     test('有料放送は free_CA_mode で分かる', () => {

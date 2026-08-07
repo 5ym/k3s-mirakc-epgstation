@@ -155,7 +155,7 @@ CREATE TABLE IF NOT EXISTS programs (
     genre_detail TEXT,                -- JSON: [{lv1, lv2}]。表示用
     is_free INTEGER NOT NULL DEFAULT 1,
     audio_type INTEGER,               -- ARIB の componentType。2 がデュアルモノ
-    audios TEXT,                      -- JSON: [{componentType, langs}]。表示用
+    audios TEXT,                      -- JSON: [{componentType, langs, text?, main?}]。表示用
     video_type TEXT,                  -- mpeg2 / h.264 など
     video_resolution TEXT,            -- 1080i / 480i など
     updated_at INTEGER NOT NULL

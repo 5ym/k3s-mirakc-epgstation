@@ -46,6 +46,17 @@ export interface EventAudio {
     componentType: number;
     langs: string[];
     samplingRate?: number;
+    /**
+     * 放送が自分で付けた名前。**「主音声ステレオ」「解説ステレオ」。**
+     *
+     * 同じ構成の音声が2本ある番組 (解説放送・二重音声) は、種別も言語も同じに
+     * なるので**符号からは区別が付かない**。実機の日テレでは、どちらも
+     * `component_type=3 lang=jpn` で「ステレオ (日本語)」が2つ並んでいた。
+     * 見分けが付くものはここにしか無い
+     */
+    text?: string;
+    /** 主音声か (`main_component_flag`)。**解説放送はこちらが立っていないほう** */
+    main?: boolean;
 }
 
 export interface EitEvent {
@@ -205,15 +216,31 @@ function readDescriptors(event: EitEvent, body: Uint8Array): void {
                 };
                 break;
             }
+            /*
+             * audio_component_descriptor (ARIB STD-B10 第2部)。
+             *
+             *     [0] reserved(4) stream_content(4)
+             *     [1] component_type          … ステレオ・デュアルモノ…
+             *     [2] component_tag
+             *     [3] stream_type
+             *     [4] simulcast_group_tag
+             *     [5] 多言語(1) 主音声(1) 品質(2) 標本化周波数(3) reserved(1)
+             *     [6..8]   ISO 639-2
+             *     [9..11]  ISO 639-2 (多言語のときだけ)
+             *     [残り]   text_char … **放送が付けた名前**
+             */
             case DESC_AUDIO_COMPONENT: {
                 const flags = data[5];
                 const multiLingual = (flags & 0x80) !== 0;
                 const langs = [lang(data, 6)];
                 if (multiLingual) langs.push(lang(data, 9));
+                const text = decodeAribText(data.subarray(6 + (multiLingual ? 6 : 3))).trim();
                 event.audios.push({
                     componentType: data[1],
                     langs,
                     samplingRate: SAMPLING_RATE[(flags >> 1) & 0x07],
+                    ...(text === '' ? {} : { text }),
+                    main: (flags & 0x40) !== 0,
                 });
                 break;
             }

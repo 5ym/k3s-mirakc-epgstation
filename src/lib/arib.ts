@@ -244,11 +244,33 @@ export interface Audio {
     componentType: number;
     langs?: string[];
     samplingRate?: number;
+    /**
+     * 放送が自分で付けた名前 (`audio_component_descriptor` の `text_char`)。
+     * 「主音声ステレオ」「解説ステレオ」
+     */
+    text?: string;
+    /** 主音声か。**解説放送はこちらが立っていないほう** */
+    main?: boolean;
 }
 
-/** 「ステレオ (日本語)」「デュアルモノ (日本語/英語)」 */
+/**
+ * 「主音声ステレオ (日本語)」「ステレオ (日本語)」「デュアルモノ (日本語/英語)」
+ *
+ * **放送が名乗っていれば、その名前を使う。**
+ *
+ * 符号 (`component_type` と言語) からだけでは、同じ構成の音声が2本ある番組を
+ * 区別できない — 実機の日テレ「金曜ロードショー[解]」では、主音声も解説も
+ * `component_type=3 lang=jpn` なので、**「ステレオ (日本語)」が2つ並んでいた**。
+ * 放送のほうは `text_char` に「主音声ステレオ」「解説ステレオ」と書いている。
+ *
+ * その名前には構成 (「ステレオ」) まで入っていることが多いので、こちらの
+ * 対応表と繋げず**差し替える**。言語は名前に入っていないので添える
+ */
 export function audioLabel(audio: Audio): string {
-    const type = AUDIO_TYPE[audio.componentType] ?? `種別${audio.componentType}`;
+    const type =
+        audio.text !== undefined && audio.text !== ''
+            ? audio.text
+            : (AUDIO_TYPE[audio.componentType] ?? `種別${audio.componentType}`);
     const langs = (audio.langs ?? []).map((lang) => LANGUAGE[lang] ?? lang);
     return langs.length === 0 ? type : `${type} (${langs.join('/')})`;
 }
@@ -276,6 +298,8 @@ export interface AudioTrack {
     side: AudioSide;
     /** 「主音声 (日本語)」「音声2 ステレオ (英語)」 */
     label: string;
+    /** 放送が「主音声」と言っているか。**何も頼まれなかったときに選ぶ** */
+    main?: boolean;
 }
 
 /**
@@ -300,15 +324,26 @@ export function audioTracks(audios: Audio[]): AudioTrack[] {
     const tracks: AudioTrack[] = [];
 
     audios.forEach((audio, stream) => {
-        const head = many ? `音声${stream + 1} ` : '';
+        /*
+         * **放送が名乗っていれば、何本目かは添えない。**
+         *
+         * 「主音声ステレオ」「解説ステレオ」と名前が付いているところへ
+         * 「音声1」「音声2」まで足すと、長いだけで何も増えない。名前が
+         * 無いときだけ、番号で呼ぶしかない
+         */
+        const named = audio.text !== undefined && audio.text !== '';
+        const head = many && !named ? `音声${stream + 1} ` : '';
         const langs = (audio.langs ?? []).map((lang) => LANGUAGE[lang] ?? lang);
         const of = (index: number) => (langs[index] === undefined ? '' : ` (${langs[index]})`);
+        const main = audio.main;
 
         if (audio.componentType === DUAL_MONO) {
+            // 左右に分かれているので、名前ではなくどちら側かで呼ぶ
+            const index = many ? `音声${stream + 1} ` : '';
             tracks.push(
-                { id: `${stream}:main`, stream, side: 'main', label: `${head}主音声${of(0)}` },
-                { id: `${stream}:sub`, stream, side: 'sub', label: `${head}副音声${of(1)}` },
-                { id: `${stream}:both`, stream, side: 'both', label: `${head}主+副` },
+                { id: `${stream}:main`, stream, side: 'main', label: `${index}主音声${of(0)}`, main },
+                { id: `${stream}:sub`, stream, side: 'sub', label: `${index}副音声${of(1)}`, main },
+                { id: `${stream}:both`, stream, side: 'both', label: `${index}主+副`, main },
             );
         } else {
             tracks.push({
@@ -316,6 +351,7 @@ export function audioTracks(audios: Audio[]): AudioTrack[] {
                 stream,
                 side: 'both',
                 label: `${head}${audioLabel(audio)}`,
+                main,
             });
         }
     });
@@ -325,13 +361,16 @@ export function audioTracks(audios: Audio[]): AudioTrack[] {
 }
 
 /**
- * 頼まれたものを選ぶ。**知らないものを頼まれたら先頭。**
+ * 頼まれたものを選ぶ。**知らないものを頼まれたら主音声。**
  *
  * 番組が変われば音声の構成も変わる (二カ国語の映画が終わればステレオに戻る)。
- * 前の番組の合言葉が残っていても、無いものは選べない
+ * 前の番組の合言葉が残っていても、無いものは選べない。
+ *
+ * **どれが主音声かは放送が言っている** (`main_component_flag`)。並び順の1本目が
+ * 主音声とは限らないので、言っているならそちらに従う。何も言っていなければ先頭
  */
 export function pickTrack(tracks: AudioTrack[], wanted: string | undefined): AudioTrack {
-    return tracks.find((track) => track.id === wanted) ?? tracks[0];
+    return tracks.find((track) => track.id === wanted) ?? tracks.find((track) => track.main) ?? tracks[0];
 }
 
 const VIDEO_TYPE: Record<string, string> = {

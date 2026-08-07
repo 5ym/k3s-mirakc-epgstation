@@ -118,13 +118,25 @@ export interface SynthEvent {
     description?: string;
     extended?: Record<string, string>;
     genres?: [number, number][];
-    /** audio_component_descriptor の component_type (3 = ステレオ) */
-    audioType?: number;
+    /** 音声。並べたぶんだけ audio_component_descriptor を積む */
+    audios?: SynthAudio[];
     /** component_descriptor の [stream_content, component_type] */
     video?: [number, number];
     isFree?: boolean;
     /** 4 = 放送中。EIT[p/f] で「いま」を表すのに使う */
     runningStatus?: number;
+}
+
+/** 音声1本ぶん。**放送が付けた名前まで持てる** (解説放送の見分けに要る) */
+export interface SynthAudio {
+    /** audio_component_descriptor の component_type (3 = ステレオ) */
+    type: number;
+    /** ISO 639-2。省くと jpn */
+    lang?: string;
+    /** 「主音声ステレオ」「解説ステレオ」。省くと名乗らない */
+    text?: string;
+    /** 主音声か。省くと主音声 */
+    main?: boolean;
 }
 
 export interface EitOptions {
@@ -163,10 +175,19 @@ function eventDescriptors(event: SynthEvent): number[] {
         out.push(0x50, 0x06, 0xf0 | streamContent, componentType, 0x00, 0x6a, 0x70, 0x6e);
     }
 
-    if (event.audioType !== undefined) {
-        // stream_content / component_type / component_tag / stream_type /
-        // simulcast_group_tag / フラグ / 言語
-        out.push(0xc4, 0x09, 0x02, event.audioType, 0x10, 0x0f, 0xff, 0b0000_1110, 0x6a, 0x70, 0x6e);
+    for (const [index, audio] of (event.audios ?? []).entries()) {
+        /*
+         * stream_content / component_type / component_tag / stream_type /
+         * simulcast_group_tag / フラグ / 言語 / **放送が付けた名前**。
+         *
+         * フラグは 多言語(1) 主音声(1) 品質(2) 標本化周波数(3) reserved(1)。
+         * 名前は、種別も言語も同じ音声が2本あるとき**唯一の見分け**になる
+         */
+        const lang = [...(audio.lang ?? 'jpn')].map((c) => c.charCodeAt(0));
+        const text = [...encodeAribText(audio.text ?? '')];
+        const flags = ((audio.main ?? true) ? 0b0100_0000 : 0) | 0b0000_1110;
+        const body = [0x02, audio.type, 0x10 + index, 0x0f, 0xff, flags, ...lang, ...text];
+        out.push(0xc4, body.length, ...body);
     }
 
     return out;

@@ -59,6 +59,34 @@ describe('audioLabel', () => {
     test('知らない種別は番号のまま残す', () => {
         expect(audioLabel({ componentType: 99, langs: ['xyz'] })).toBe('種別99 (xyz)');
     });
+
+    /*
+     * **放送が名乗っていれば、その名前を使う。**
+     *
+     * 解説放送や二重音声は、種別も言語も同じ音声が2本並ぶ。実機の日テレ
+     * 「金曜ロードショー[解]」はどちらも `component_type=3 lang=jpn` なので、
+     * 番組表の詳細に**「ステレオ (日本語)」が2つ**出ていて見分けが付かなかった。
+     * 放送のほうは `text_char` に「主音声ステレオ」「解説ステレオ」と書いている
+     */
+    test('放送が付けた名前があれば、そちらを出す', () => {
+        expect(audioLabel({ componentType: 3, langs: ['jpn'], text: '主音声ステレオ' })).toBe(
+            '主音声ステレオ (日本語)',
+        );
+        expect(audioLabel({ componentType: 3, langs: ['jpn'], text: '解説ステレオ' })).toBe(
+            '解説ステレオ (日本語)',
+        );
+    });
+
+    /** 名前に構成まで入っているので、こちらの対応表と繋げると二重になる */
+    test('名前と構成を繋げない', () => {
+        expect(audioLabel({ componentType: 3, langs: ['jpn'], text: '解説ステレオ' })).not.toContain(
+            'ステレオステレオ',
+        );
+    });
+
+    test('名前が空なら構成で呼ぶ', () => {
+        expect(audioLabel({ componentType: 3, langs: ['jpn'], text: '' })).toBe('ステレオ (日本語)');
+    });
 });
 
 /**
@@ -106,6 +134,21 @@ describe('audioTracks', () => {
         expect(tracks.map((track) => track.stream)).toEqual([0, 1]);
     });
 
+    /*
+     * **名乗っているなら番号は要らない。** 「主音声ステレオ」「解説ステレオ」と
+     * 書いてあるところへ「音声1」「音声2」まで足すと、長いだけで何も増えない
+     */
+    test('放送が名乗っていれば番号は添えない', () => {
+        const tracks = audioTracks([
+            { componentType: 3, langs: ['jpn'], text: '主音声ステレオ', main: true },
+            { componentType: 3, langs: ['jpn'], text: '解説ステレオ', main: false },
+        ]);
+        expect(tracks.map((track) => track.label)).toEqual([
+            '主音声ステレオ (日本語)',
+            '解説ステレオ (日本語)',
+        ]);
+    });
+
     /** 2本目がデュアルモノということもある。**どちらの数え方も同時に効く** */
     test('2本目がデュアルモノでも展開する', () => {
         const tracks = audioTracks([
@@ -141,6 +184,18 @@ describe('pickTrack', () => {
     test('無いものを頼まれたら先頭', () => {
         expect(pickTrack(tracks, '1:sub').id).toBe('0:main');
         expect(pickTrack(tracks, undefined).id).toBe('0:main');
+    });
+
+    /*
+     * **どれが主音声かは放送が言っている** (`main_component_flag`)。
+     * 並び順の1本目が主音声とは限らないので、言っているならそちらに従う
+     */
+    test('何も頼まれなければ、放送が言う主音声', () => {
+        const two = audioTracks([
+            { componentType: 3, langs: ['jpn'], text: '解説ステレオ', main: false },
+            { componentType: 3, langs: ['jpn'], text: '主音声ステレオ', main: true },
+        ]);
+        expect(pickTrack(two, undefined).label).toBe('主音声ステレオ (日本語)');
     });
 });
 

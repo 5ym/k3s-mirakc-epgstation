@@ -303,7 +303,17 @@ export function savePrograms(events: EitEvent[]): number {
                 event.audios.length === 0
                     ? null
                     : JSON.stringify(
-                          event.audios.map((a) => ({ componentType: a.componentType, langs: a.langs })),
+                          /*
+                           * **放送が付けた名前も残す。** 解説放送や二重音声は、
+                           * 種別も言語も同じ音声が2本並ぶので、符号だけでは
+                           * 「ステレオ (日本語)」が2つになって見分けが付かない
+                           */
+                          event.audios.map((a) => ({
+                              componentType: a.componentType,
+                              langs: a.langs,
+                              ...(a.text === undefined ? {} : { text: a.text }),
+                              ...(a.main === undefined ? {} : { main: a.main }),
+                          })),
                       ),
                 event.video?.type ?? null,
                 event.video?.resolution ?? null,

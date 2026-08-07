@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import type { Locator } from '@playwright/test';
 import { SERVICES } from '../fake/services';
 import { airing, cellOf, expect, goto, syncEpg, test, upcoming } from './helpers';
@@ -251,6 +251,32 @@ test.describe('ライブ視聴', () => {
     });
 
     /*
+     * **焼けなくなったら、その場で言う。**
+     *
+     * ffmpeg が入口で降りても何も伝えていなかった頃は、画面には**前の絵が
+     * 貼られたまま6秒たって黒くなる**だけだった (`live-player` の `HOLD_MOST`)。
+     * 見た目は「切り替えに6秒かかった」で、実際には失敗しているのに、
+     * そうとは分からない出方をする。
+     *
+     * 実機で出たのは tvk (T15) — 局が3つ相乗りしている TS で `-probesize` が
+     * 足りず、`-map 0:p:24632:v:0` を解決できないまま降りていた
+     */
+    test('焼けなくなったら、黙って消えずに理由を出す', async ({ page, stack }) => {
+        writeFileSync(stack.liveFailFile, '1');
+        try {
+            await goto(page, '/live');
+            await page.getByTestId('live-channel').first().click();
+
+            const status = page.getByTestId('live-status');
+            await expect(status).toContainText('映像を出せませんでした', { timeout: 15_000 });
+            // やり直せること。押せないと、開き直すしかなくなる
+            await expect(page.getByTestId('live-retry')).toBeVisible();
+        } finally {
+            rmSync(stack.liveFailFile, { force: true });
+        }
+    });
+
+    /*
      * **開いたら、いま映しているものまで送っておく。** 局が100を超える環境では
      * 覚えていた局が画面の外にあるほうが普通で、探させるのはテレビを点けたときの
      * 振る舞いから遠い
@@ -430,14 +456,14 @@ test.describe('ライブ視聴', () => {
     /*
      * **音声は番組表を見て組み立てる。**
      *
-     * 選べるものは番組ごとに違う (二カ国語なら主/副/主+副、解説放送なら音声1/音声2)
-     * ので、いま流れている番組から起こす (`arib.audioTracks`)。偽の放送は普通の
-     * ステレオしか流していないので、**選ぶものは1つ**になるのが正しい。
+     * 選べるものは番組ごとに違う (二カ国語なら主/副/主+副、解説放送なら音声が2本)
+     * ので、いま流れている番組から起こす (`arib.audioTracks`)。偽の放送は解説付きの
+     * ステレオ2本 — 実機によくある形で、**どちらも `component_type=3` の日本語**。
      *
      * 左右の配り直し (`-af pan=...`) が出ていたら、ステレオをデュアルモノと
      * 取り違えている — **絵は出るので、気付くのは音を聞いたときだけ**
      */
-    test('普通のステレオでは音をいじらず、切り替えも出さない', async ({ page, stack }) => {
+    test('ステレオでは音をいじらず、放送が言う主音声を焼く', async ({ page, stack }) => {
         await goto(page, '/live');
         await page.getByTestId('live-channel').first().click();
         await expect(page.getByTestId('live-title')).toBeVisible();
@@ -445,11 +471,30 @@ test.describe('ライブ視聴', () => {
         const args = await ffmpegArgs(stack.liveArgsFile, 'video', expect);
 
         expect(args).not.toContain('-af');
-        // 1本目の音声をそのまま。何本目かを名指ししていること自体は要る
+        // 何も頼まれていないので主音声。何本目かを名指ししていること自体は要る
         expect(args.some((a) => a.endsWith(':a:0'))).toBe(true);
+    });
 
-        // 選ぶものが1つしか無いのに切り替えを出すと、押しても何も起きない操作が並ぶ
-        await expect(page.getByTestId('live-audio')).toHaveCount(0);
+    /*
+     * **同じ構成の音声が2本あっても、見分けが付くようにする。**
+     *
+     * 解説放送はどちらも `component_type=3` の日本語なので、符号だけを見ていた
+     * 頃は**「ステレオ (日本語)」が2つ**並んで、どちらが何なのか分からなかった
+     * (実機の日テレ「金曜ロードショー[解]」)。放送のほうは
+     * `audio_component_descriptor` の `text_char` に名前を書いている
+     */
+    test('音声の切り替えに、放送が付けた名前を出す', async ({ page }) => {
+        await goto(page, '/live');
+        await page.getByTestId('live-channel').first().click();
+        await expect(page.getByTestId('live-title')).toBeVisible();
+
+        const audio = page.getByTestId('live-audio');
+        await expect(audio).toBeVisible();
+        await audio.click();
+        await expect(page.getByTestId('live-audio-option')).toHaveText([
+            '主音声ステレオ (日本語)',
+            '解説ステレオ (日本語)',
+        ]);
     });
 
     /*
@@ -521,7 +566,15 @@ test.describe('ライブ視聴', () => {
 
         // 字幕も局を名指しする。1本の物理チャンネルに複数の局が乗っている
         const filter = args[args.indexOf('-filter_complex') + 1];
-        expect(filter).toMatch(/^\[0:p:\d+:s:0\]showinfo/);
+        expect(filter).toMatch(/^\[0:p:\d+:s:0\]null/);
+
+        /*
+         * **別の口には喋らせない。** 時刻と「空かどうか」を `showinfo` に喋らせ、
+         * 標準エラーの行と標準出力の PNG を来た順に組にしていた頃は、**数が
+         * 合わずにずれていた** (実機で PNG 77枚に対し showinfo 79行)。一度ずれると
+         * 戻らず、字幕が1秒ほど遅れて出て、消えるのも遅れる
+         */
+        expect(args).not.toContain('showinfo');
     });
 
     /*
