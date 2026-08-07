@@ -197,6 +197,27 @@ export function encodeArgs(
         deinterlace(smooth),
         '-map',
         `${from}:v:0`,
+        /*
+         * **コマ数の上限を言っておく。**
+         *
+         * `-probesize` を 20KB まで削ったので、ffmpeg は入口でコマ数を読み切れず、
+         * 時間の刻み (90kHz) から**でたらめな値**を起こすことがある。x264 は黙って
+         * 受けるが、**SVT-AV1 は突っぱねる**:
+         *
+         *     Svt[error]: Instance 1: The maximum allowed frame rate is 240 fps
+         *     [libsvtav1] Error setting encoder parameters: bad parameter
+         *
+         * 実機で 20KB のまま AV1 を選ぶと 0/3、この上限を付けると 3/3 通った。
+         *
+         * **固定 (`-r`) ではなく上限 (`-fpsmax`) にする。** 固定すると、放送が
+         * 本当に 59.94p だったとき (720p の局) にコマを落とす。上限なら、
+         * まともな値のときは何も起きず、でたらめな値のときだけ抑える。
+         *
+         * 値はインタレ解除の出方そのまま — 放送は 29.97 のインタレなので、
+         * フィールドを起こせば 59.94、フレームのままなら 29.97
+         */
+        '-fpsmax',
+        smooth ? '60000/1001' : '30000/1001',
         ...videoArgs(codec),
         // 何本目の音声か。複数入っている放送では 0 が主とは限らない
         '-map',

@@ -302,3 +302,37 @@ describe('H.264 は速さを優先する', () => {
         expect(av1).toContain('libsvtav1');
     });
 });
+
+/**
+ * **コマ数の上限を言っておく。**
+ *
+ * `-probesize` を 20KB まで削ったので、ffmpeg は入口でコマ数を読み切れず、
+ * 時間の刻み (90kHz) からでたらめな値を起こすことがある。x264 は黙って受けるが、
+ * **SVT-AV1 は突っぱねる** (`The maximum allowed frame rate is 240 fps`)。
+ * 実機で 20KB のまま AV1 を選ぶと 0/3、上限を付けると 3/3 通った。
+ */
+describe('コマ数の上限', () => {
+    const cap = (args: string[]) => args[args.indexOf('-fpsmax') + 1];
+
+    test('インタレ解除の出方に合わせる', () => {
+        // フィールドを起こす = 59.94
+        expect(cap(encodeArgs(1024, true, stereo))).toBe('60000/1001');
+        // フレームのまま = 29.97 (国内アニメ)
+        expect(cap(encodeArgs(1024, false, stereo))).toBe('30000/1001');
+    });
+
+    /*
+     * **固定 (`-r`) ではなく上限。** 固定すると、放送が本当に 59.94p だったとき
+     * (720p の局) にコマを落とす
+     */
+    test('固定はしない', () => {
+        expect(encodeArgs(1024, true, stereo)).not.toContain('-r');
+    });
+
+    /** どちらの焼き方でも要る。読み切れないのは入口の話 */
+    test('どちらの焼き方でも付ける', () => {
+        for (const codec of ['h264', 'av1'] as const) {
+            expect(encodeArgs(1024, true, stereo, codec)).toContain('-fpsmax');
+        }
+    });
+});
