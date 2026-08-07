@@ -47,15 +47,16 @@ describe('ライブの焼き方', () => {
      *     50KB   丸ごと 0/3 通る   1局に絞る 3/3
      *    120KB   丸ごと 1/3 通る   1局に絞る 3/3
      *
-     * 絞れば 20KB でも通る。5倍の余裕を見て 100KB。
+     * 絞れば 20KB でも通る。**そこまで下げてある** — 6回ずつ測ると
+     * 100KB は最短 474ms、20KB は最短 441ms で、33ms は固定の費用。
      *
      * **上げる方向には床がある。** 実測した ffmpeg の立ち上がりは
      * 1.5MB → 1429ms、800KB → 972ms、400KB → 約 700ms、200KB → 754ms。
      * 750ms 前後で止まるのは、放送の MPEG-2 が GOP の頭を待つため
      */
-    test('入口の解析は 100KB まで', () => {
+    test('入口の解析は 20KB まで', () => {
         const args = plain();
-        expect(args[args.indexOf('-probesize') + 1]).toBe('100000');
+        expect(args[args.indexOf('-probesize') + 1]).toBe('20000');
     });
 
     /*
@@ -262,5 +263,42 @@ describe('音声も組で決まる', () => {
             const out = args(codec);
             expect(out[out.indexOf('-ac') + 1]).toBe('2');
         }
+    });
+});
+
+/**
+ * **H.264 は量を捨てて速さを採る。** AV1 と役割が分かれている —
+ * あちらが「小さく」、こちらが「速く」。
+ *
+ * 実機で6回ずつ測ったもの。ばらつきは放送の GOP 待ち (0〜501ms) なので、
+ * 短いほうの2つを見る:
+ *
+ *     veryfast  既定      最短 438ms  2番目 535ms   2.5 Mbit/s  ← 前
+ *     ultrafast 既定      最短 386ms  2番目 429ms   8.2 Mbit/s  ← これ
+ *     ultrafast crf 20    最短 524ms  2番目 584ms  10.7 Mbit/s
+ *     ultrafast crf 18    最短 478ms  2番目 511ms  14.6 Mbit/s
+ *     ultrafast crf 14    最短 586ms              35.9 Mbit/s
+ *     ultrafast 無劣化    最短 643ms             235.7 Mbit/s
+ */
+describe('H.264 は速さを優先する', () => {
+    test('いちばん速い設定で焼く', () => {
+        expect(plain()[plain().indexOf('-preset') + 1]).toBe('ultrafast');
+    });
+
+    /*
+     * **画質は据え置き。** 上げると必ず遅くなる (最初の1枚が太り、書き出すのに
+     * 時間がかかる)。速さが目的なので、ここは触らない — 出てくる絵は今までと
+     * 同じで、増えるのは量だけ
+     */
+    test('画質は指定しない (上げると遅くなる)', () => {
+        expect(plain()).not.toContain('-crf');
+        expect(plain()).not.toContain('-qp');
+    });
+
+    /** AV1 は量のほう。こちらの設定を持ち込まない */
+    test('AV1 には持ち込まない', () => {
+        const av1 = encodeArgs(1024, true, stereo, 'av1');
+        expect(av1).not.toContain('ultrafast');
+        expect(av1).toContain('libsvtav1');
     });
 });

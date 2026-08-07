@@ -168,3 +168,40 @@ describe('貯める量の決め直し', () => {
         expect(nextTarget(CEILING, true, 0)).toBe(CEILING);
     });
 });
+
+/**
+ * **下限は起動時間そのもの。**
+ *
+ * 再生を始める条件は「貯まった尺 ≧ 貯める量」で、電波は実時間で届くのだから、
+ * 0.4 秒貯めるには 0.4 秒かかる。開いてから絵が出るまでの内訳のうち、
+ * **こちらの都合で動かせるのはここだけ** (電波のロックも ffmpeg の立ち上がりも
+ * 動かせない)。
+ */
+describe('貯める量の下限', () => {
+    /** サーバは 0.05 秒ずつ塊を出す (`server/live.ts` の -frag_duration) */
+    const FRAGMENT = 0.05;
+
+    test('塊いくつかぶんに収める', () => {
+        expect(FLOOR).toBeLessThanOrEqual(0.25);
+        // 1つ2つでは、届き方が少し揺れただけで足りなくなる
+        expect(FLOOR).toBeGreaterThanOrEqual(FRAGMENT * 3);
+    });
+
+    /*
+     * **小さすぎても壊れない。** 足りずに止まったら増える。荒れる経路
+     * (宅外) では自分で伸びていくので、下限は宅内に合わせてよい
+     */
+    test('足りなければ、そこから伸びる', () => {
+        let target = FLOOR;
+        for (let i = 0; i < 3; i++) target = nextTarget(target, true, 0);
+        expect(target).toBeGreaterThan(1);
+        expect(target).toBeLessThanOrEqual(CEILING);
+    });
+
+    /** 伸びたぶんは、無事が続けば下限まで戻る */
+    test('無事が続けば下限まで戻る', () => {
+        let target = nextTarget(FLOOR, true, 0);
+        for (let i = 0; i < 50; i++) target = nextTarget(target, false, SETTLED);
+        expect(target).toBe(FLOOR);
+    });
+});

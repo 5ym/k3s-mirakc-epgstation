@@ -29,6 +29,20 @@ export type LiveState = 'idle' | 'connecting' | 'playing' | 'error';
  * 5分あれば、電話に出て戻ってくるくらいは追いつける。
  */
 const KEEP = 300;
+/**
+ * 抱えてよい量 (バイト)。**時間だけで切ると、太い絵で溢れる。**
+ *
+ * 5分は「毎秒 3Mbit なら 110MB」のつもりで決めた値だった。ところが焼き方は
+ * 選べるようになっていて (`LiveCodec`)、H.264 は絵を優先するので実測 35.9Mbit/s
+ * ある — そのまま5分持つと **1.3GB** で、ブラウザの上限 (数百MB) を軽く超える。
+ * 超えると `appendBuffer` が `QuotaExceededError` で落ち、**そこから絵が出ない**。
+ *
+ * なので**時間とバイト数の小さいほう**で切る。太ければ戻れる幅が縮むだけで、
+ * 映らなくなるよりはるかにいい
+ */
+const BUDGET = 120 * 1024 * 1024;
+/** 戻れる幅の下限 (秒)。ここまで縮めても足りないなら、そもそも抱えられない */
+const KEEP_LEAST = 20;
 /** 貯める量を決め直す間隔 (ms)。塊は毎秒20個来るので、そのたびには回さない */
 const SETTLE_EVERY = 5_000;
 /**
@@ -178,6 +192,9 @@ export function livePlayer() {
      * 前のが終わる前に呼ぶと `InvalidStateError` で止まる
      */
     const pending: Uint8Array[] = [];
+    /** 受け取った映像の量と、数えはじめた時刻。**戻れる幅を決めるのに使う** */
+    let received = 0;
+    let receivedFrom = 0;
 
     /**
      * 前の絵を写して、次が出るまで貼っておく。**切り替えの間の黒を埋める。**
@@ -363,9 +380,22 @@ export function livePlayer() {
      * `QuotaExceededError` で落ちる。落ちるとそこから絵が出なくなるので、
      * 遅れて見られる長さに上限を設けて、古いほうから捨てる。
      */
+    /**
+     * どれだけ戻れるか (秒)。**太い絵ほど短くなる。**
+     *
+     * 受け取っている速さから、`BUDGET` に収まる長さを出す。まだ測れていない
+     * 間は今までどおり 5 分。
+     */
+    function keepFor(): number {
+        const seconds = (Date.now() - receivedFrom) / 1000;
+        if (receivedFrom === 0 || seconds < 2 || received === 0) return KEEP;
+        const perSecond = received / seconds;
+        return Math.max(KEEP_LEAST, Math.min(KEEP, BUDGET / perSecond));
+    }
+
     function trim(end: number): void {
         if (buffer === null || buffer.updating || buffer.buffered.length === 0) return;
-        const cut = end - KEEP;
+        const cut = end - keepFor();
         if (buffer.buffered.start(0) >= cut) return;
         try {
             buffer.remove(0, cut);
@@ -738,6 +768,9 @@ export function livePlayer() {
                 }
             }
             if (kind === CHANNEL.videoInit || kind === CHANNEL.videoMedia) {
+                // 戻れる幅を決めるのに、どれだけ来ているかを数える (`keepFor`)
+                if (receivedFrom === 0) receivedFrom = Date.now();
+                received += body.byteLength;
                 pending.push(body);
                 drain();
                 return;
@@ -815,6 +848,9 @@ export function livePlayer() {
          * 足しに行くと中身が混ざって止まる
          */
         clear();
+        // 焼き方が変われば太さも変わる。数え直す
+        received = 0;
+        receivedFrom = 0;
         const media = new MediaSource();
         source = media;
         video.src = URL.createObjectURL(media);
