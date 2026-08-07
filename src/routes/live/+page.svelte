@@ -377,10 +377,15 @@
                     data-veiled={!player.holding}
                 >
                     {#if player.state === 'connecting'}
-                        <span
-                            class="loading loading-spinner loading-lg
-                                   {player.holding ? 'rounded-box bg-black/45 p-3 text-white' : ''}"
-                        ></span>
+                        <!--
+                            **敷くのは外側。** daisyUI の `loading` は自分の
+                            `background-color` で回る絵を塗っているので、そこへ
+                            `bg-*` を足すと**回っているものの色を上書きする** —
+                            敷いたつもりが、見えなくなる
+                        -->
+                        <span class={player.holding ? 'rounded-box bg-black/45 p-3 text-white' : 'contents'}>
+                            <span class="loading loading-spinner loading-lg"></span>
+                        </span>
                     {:else if player.state === 'error'}
                         <div class="text-center">
                             <div class="text-error font-medium">{player.message}</div>
