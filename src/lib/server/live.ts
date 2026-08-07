@@ -392,6 +392,57 @@ function watch(
 }
 
 /**
+ * 誰も繋いでこなかったときに畳むまで (ms)。
+ *
+ * **画面はすぐ来る** — 実測で、ページを組みはじめてから WebSocket が繋がる
+ * まで 160ms。それでも来ないなら開いたそばから離れた人なので、掴んだままに
+ * しない (ライブは録画の次に強いので、放っておくと番組表集めを蹴り続ける)。
+ */
+const WARM_WAIT = 8_000;
+
+/**
+ * **画面が繋いでくる前に焼きはじめる。**
+ *
+ * 開いてから絵が出るまでを実機で割ると ([stream.md](../../../docs/stream.md) §4):
+ *
+ *     画面が動き出して札を取り、WebSocket が繋がるまで   160ms
+ *     ffmpeg の立ち上がり                              530ms
+ *     放送の I フレーム待ち                          0〜501ms
+ *
+ * **前の 160ms は後ろと重ねられる。** これから開くのがどの局かは、画面を
+ * 組む時点で分かっている — 番組表から名指しで来たか (`?service=`)、画面が
+ * 覚えている前回の局か (`LAST_COOKIE`)、一覧の先頭。
+ *
+ * **1枚も出ないうちに繋がるので、合流の待ちは付かない。** 焼いたものは
+ * 鍵フレームから始まるが、それが出るのは 530ms 後なので、160ms で来る画面は
+ * まだ何も渡されていない状態で乗る。
+ *
+ * 待たない・投げない。掴めなくても画面はいつもどおり繋いでくるので、
+ * そのとき改めて開くだけ。
+ */
+export function warm(channelType: string, channel: string, serviceId: number, audio?: string): void {
+    if (channelType === '' || channel === '' || !Number.isFinite(serviceId)) return;
+
+    const now = nowPlaying(serviceId, audio);
+    const id = key(channelType, channel, serviceId, now.smooth, now.audio);
+    // 既に焼いていれば何もしない。開き直すたびに増やさない
+    if (sessions.has(id)) return;
+
+    const session = new Session(channelType, channel, serviceId, now.program, now.smooth, now.audio);
+    sessions.set(id, session);
+    void session.run();
+
+    /*
+     * **誰も来なければ自分で畳む。** 見ている人が居なくなったら畳む仕掛け
+     * (`attend` の `leave`) は、**1人も来なかった場合には動かない**
+     */
+    const timer = setTimeout(() => {
+        if (session.empty) session.stop();
+    }, WARM_WAIT);
+    timer.unref?.();
+}
+
+/**
  * 1本ぶんの受け持ち。**繋いでいる間だけチューナーを掴む。**
  *
  * 接続そのものが在席の印になる (`stream.md` の「誰が見ているかが分かる」)。

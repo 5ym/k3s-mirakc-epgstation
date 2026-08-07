@@ -115,3 +115,14 @@ export type Command = {
 
 /** WebSocket の宛先 */
 export const SOCKET_PATH = '/api/live/socket';
+
+/**
+ * 前回見ていた局を、**サーバにも読めるように**置いておく cookie。
+ *
+ * 覚え先そのものは localStorage だが、あちらはサーバから読めない。画面を
+ * 組む時点で「これからどの局を開くか」が分からないと、**繋いでくる前に
+ * 焼きはじめられない** (`server/live.ts` の `warm`)。中身は `Tuned` の JSON。
+ *
+ * `/live` にだけ付ける。他の画面の要求に毎回ぶら下げるものではない
+ */
+export const LAST_COOKIE = 'denpa_live_last';

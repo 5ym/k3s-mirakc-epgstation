@@ -1,5 +1,7 @@
+import { LAST_COOKIE } from '$lib/live';
 import { queryAll } from '$lib/server/db';
 import { airing, CURRENT_SERVICES, SERVICE_ORDER, SERVICE_TYPE_ORDER } from '$lib/server/epg';
+import { warm } from '$lib/server/live';
 import type { Service } from '$lib/types';
 
 /**
@@ -30,7 +32,32 @@ export interface LiveChannel {
     now: { name: string; startAt: number; endAt: number } | null;
 }
 
-export function load({ url }) {
+/**
+ * 画面が覚えている前回の局。**cookie から読む。**
+ *
+ * 覚え先そのものは localStorage (`live-player.svelte.ts` の `remember`) だが、
+ * あちらはサーバから読めない。**繋いでくる前に焼きはじめる**ためだけに、
+ * 同じものを cookie にも置いてもらっている。壊れていても無視するだけでよい —
+ * 落ちたら「先に焼く相手が分からない」で、いつもどおりの速さに戻るだけ
+ */
+function remembered(
+    raw: string | undefined,
+    channels: LiveChannel[],
+): { channel: LiveChannel; audio?: string } | null {
+    if (raw === undefined) return null;
+    try {
+        const saved = JSON.parse(raw) as Record<string, unknown>;
+        const found = channels.find(
+            (channel) => channel.type === saved.channelType && channel.channel === saved.channel,
+        );
+        if (found === undefined) return null;
+        return { channel: found, audio: typeof saved.audio === 'string' ? saved.audio : undefined };
+    } catch {
+        return null;
+    }
+}
+
+export function load({ url, cookies }) {
     const at = Date.now();
     // テレビと同じ並び (SERVICE_TYPE_ORDER / SERVICE_ORDER)。番組表とも揃えてある
     const services = queryAll<Service>(
@@ -76,6 +103,17 @@ export function load({ url }) {
      */
     const asked = Number(url.searchParams.get('service'));
     const initial = channels.some((channel) => channel.id === asked) ? asked : null;
+
+    /*
+     * **繋いでくる前に焼きはじめる** (`live.warm`)。
+     *
+     * これから開くのがどの局かは、ここで既に決まっている — 画面が `onMount` で
+     * 選ぶのと同じ順 (名指し → 覚えている前回の局 → 一覧の先頭)。**順番を
+     * 揃えておく**こと。ずれると、使われない焼きが1本立って畳まれるだけになる
+     */
+    const saved = initial === null ? remembered(cookies.get(LAST_COOKIE), channels) : null;
+    const first = initial === null ? (saved?.channel ?? channels[0]) : channels.find((c) => c.id === initial);
+    if (first !== undefined) warm(first.type, first.channel, first.id, saved?.audio);
 
     return { channels, initial };
 }

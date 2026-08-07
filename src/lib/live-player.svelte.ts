@@ -7,7 +7,7 @@
  */
 
 import type { AudioTrack } from '$lib/arib';
-import { type CaptionTrack, CHANNEL, type Command, type Notice, SOCKET_PATH } from '$lib/live';
+import { type CaptionTrack, CHANNEL, type Command, LAST_COOKIE, type Notice, SOCKET_PATH } from '$lib/live';
 import { type Cue, currentCue, insertCue, trimCues } from '$lib/ts/captions';
 import { FLOOR, nextTarget, pacing } from '$lib/ts/pacing';
 
@@ -71,6 +71,20 @@ export function lastChannel(): Tuned | null {
     } catch {
         return null;
     }
+}
+
+/**
+ * 見ている局を覚える。**cookie にも同じものを置く。**
+ *
+ * localStorage はサーバから読めないので、画面を組む時点で「どの局を開くか」が
+ * 分からない。それが分かっていれば**繋いでくる前に焼きはじめられる**
+ * (`server/live.ts` の `warm`) ので、そのためだけに二重に書いておく。
+ * 読むのはいつも localStorage のほうで、cookie は落ちても実害が無い
+ */
+function remember(target: Tuned): void {
+    localStorage.setItem(LAST, JSON.stringify(target));
+    const value = encodeURIComponent(JSON.stringify(target));
+    document.cookie = `${LAST_COOKIE}=${value}; path=/live; max-age=31536000; samesite=lax`;
 }
 
 export function livePlayer() {
@@ -181,8 +195,10 @@ export function livePlayer() {
     /**
      * 前の絵を写して、次が出るまで貼っておく。**切り替えの間の黒を埋める。**
      *
-     * 選局にかかる 1.6 秒は削れない — 電波の同期待ち (0.65秒) と、放送の MPEG-2 が
-     * GOP の頭を待つぶん (0.75秒) で、どちらもこちらの都合では動かない。
+     * 切り替えにかかる時間は、ほとんどが**こちらの都合では動かないもの**
+     * ([stream.md](../../docs/stream.md) §4 に実測の内訳)。復調器のロック 0.32秒、
+     * スクランブル解除が ECM を待つ 0.24秒、ffmpeg の立ち上がり 0.53秒、
+     * 放送の I フレーム待ち 0〜0.50秒。
      * **待ち時間そのものは変わらないが、黒い画面を見せずに済む。**
      *
      * 器を作り直すと `<video>` は何も映さなくなるので、その前に1枚だけ
@@ -584,7 +600,7 @@ export function livePlayer() {
         audio = id;
         state = 'connecting';
         quiet = Date.now() + GRACE;
-        localStorage.setItem(LAST, JSON.stringify(next));
+        remember(next);
         socket.send(JSON.stringify({ type: 'tune', ...next } satisfies Command));
     }
 
@@ -609,7 +625,7 @@ export function livePlayer() {
         tuned = target;
         audio = target.audio ?? '';
         quiet = Date.now() + GRACE;
-        localStorage.setItem(LAST, JSON.stringify(target));
+        remember(target);
 
         /*
          * **札を先に取る。** ブラウザは WebSocket の握手に `Authorization` を
