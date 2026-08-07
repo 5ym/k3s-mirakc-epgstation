@@ -15,6 +15,14 @@
 
     const serviceName = (id: number) => data.services.find((s) => s.id === id)?.name ?? '';
 
+    /**
+     * いまライブで選べる局。詳細の「視聴」を出すかどうかに使う。
+     *
+     * **決めているのはサーバ** (`+page.server.ts` の `watchable`)。ライブ画面と
+     * 同じ決め方でないと、押した先で別の局が映る
+     */
+    const watchable = $derived(new Set(data.watchable));
+
     const TYPE_LABEL: Record<string, string> = { GR: '地上波', BS: 'BS', CS: 'CS' };
     const HOUR = 60 * 60 * 1000;
     /** 5分を1マスにする。細かすぎると行数が増えるだけ、粗いと短い番組が潰れる */
@@ -470,12 +478,17 @@
                     </a>
                 {/if}
 
-                {#if program.start_at <= clock && program.end_at > clock}
+                {#if program.start_at <= clock && program.end_at > clock && watchable.has(program.service_id)}
                     <!--
                         **いま流れている番組は、その場で観られるようにする。**
                         番組表で見つけた番組を観るのに、ライブ画面へ行って
                         同じ局を一覧から探し直させるのは遠回り (局が100を超える
                         環境では、探すほうが手間になる)。
+
+                        **ライブ画面が持っている局にだけ出す** (`watchable`)。
+                        番組表のマスは**名前の無い枠でも出る**ので、そのまま出すと
+                        押した先で別の局が映る (実機の NHKEテレ2/3。分割放送を
+                        していない間のサブチャンネルがこれにあたる)。
 
                         **リンクにする。** 押した先は別の画面で、そこで選局から
                         やり直すことになるので、モーダルの中で始めるものではない

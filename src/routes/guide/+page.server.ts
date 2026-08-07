@@ -82,11 +82,33 @@ export async function load({ url, request }) {
         start,
     );
 
+    /*
+     * **いまライブで選べる局** (`services.id`)。詳細の「視聴」を出すかどうかに使う。
+     *
+     * **ライブ画面と同じ決め方にする** (`epg.airing`)。番組表のマスは**名前の無い
+     * 枠でも出る**が、ライブの一覧には出ないので、そこに「視聴」を出すと**押した先で
+     * 別の局が映る** — 実機の NHKEテレ2/3 で踏んだ (相乗り中のサブチャンネルは、
+     * 分割放送をしていない間は名前の無い枠が並ぶ)。
+     *
+     * 局は種別で絞らない。ライブ画面が地上波・BS・CS をまとめて見ているので、
+     * 絞ると `airing` の「1局も残らなければ全部出す」の効き方がずれる
+     */
+    const at = Date.now();
+    const watchable = airing(
+        queryAll<{ id: number }>(`SELECT id FROM services WHERE ${CURRENT_SERVICES}`),
+        queryAll<{ service_id: number; name: string }>(
+            `SELECT service_id, name FROM programs WHERE start_at <= ? AND end_at > ?`,
+            at,
+            at,
+        ),
+    ).map((service) => service.id);
+
     return {
         type,
         start,
         hours: WINDOW_HOURS,
         programs,
+        watchable,
         // 放送していない局は出さない (終わったチャンネル・相乗り中のサブチャンネル)
         services: airing(services, programs),
         counts: queryOne<{ programs: number; services: number }>(
