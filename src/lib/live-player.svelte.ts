@@ -89,6 +89,15 @@ export function livePlayer() {
     let paused = $state(false);
     /** 放送の今に張り付いているか。離れていれば「ライブへ」を出す */
     let live = $state(true);
+    /**
+     * 追っかけ再生か。**わざと遅れて見ている状態。**
+     *
+     * 止めたときと、帯を後ろへ戻したときに立つ。立っている間は放送の今を
+     * 追いかけず (跳ばない)、選ばれた速さで進む。追いついたら自分で下りる
+     */
+    let chasing = $state(false);
+    /** 追っかけ中の速さ。ライブに戻れば 1 に戻す */
+    let speed = $state(1);
     /** どれだけ貯めているか (秒)。詰まると伸び、無事が続くと縮む */
     let target = $state(FLOOR);
     /**
@@ -309,8 +318,18 @@ export function livePlayer() {
             at: video.currentTime,
             playing: running,
             target,
+            chasing,
+            speed,
         });
 
+        /*
+         * **追いついたらライブに戻す。** 押してもらう必要は無い — 追いついた
+         * ところで選んだ速さのまま進むと放送を追い越し、溜まりを使い切って止まる
+         */
+        if (next.caught) {
+            chasing = false;
+            speed = 1;
+        }
         if (next.seek !== null) {
             video.currentTime = next.seek;
             quiet = Date.now() + GRACE;
@@ -395,8 +414,12 @@ export function livePlayer() {
     /**
      * 止める・再開する。**止めても受け取りは続く。**
      *
-     * 止めた所から見られるようにするため、再開しても追いかけ直さない
-     * (`pace` が `paused` の間は何もしない)。放送に戻りたいときは `goLive`。
+     * 止めた時点で追っかけに入る。再開しても放送の今へは跳ばない
+     * (`pacing` が `chasing` の間は跳ばない)。放送に戻りたいときは `goLive`。
+     *
+     * **印を立てるのは止めるときだけで足りる。** 立てていなかった頃は、
+     * 8秒より長く止めて再開すると `pacing` が勝手に放送の今へ跳んでいた —
+     * 「止めた所から見られる」と謳っておきながら、実際には戻れなかった
      */
     function toggle(): void {
         if (element === null) return;
@@ -407,25 +430,49 @@ export function livePlayer() {
             });
         } else {
             paused = true;
+            chasing = true;
             element.pause();
         }
     }
 
-    /** 放送の今へ追いつく。**止めて見ていたぶんを飛ばす** */
+    /** 放送の今へ追いつく。**追っかけをやめて、見ていたぶんを飛ばす** */
     function goLive(): void {
         if (element === null || buffer === null || buffer.buffered.length === 0) return;
         const end = buffer.buffered.end(buffer.buffered.length - 1);
         element.currentTime = Math.max(buffer.buffered.start(0), end - target);
+        chasing = false;
+        speed = 1;
+        element.playbackRate = 1;
         quiet = Date.now() + GRACE;
         if (paused) toggle();
     }
 
-    /** 持っている範囲の中で移る。帯を押されたとき */
+    /**
+     * 追っかけの速さを選ぶ。**追っかけている間だけ効く。**
+     *
+     * ライブに張り付いているときに速められては困る (放送より先は無い) ので、
+     * ここで選べるのは遅れて見ているときだけ。追いついたら 1 に戻す (`pace`)
+     */
+    function setSpeed(next: number): void {
+        if (!chasing) return;
+        speed = next;
+        if (element !== null) element.playbackRate = next;
+    }
+
+    /**
+     * 持っている範囲の中で移る。帯を押されたとき。
+     *
+     * **後ろへ戻したら追っかけに入る。** 入れないと `pacing` が「大きく離れた」と
+     * 見て放送の今へ跳ね返すので、戻した先が1秒も映らない
+     */
     function seek(to: number): void {
         if (element === null || buffer === null || buffer.buffered.length === 0) return;
         const start = buffer.buffered.start(0);
         const end = buffer.buffered.end(buffer.buffered.length - 1);
-        element.currentTime = Math.min(end, Math.max(start, to));
+        const at = Math.min(end, Math.max(start, to));
+        element.currentTime = at;
+        // 端の近くへ戻しただけならライブのまま。少しの操作で追っかけにしない
+        if (end - at > target + 1.5) chasing = true;
         quiet = Date.now() + GRACE;
     }
 
@@ -442,6 +489,9 @@ export function livePlayer() {
         delay = null;
         paused = false;
         live = true;
+        // 局や音声を選び直したら、追っかけていた場所はもう無い
+        chasing = false;
+        speed = 1;
         oldest = 0;
         newest = 0;
         position = 0;
@@ -760,6 +810,15 @@ export function livePlayer() {
         get holding() {
             return holding;
         },
+        /** 追っかけ再生か。**わざと遅れて見ている** */
+        get chasing() {
+            return chasing;
+        },
+        /** 追っかけの速さ。ライブでは常に 1 */
+        get speed() {
+            return speed;
+        },
+        setSpeed,
         /** 字幕を出しているか */
         get captions() {
             return captions;

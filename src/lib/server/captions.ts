@@ -70,6 +70,9 @@ const MEAN = /mean:\[([\d\s]+)\]/;
 /** PNG の署名。塊の切れ目を見つけるのに使う */
 const SIGNATURE = [0x89, 0x50, 0x4e, 0x47];
 
+/** 記録に残す価値のある行。**それ以外は入り口の説明なので捨てる** */
+const TROUBLE = /error|Error|failed|Failed|Cannot|Unable|No such|Invalid data/;
+
 /**
  * 字幕を絵で取り出す ffmpeg の引数。
  *
@@ -91,8 +94,12 @@ export function captionArgs(program: number): string[] {
     return [
         '-hide_banner',
         '-nostats',
-        '-loglevel',
-        'error',
+        /*
+         * **`-loglevel` を下げない。** `showinfo` は info で喋るので、`error` に
+         * 絞ると時刻が1行も来なくなる — 絵だけ出てきて、いつ出すか分からないまま
+         * 捨てることになる (実機で字幕が1枚も出ず、ここで詰まった)。
+         * 騒がしいぶんは読む側で落とす (`watch`)
+         */
         '-copyts',
         '-sub_type',
         'bitmap',
@@ -304,7 +311,13 @@ class Captions {
         if (tail !== null) this.deliver(tail);
     }
 
-    /** 時刻と空かどうかは標準エラーから来る */
+    /**
+     * 時刻と空かどうかは標準エラーから来る。
+     *
+     * **`-loglevel` を下げられない**ので (showinfo が info で喋る)、入り口の
+     * ストリーム一覧まで流れてくる。**残すのは失敗だけ** — 全部出すと、
+     * 選局のたびに数十行が記録に積まれて読めなくなる
+     */
     private async watch(proc: ReturnType<typeof Bun.spawn>): Promise<void> {
         for await (const line of lines(proc.stderr as ReadableStream<Uint8Array>)) {
             const info = readInfo(line);
@@ -312,8 +325,9 @@ class Captions {
                 this.stamps.push(info);
                 continue;
             }
-            const text = line.trim();
-            if (text !== '') console.warn(`[captions] ${this.channelType}:${this.channel} ffmpeg: ${text}`);
+            if (TROUBLE.test(line)) {
+                console.warn(`[captions] ${this.channelType}:${this.channel} ffmpeg: ${line.trim()}`);
+            }
         }
     }
 

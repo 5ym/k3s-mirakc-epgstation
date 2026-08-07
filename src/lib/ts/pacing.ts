@@ -45,6 +45,15 @@ export interface Buffered {
     playing: boolean;
     /** どれだけ貯めてから出すか */
     target: number;
+    /**
+     * 追っかけ再生か。**放送の今を追わない。**
+     *
+     * 止めて見ていたり、帯を戻したりして**わざと遅れて見ている**状態。
+     * ここで勝手に跳ぶと、見ようとしていた場面を飛ばすことになる
+     */
+    chasing: boolean;
+    /** 追っかけ中の速さ。見ている人が選ぶ。ライブに戻れば使わない */
+    speed: number;
 }
 
 export interface Pacing {
@@ -54,6 +63,8 @@ export interface Pacing {
     play: boolean;
     /** 再生の速さ。**null は今のまま** (毎回入れ直すと往復する) */
     rate: number | null;
+    /** 追っかけが放送の今に追いついた。**呼ぶ側はライブに戻す** */
+    caught: boolean;
 }
 
 /**
@@ -62,17 +73,37 @@ export interface Pacing {
  * **頭出しは自分で合わせる。** `-copyts` で放送の時刻をそのまま持っているので、
  * 持っている範囲は 0 秒から始まらない (数万秒のこともある)。何もしないと
  * 再生位置が範囲の外に居るままで、1コマも出ない。
+ *
+ * ## 追っかけ中は跳ばない
+ *
+ * 追っかけかどうかで**別のものを見ている**。ライブは「放送の今」を追うので、
+ * 大きく離れたら跳んで詰めるのが正しい (別のタブから戻ってきたとき)。
+ * 追っかけは**わざと遅れて見ている**ので、跳ぶと見ようとしていた場面が飛ぶ。
+ *
+ * 分けていなかった頃は、**止めて再開すると勝手に放送の今へ跳んで**いた —
+ * 「止めた所から見られる」と謳っておきながら、8秒より長く止めると戻れなかった。
  */
-export function pacing({ start, end, at, playing, target }: Buffered): Pacing {
+export function pacing({ start, end, at, playing, target, chasing, speed }: Buffered): Pacing {
     // 範囲の外に居る。チャンネルを変えた直後もここを通る
-    if (at < start || at > end) return { seek: start, play: false, rate: 1 };
+    if (at < start || at > end) return { seek: start, play: false, rate: 1, caught: false };
 
     // まだ貯まっていない。始めると、すぐ足りなくなって止まる
-    if (!playing) return { seek: null, play: end - at >= target, rate: 1 };
+    if (!playing) return { seek: null, play: end - at >= target, rate: 1, caught: false };
 
     const lag = end - at;
+
+    if (chasing) {
+        /*
+         * **追いついた。** ここから先はライブと同じ扱いにする — 選んだ速さのまま
+         * だと放送を追い越してしまい、溜まりを使い切って止まる
+         */
+        if (lag <= target * 1.1) return { seek: null, play: true, rate: 1, caught: true };
+        // 跳ばない。選ばれた速さのまま進む
+        return { seek: null, play: true, rate: speed, caught: false };
+    }
+
     // 大きく離れた。**詰めきれないので跳ぶ** — 別のタブから戻ってきたとき
-    if (lag > target + JUMP) return { seek: end - target, play: true, rate: 1 };
+    if (lag > target + JUMP) return { seek: end - target, play: true, rate: 1, caught: false };
     /*
      * 少し離れた。速めて詰める。跳ばないので音は切れない。
      *
@@ -80,12 +111,20 @@ export function pacing({ start, end, at, playing, target }: Buffered): Pacing {
      * 0.70 秒に居着いていた — 始めた直後は必ず狙いより溜まる (再生を頼んでから
      * 実際に絵が出るまでの間にも届く) ので、放っておくとそこから下りてこない。
      */
-    if (lag > target * 1.5) return { seek: null, play: true, rate: CATCH_UP };
+    if (lag > target * 1.5) return { seek: null, play: true, rate: CATCH_UP, caught: false };
     // 追いついた。戻す。**溜まりを使い切る前に戻す**ので、少し余裕を残す
-    if (lag <= target * 1.1) return { seek: null, play: true, rate: 1 };
+    if (lag <= target * 1.1) return { seek: null, play: true, rate: 1, caught: false };
     // その間。速さは今のまま (ここで戻すと、速める・戻すを往復する)
-    return { seek: null, play: true, rate: null };
+    return { seek: null, play: true, rate: null, caught: false };
 }
+
+/**
+ * 追っかけで選べる速さ。**遅くは出さない。**
+ *
+ * 追っかけは「放送に追いつきたい」ための機能なので、1倍より遅い選択肢は
+ * 目的と逆を向く。上は2倍まで — それ以上は音が聞き取れなくなる
+ */
+export const SPEEDS = [1, 1.25, 1.5, 2] as const;
 
 /**
  * 貯める量を決め直す。**止まったら伸ばし、無事が続いたら縮める。**

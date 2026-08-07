@@ -3,7 +3,16 @@ import { CEILING, FLOOR, JUMP, nextTarget, pacing, SETTLED } from './pacing';
 
 /** 宅内で落ち着いている状態 */
 const at = (over: Partial<Parameters<typeof pacing>[0]>) =>
-    pacing({ start: 100, end: 100 + FLOOR, at: 100, playing: true, target: FLOOR, ...over });
+    pacing({
+        start: 100,
+        end: 100 + FLOOR,
+        at: 100,
+        playing: true,
+        target: FLOOR,
+        chasing: false,
+        speed: 1,
+        ...over,
+    });
 
 /**
  * **ここが「かくつき」の分かれ目。** 届いた端で再生すると、1コマ遅れるたびに
@@ -16,6 +25,7 @@ describe('再生位置の決め方', () => {
             seek: 50_000,
             play: false,
             rate: 1,
+            caught: false,
         });
     });
 
@@ -76,6 +86,56 @@ describe('再生位置の決め方', () => {
         const generous = at({ target: 4, end: 100 + 4 });
         expect(generous.seek).toBeNull();
         expect(generous.rate).toBe(1);
+    });
+});
+
+/**
+ * 追っかけ再生。**わざと遅れて見ている状態。**
+ *
+ * ライブと追っかけでは見ているものが違う。ライブは「放送の今」を追うので
+ * 大きく離れたら跳ぶのが正しいが、追っかけで跳ぶと**見ようとしていた場面が
+ * 飛ぶ**。分けていなかった頃は、止めて再開すると勝手に放送の今へ跳んでいた —
+ * 「止めた所から見られる」と謳っておきながら、8秒より長く止めると戻れなかった。
+ */
+describe('追っかけ再生', () => {
+    /** 5分遅れて見ている状態 */
+    const chase = (over: Partial<Parameters<typeof pacing>[0]> = {}) =>
+        at({ end: 100 + 300, chasing: true, speed: 1.5, ...over });
+
+    test('どれだけ離れていても跳ばない', () => {
+        expect(chase().seek).toBeNull();
+    });
+
+    /** ライブなら跳んでいた距離で、跳ばないことを確かめる */
+    test('ライブなら跳ぶ距離でも、追っかけなら跳ばない', () => {
+        const far = { end: 100 + FLOOR + JUMP + 5 };
+        expect(at({ ...far, chasing: false }).seek).not.toBeNull();
+        expect(at({ ...far, chasing: true, speed: 1 }).seek).toBeNull();
+    });
+
+    test('選ばれた速さで進む', () => {
+        expect(chase({ speed: 2 }).rate).toBe(2);
+        expect(chase({ speed: 1 }).rate).toBe(1);
+    });
+
+    /*
+     * **追いついたら自分でライブに戻る。** 戻さずに選ばれた速さのまま進むと
+     * 放送を追い越し、溜まりを使い切って止まる
+     */
+    test('追いついたら、速さを戻してライブへ返す', () => {
+        const caught = chase({ end: 100 + FLOOR });
+        expect(caught.caught).toBe(true);
+        expect(caught.rate).toBe(1);
+    });
+
+    test('追いつくまでは返さない', () => {
+        expect(chase().caught).toBe(false);
+    });
+
+    /** 貯める量が増えていれば、追いついたと見なす境目もそのぶん先へ */
+    test('たくさん貯めているときは、その手前で追いついたと見る', () => {
+        expect(chase({ target: 4, end: 100 + 4 }).caught).toBe(true);
+        expect(chase({ target: 4, end: 100 + 20 }).caught).toBe(false);
     });
 });
 

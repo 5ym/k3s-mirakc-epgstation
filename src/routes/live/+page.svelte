@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { lastChannel, livePlayer } from '$lib/live-player.svelte';
+    import { SPEEDS } from '$lib/ts/pacing';
     import { time } from '$lib/format';
     import type { LiveChannel } from './+page.server';
 
@@ -358,6 +359,47 @@
                         aria-label="再生位置"
                         data-testid="live-seek"
                     />
+
+                    <!--
+                        **追っかけ中の速さ。追っかけている間だけ出す。**
+
+                        ライブに張り付いているときは速められない (放送より先は
+                        無い)。追いついたら自分でライブに戻るので、そのとき
+                        この選択肢も消える
+                    -->
+                    {#if player.chasing}
+                        <div class="dropdown dropdown-top dropdown-end">
+                            <button
+                                class="btn btn-sm tabular-nums {OVERLAY}"
+                                aria-label="追っかけの速さ"
+                                data-testid="live-speed"
+                            >
+                                {player.speed}×
+                            </button>
+                            <ul
+                                class="dropdown-content menu bg-base-100 text-base-content rounded-box
+                                       z-10 mb-1 w-28 p-2 shadow-lg"
+                                data-testid="live-speed-menu"
+                            >
+                                {#each SPEEDS as value (value)}
+                                    <li>
+                                        <button
+                                            class="tabular-nums {value === player.speed ? 'menu-active' : ''}"
+                                            onclick={(event) => {
+                                                player.setSpeed(value);
+                                                event.currentTarget.blur();
+                                            }}
+                                            data-testid="live-speed-option"
+                                            data-speed={value}
+                                            aria-current={value === player.speed ? 'true' : undefined}
+                                        >
+                                            {value}×
+                                        </button>
+                                    </li>
+                                {/each}
+                            </ul>
+                        </div>
+                    {/if}
 
                     <!-- 放送の今に居るかどうか。離れていれば押して戻れる -->
                     <button
