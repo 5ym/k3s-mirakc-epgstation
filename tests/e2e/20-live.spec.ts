@@ -87,6 +87,100 @@ test.describe('ライブ視聴', () => {
     });
 
     /*
+     * **押せると分かる形にする。** 平らに並べていた頃は、文字が並んでいるだけに
+     * 見えて押せると気付けなかった。枠を持たせ、指の形を変える
+     */
+    test('チャンネルは押せると分かる形にする', async ({ page }) => {
+        await goto(page, '/live');
+        const row = page.getByTestId('live-channel').first();
+        await expect(row).toBeVisible();
+        const look = await row.evaluate((el) => {
+            const style = getComputedStyle(el);
+            return { cursor: style.cursor, border: Number.parseFloat(style.borderTopWidth) };
+        });
+        expect(look.cursor).toBe('pointer');
+        expect(look.border).toBeGreaterThan(0);
+    });
+
+    /*
+     * **いま映しているものが分かるようにする。** 色だけだと、色の見え方が違う人に
+     * 伝わらないので、文字でも出す
+     */
+    test('選局中のチャンネルが分かる', async ({ page }) => {
+        await goto(page, '/live');
+        const channels = page.getByTestId('live-channel');
+        const second = channels.nth(1);
+        await second.click();
+        await expect(page.getByTestId('live-title')).toBeVisible();
+
+        await expect(second).toHaveAttribute('data-current', 'true');
+        await expect(second).toContainText('視聴中');
+        // 印は1つだけ。ほかの行に残っていたら、どれを見ているのか分からない
+        expect(await page.locator('[data-testid="live-channel"][data-current="true"]').count()).toBe(1);
+    });
+
+    /*
+     * **開いたら、いま映しているものまで送っておく。** 局が100を超える環境では
+     * 覚えていた局が画面の外にあるほうが普通で、探させるのはテレビを点けたときの
+     * 振る舞いから遠い
+     */
+    test('開くと、選局中のチャンネルまでスクロールしてある', async ({ page }) => {
+        await page.setViewportSize({ width: 1440, height: 700 });
+        await goto(page, '/live');
+        const channels = page.getByTestId('live-channel');
+        // 下のほうの局を選んでから開き直す
+        const last = channels.last();
+        const picked = await last.getAttribute('data-channel');
+        await last.click();
+        await expect(page.getByTestId('live-title')).toBeVisible();
+
+        await goto(page, '/live');
+        const row = page.locator(`[data-testid="live-channel"][data-channel="${picked}"]`);
+        await expect(row).toHaveAttribute('data-current', 'true');
+        // 一覧の見えている範囲に入っていること
+        const inside = await row.evaluate((el) => {
+            const list = el.closest('[data-testid="live-channels"]');
+            if (list === null) return false;
+            const a = el.getBoundingClientRect();
+            const b = list.getBoundingClientRect();
+            return a.top >= b.top - 1 && a.bottom <= b.bottom + 1;
+        });
+        expect(inside).toBe(true);
+    });
+
+    /*
+     * **備え付けの操作は出さない。** あれの再生位置は「持っている範囲」を尺として
+     * 描くので、0.05秒ごとに中身が届くたびに右へ左へ動く。放送に終わりは無いので、
+     * 位置ではなく張り付いているかどうかを出す
+     */
+    test('自前の操作列を出し、備え付けは使わない', async ({ page }) => {
+        await goto(page, '/live');
+        await expect(page.getByTestId('live-video')).not.toHaveAttribute('controls', /.*/);
+        await expect(page.getByTestId('live-controls')).toBeVisible();
+        await expect(page.getByTestId('live-edge')).toBeVisible();
+        await expect(page.getByTestId('live-play')).toBeVisible();
+    });
+
+    /*
+     * 止める・再開するの繋がりだけ見る。
+     *
+     * **「止めた所から見られる」ところまでは、ここでは確かめられない。** 偽の
+     * ffmpeg が流すものは MSE が受け取れないので、そもそも再生が始まらず、
+     * 位置も動かない。動く中身での確認は実機で行う
+     */
+    test('止める・再開するが繋がっている', async ({ page }) => {
+        await goto(page, '/live');
+        const button = page.getByTestId('live-play');
+        await expect(button).toBeVisible();
+
+        await expect(button).toHaveAttribute('aria-label', '一時停止');
+        await button.click();
+        await expect(button).toHaveAttribute('aria-label', '再生');
+        await button.click();
+        await expect(button).toHaveAttribute('aria-label', '一時停止');
+    });
+
+    /*
      * **放送に終わりは無いと言っておく。** 何も言わないと MediaSource の尺は
      * 「いま持っている中でいちばん後ろ」になり、0.2秒ごとに中身が届くたびに
      * 伸びる。備え付けの再生位置が右端まで行っては少し左へ戻る、を繰り返す
@@ -178,8 +272,9 @@ test.describe('ライブ視聴', () => {
 
         await goto(page, '/live');
         // 覚えていた局が選ばれた状態で開く
-        await expect(page.locator(`[data-testid="live-channel"][data-channel="${picked}"]`)).toHaveClass(
-            /bg-base-200/,
+        await expect(page.locator(`[data-testid="live-channel"][data-channel="${picked}"]`)).toHaveAttribute(
+            'data-current',
+            'true',
         );
     });
 

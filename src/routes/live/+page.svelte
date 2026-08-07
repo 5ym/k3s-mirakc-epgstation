@@ -59,6 +59,30 @@
             serviceId: channel.id,
         });
     }
+
+    /**
+     * 一覧の各行。**開いたときに、いま映しているものまで送るのに要る。**
+     *
+     * 局が100を超える環境では、覚えていた局が画面の外にあることのほうが普通。
+     * 探させるのは、テレビを点けたときの振る舞いから遠い
+     */
+    const rows: Record<number, HTMLElement | undefined> = $state({});
+    /** 一度送ったら、あとは触らない。見ている途中で勝手に動くと邪魔になる */
+    let scrolled = false;
+    $effect(() => {
+        const row = current === undefined ? undefined : rows[current.id];
+        if (scrolled || row === undefined) return;
+        scrolled = true;
+        row.scrollIntoView({ block: 'center' });
+    });
+
+    /** 全画面。映像だけでなく操作列も一緒に大きくしたいので、箱ごと入れる */
+    function full(): void {
+        const box = video?.parentElement;
+        if (box === null || box === undefined) return;
+        if (document.fullscreenElement === null) void box.requestFullscreen().catch(() => {});
+        else void document.exitFullscreen().catch(() => {});
+    }
 </script>
 
 <!--
@@ -81,13 +105,83 @@
                 `live-player` の役目で、音ありで断られたときだけ自分で黙る。
                 ここで `muted` にすると、断られていないときまで無音になる
             -->
-            <video
-                bind:this={video}
-                class="h-full w-full bg-black"
-                playsinline
-                controls
-                data-testid="live-video"
+            <!--
+                **備え付けの操作は出さない** (`controls` を付けない)。あれの
+                再生位置は「持っている範囲」を尺として描くので、0.05秒ごとに
+                中身が届くたびに右へ左へ動く。放送に終わりは無いのだから、
+                位置ではなく**張り付いているかどうか**を出すのが正しい
+            -->
+            <video bind:this={video} class="h-full w-full bg-black" playsinline data-testid="live-video"
             ></video>
+
+            {#if player.tuned !== null && player.state !== 'error'}
+                <!--
+                    自前の操作列。**放送の今に居るときは右端に張り付く。**
+                    止めても受け取りは続くので、止めた所から見られる。
+
+                    絵が出る前から出しておく — 出たり消えたりすると、押そうとした
+                    ところで動くことになる
+                -->
+                <div
+                    class="absolute right-0 bottom-0 left-0 flex items-center gap-3
+                           bg-gradient-to-t from-black/80 to-transparent px-3 pt-8 pb-3"
+                    data-testid="live-controls"
+                >
+                    <button
+                        class="btn btn-circle btn-sm btn-ghost text-white"
+                        onclick={() => player.toggle()}
+                        aria-label={player.paused ? '再生' : '一時停止'}
+                        data-testid="live-play"
+                    >
+                        {player.paused ? '▶' : '❚❚'}
+                    </button>
+
+                    <!--
+                        戻れる範囲の中のどこに居るか。**放送の今に居れば右端。**
+                        押すとその時刻へ移る
+                    -->
+                    <input
+                        type="range"
+                        class="range range-xs flex-1"
+                        min={player.oldest}
+                        max={player.newest}
+                        step="0.1"
+                        value={player.position}
+                        oninput={(event) => player.seek(Number(event.currentTarget.value))}
+                        aria-label="再生位置"
+                        data-testid="live-seek"
+                    />
+
+                    <!-- 放送の今に居るかどうか。離れていれば押して戻れる -->
+                    <button
+                        class="btn btn-xs gap-1 {player.live ? 'btn-error' : 'btn-ghost text-white'}"
+                        onclick={() => player.goLive()}
+                        data-testid="live-edge"
+                    >
+                        <span class="inline-block size-2 rounded-full {player.live ? 'bg-white' : 'bg-error'}"
+                        ></span>
+                        ライブ
+                    </button>
+
+                    <button
+                        class="btn btn-circle btn-sm btn-ghost text-white"
+                        onclick={() => (player.silenced ? player.unmute() : player.mute())}
+                        aria-label={player.silenced ? '音を出す' : '音を消す'}
+                        data-testid="live-sound"
+                    >
+                        {player.silenced ? '🔇' : '🔊'}
+                    </button>
+
+                    <button
+                        class="btn btn-circle btn-sm btn-ghost text-white"
+                        onclick={() => full()}
+                        aria-label="全画面"
+                        data-testid="live-full"
+                    >
+                        ⛶
+                    </button>
+                </div>
+            {/if}
 
             {#if player.silenced && player.state === 'playing'}
                 <!--
@@ -105,9 +199,16 @@
             {/if}
 
             {#if player.state !== 'playing'}
-                <!-- 何も出ていない間に何が起きているかを出す。黒いままだと壊れて見える -->
+                <!--
+                    何も出ていない間に何が起きているかを出す。黒いままだと壊れて見える。
+
+                    **押せる邪魔をしない** (`pointer-events-none`)。箱いっぱいに
+                    広がるので、そのままだと下の操作列を覆って押せなくなる。
+                    中の「やり直す」だけは押せるように戻す
+                -->
                 <div
-                    class="bg-base-300/80 absolute inset-0 flex items-center justify-center"
+                    class="bg-base-300/80 pointer-events-none absolute inset-0 flex items-center
+                           justify-center"
                     data-testid="live-status"
                 >
                     {#if player.state === 'connecting'}
@@ -116,7 +217,7 @@
                         <div class="text-center">
                             <div class="text-error font-medium">{player.message}</div>
                             <button
-                                class="btn btn-sm mt-3"
+                                class="btn pointer-events-auto btn-sm mt-3"
                                 onclick={() => current && select(current)}
                                 data-testid="live-retry">やり直す</button
                             >
@@ -171,14 +272,25 @@
                 </button>
             {/each}
         </div>
+        <!--
+            **押せると分かる形にする。** 平らに並べていた頃は、文字が並んでいる
+            だけに見えて押せると気付けなかった。枠を持たせ、指を乗せると浮かせ、
+            いま映しているものは色で塗る
+        -->
         <ul class="flex-1 space-y-1 overflow-y-auto lg:min-h-0" data-testid="live-channels">
             {#each listed as channel (channel.id)}
                 <li>
                     <button
-                        class="hover:bg-base-200 flex w-full items-center gap-3 rounded p-2 text-left
-                               {current?.id === channel.id ? 'bg-base-200' : ''}"
+                        bind:this={rows[channel.id]}
+                        class="flex w-full cursor-pointer items-center gap-3 rounded-lg border p-2 text-left
+                               transition-colors
+                               {current?.id === channel.id
+                            ? 'border-primary bg-primary/15 ring-primary/40 ring-1'
+                            : 'border-base-300 hover:border-base-content/30 hover:bg-base-200'}"
                         onclick={() => select(channel)}
+                        aria-current={current?.id === channel.id ? 'true' : undefined}
                         data-testid="live-channel"
+                        data-current={current?.id === channel.id ? 'true' : 'false'}
                         data-channel="{channel.type}/{channel.channel}"
                     >
                         {#if channel.hasLogo}
@@ -195,13 +307,22 @@
                             </span>
                         {/if}
                         <span class="min-w-0 flex-1">
-                            <span class="block truncate text-sm font-medium">{channel.name}</span>
+                            <span
+                                class="block truncate text-sm font-medium
+                                       {current?.id === channel.id ? 'text-primary' : ''}"
+                            >
+                                {channel.name}
+                            </span>
                             {#if channel.now}
                                 <span class="text-base-content/60 block truncate text-xs">
                                     {channel.now.name}
                                 </span>
                             {/if}
                         </span>
+                        <!-- いま映しているもの。色だけだと、色の見え方が違う人に伝わらない -->
+                        {#if current?.id === channel.id}
+                            <span class="badge badge-primary badge-sm shrink-0">視聴中</span>
+                        {/if}
                     </button>
                 </li>
             {/each}

@@ -7,12 +7,22 @@
  */
 
 import { CHANNEL, type Command, type Notice, SOCKET_PATH } from '$lib/live';
-import { pacing } from '$lib/ts/pacing';
+import { FLOOR, nextTarget, pacing } from '$lib/ts/pacing';
 
 export type LiveState = 'idle' | 'connecting' | 'playing' | 'error';
 
 /** 前回見ていたチャンネルの控え */
 const LAST = 'denpa:live:last';
+
+/**
+ * 遅れて見られる長さ (秒)。**止めている間も受け取り続けるので、上限が要る。**
+ *
+ * ブラウザが抱えられる量には上限があり、超えると `appendBuffer` が落ちる。
+ * 5分あれば、電話に出て戻ってくるくらいは追いつける。
+ */
+const KEEP = 300;
+/** 貯める量を決め直す間隔 (ms)。塊は毎秒20個来るので、そのたびには回さない */
+const SETTLE_EVERY = 5_000;
 
 export interface Tuned {
     channelType: string;
@@ -46,6 +56,21 @@ export function livePlayer() {
      * 詰まりが増えていないかを見ながら詰めていくため
      */
     let delay = $state<number | null>(null);
+    /** 止めているか。**押して止めた間も受け取り続ける** */
+    let paused = $state(false);
+    /** 放送の今に張り付いているか。離れていれば「ライブへ」を出す */
+    let live = $state(true);
+    /** どれだけ貯めているか (秒)。詰まると伸び、無事が続くと縮む */
+    let target = $state(FLOOR);
+    /**
+     * どこまで戻れて、いまどこに居るか。**操作の帯を描くのに使う。**
+     *
+     * 0.1秒刻みで入れ直す。塊は毎秒20個来るので、そのたびに動かすと
+     * 画面を無駄に描き直すことになる
+     */
+    let oldest = $state(0);
+    let newest = $state(0);
+    let position = $state(0);
 
     let socket: WebSocket | null = null;
     let source: MediaSource | null = null;
@@ -54,6 +79,12 @@ export function livePlayer() {
     let element: HTMLVideoElement | null = null;
     /** もう再生を始めたか。始めるまでは貯める */
     let running = false;
+    /** 最後に詰まった時刻。無事が続いたかを見る */
+    let lastStall = 0;
+    /** 前回 `nextTarget` を回してから詰まったか */
+    let stalled = false;
+    /** 最後に `nextTarget` を回した時刻 */
+    let lastSettled = 0;
     /**
      * 追加待ちの列。**`appendBuffer` は1つずつしか受け付けない** —
      * 前のが終わる前に呼ぶと `InvalidStateError` で止まる
@@ -82,18 +113,38 @@ export function livePlayer() {
     function pace(video: HTMLVideoElement): void {
         if (buffer === null || buffer.updating || buffer.buffered.length === 0) return;
         const end = buffer.buffered.end(buffer.buffered.length - 1);
+        const behind = end - video.currentTime;
         /*
          * **0.1秒刻みにする。** 塊は毎秒20個届くので、そのたびに書き換えると
          * 画面を無駄に描き直すことになる
          */
-        const behind = running ? Math.round((end - video.currentTime) * 10) / 10 : null;
-        if (behind !== delay) delay = behind;
+        const rounded = running ? Math.round(behind * 10) / 10 : null;
+        if (rounded !== delay) delay = rounded;
+        // 放送の今に張り付いているか。少しの揺れでは離れたことにしない
+        const atLive = behind <= target + 1.5;
+        if (atLive !== live) live = atLive;
+
+        const tenth = (value: number) => Math.round(value * 10) / 10;
+        if (tenth(buffer.buffered.start(0)) !== oldest) oldest = tenth(buffer.buffered.start(0));
+        if (tenth(end) !== newest) newest = tenth(end);
+        if (tenth(video.currentTime) !== position) position = tenth(video.currentTime);
+
+        trim(end);
+        settle();
+
+        /*
+         * **押して止めている間は動かさない。** 受け取りは続けているので溜まって
+         * いくが、そこへ跳ばせると「止めた所から見る」ができなくなる。
+         * 追いかけ直すのは「ライブへ」を押されたとき (`goLive`)
+         */
+        if (paused) return;
 
         const next = pacing({
             start: buffer.buffered.start(0),
             end,
             at: video.currentTime,
             playing: running,
+            target,
         });
 
         if (next.seek !== null) video.currentTime = next.seek;
@@ -103,6 +154,35 @@ export function livePlayer() {
             state = 'playing';
             void play(video);
         }
+    }
+
+    /**
+     * 溜まりすぎを刈る。**止めている間も受け取り続けるので、放っておくと際限なく太る。**
+     *
+     * ブラウザが抱えられる量には上限があり、超えると `appendBuffer` が
+     * `QuotaExceededError` で落ちる。落ちるとそこから絵が出なくなるので、
+     * 遅れて見られる長さに上限を設けて、古いほうから捨てる。
+     */
+    function trim(end: number): void {
+        if (buffer === null || buffer.updating || buffer.buffered.length === 0) return;
+        const cut = end - KEEP;
+        if (buffer.buffered.start(0) >= cut) return;
+        try {
+            buffer.remove(0, cut);
+        } catch {
+            // 追加中だった。次の機会に
+        }
+    }
+
+    /** 貯める量を決め直す。**止まったら伸ばし、無事が続いたら縮める** */
+    function settle(): void {
+        const now = Date.now();
+        if (!stalled && now - lastSettled < SETTLE_EVERY) return;
+        const settledFor = (now - lastStall) / 1000;
+        const next = nextTarget(target, stalled, settledFor);
+        stalled = false;
+        lastSettled = now;
+        if (next !== target) target = next;
     }
 
     /**
@@ -137,6 +217,47 @@ export function livePlayer() {
         });
     }
 
+    /** 音を止める。備え付けの操作を出さないので、こちらで用意する */
+    function mute(): void {
+        silenced = true;
+        if (element !== null) element.muted = true;
+    }
+
+    /**
+     * 止める・再開する。**止めても受け取りは続く。**
+     *
+     * 止めた所から見られるようにするため、再開しても追いかけ直さない
+     * (`pace` が `paused` の間は何もしない)。放送に戻りたいときは `goLive`。
+     */
+    function toggle(): void {
+        if (element === null) return;
+        if (paused) {
+            paused = false;
+            void element.play().catch(() => {
+                /* 押されて呼ばれるので断られない */
+            });
+        } else {
+            paused = true;
+            element.pause();
+        }
+    }
+
+    /** 放送の今へ追いつく。**止めて見ていたぶんを飛ばす** */
+    function goLive(): void {
+        if (element === null || buffer === null || buffer.buffered.length === 0) return;
+        const end = buffer.buffered.end(buffer.buffered.length - 1);
+        element.currentTime = Math.max(buffer.buffered.start(0), end - target);
+        if (paused) toggle();
+    }
+
+    /** 持っている範囲の中で移る。帯を押されたとき */
+    function seek(to: number): void {
+        if (element === null || buffer === null || buffer.buffered.length === 0) return;
+        const start = buffer.buffered.start(0);
+        const end = buffer.buffered.end(buffer.buffered.length - 1);
+        element.currentTime = Math.min(end, Math.max(start, to));
+    }
+
     function reset(): void {
         socket?.close();
         socket = null;
@@ -144,6 +265,11 @@ export function livePlayer() {
         source = null;
         running = false;
         delay = null;
+        paused = false;
+        live = true;
+        oldest = 0;
+        newest = 0;
+        position = 0;
         pending.length = 0;
     }
 
@@ -268,6 +394,16 @@ export function livePlayer() {
                     drain();
                     pace(video);
                 });
+                /*
+                 * **詰まったことを覚えておく。** 宅内と宅外で必要な貯めの量は
+                 * 桁違いに違うのに、どちらから見ているかは分からない。
+                 * 実際に止まったかどうかで決める (`nextTarget`)
+                 */
+                video.addEventListener('waiting', () => {
+                    if (paused) return;
+                    stalled = true;
+                    lastStall = Date.now();
+                });
                 drain();
             },
             { once: true },
@@ -292,6 +428,34 @@ export function livePlayer() {
         get delay() {
             return delay;
         },
+        /** 押して止めているか */
+        get paused() {
+            return paused;
+        },
+        /** 放送の今に張り付いているか */
+        get live() {
+            return live;
+        },
+        /** いまどれだけ貯めているか (秒)。詰まると伸びる */
+        get buffering() {
+            return target;
+        },
+        /** どこまで戻れるか (いちばん古い時刻) */
+        get oldest() {
+            return oldest;
+        },
+        /** 放送の今 (いちばん新しい時刻) */
+        get newest() {
+            return newest;
+        },
+        /** いま映している時刻 */
+        get position() {
+            return position;
+        },
+        seek,
+        toggle,
+        goLive,
+        mute,
         tune,
         unmute,
         stop: reset,

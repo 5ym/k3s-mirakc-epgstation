@@ -1,22 +1,29 @@
 /**
- * ライブの再生位置の決め方。**放送は待ってくれないが、目は待てない。**
+ * ライブの再生位置の決め方。**放送は待ってくれないが、目は待てる。**
  *
  * 届いた端でそのまま再生すると、1コマ遅れるたびに映像が止まる。ネットワークも
  * エンコードも一定では届かないので、これは常時起きる。少しだけ貯めてから出し、
  * 離れたら少し速く再生して詰める。跳ぶのは大きく離れたときだけ — 跳ぶと
  * 音が切れるので、常用すると「かくつき」そのものになる。
  *
+ * **どれだけ貯めるかは動かす。** 宅内なら 0.4 秒で足りるが、宅外から見ると
+ * 届き方が荒れて止まる。止まったら伸ばし、しばらく無事なら縮める
+ * (`nextTarget`)。初めに大きく取ると、開いてから絵が出るまでが遅くなる。
+ *
  * DOM を触らないので、ここだけ単体で確かめられる。
  */
 
-/**
- * 貯めてから出す秒数。**0だと1コマ遅れるたびに止まる。**
- *
- * ここが遅延のいちばん大きな部分で、焼き方より効く。塊が 0.05 秒ぶんずつ
- * 届くので (`live.ts` の `-frag_duration`)、0.4 秒あれば8個ぶんの余裕がある。
- * 縮めるほど放送に近づくが、詰まったときに止まりやすくなる。
- */
-export const TARGET = 0.4;
+/** 貯める量の下限。**開いた直後はここから始める** — 小さいほど早く絵が出る */
+export const FLOOR = 0.4;
+/** 貯める量の上限。これ以上は、遅れが目に見えて増えるだけ */
+export const CEILING = 6;
+/** 止まったときに増やす量 */
+const GROW = 0.6;
+/** 無事だったときに減らす量。**増やすより控えめに** — 減らして止まると元も子もない */
+const SHRINK = 0.15;
+/** これだけ無事なら縮めにかかる (秒) */
+export const SETTLED = 45;
+
 /** これ以上離れたら跳ぶ。別のタブへ行って戻ってきたとき */
 export const JUMP = 8;
 /** 詰めるときの速さ。上げすぎると音程が分かるほど狂う */
@@ -31,6 +38,8 @@ export interface Buffered {
     at: number;
     /** もう再生を始めているか */
     playing: boolean;
+    /** どれだけ貯めてから出すか */
+    target: number;
 }
 
 export interface Pacing {
@@ -49,16 +58,16 @@ export interface Pacing {
  * 持っている範囲は 0 秒から始まらない (数万秒のこともある)。何もしないと
  * 再生位置が範囲の外に居るままで、1コマも出ない。
  */
-export function pacing({ start, end, at, playing }: Buffered): Pacing {
+export function pacing({ start, end, at, playing, target }: Buffered): Pacing {
     // 範囲の外に居る。チャンネルを変えた直後もここを通る
     if (at < start || at > end) return { seek: start, play: false, rate: 1 };
 
     // まだ貯まっていない。始めると、すぐ足りなくなって止まる
-    if (!playing) return { seek: null, play: end - at >= TARGET, rate: 1 };
+    if (!playing) return { seek: null, play: end - at >= target, rate: 1 };
 
     const lag = end - at;
     // 大きく離れた。**詰めきれないので跳ぶ** — 別のタブから戻ってきたとき
-    if (lag > JUMP) return { seek: end - TARGET, play: true, rate: 1 };
+    if (lag > target + JUMP) return { seek: end - target, play: true, rate: 1 };
     /*
      * 少し離れた。速めて詰める。跳ばないので音は切れない。
      *
@@ -66,9 +75,29 @@ export function pacing({ start, end, at, playing }: Buffered): Pacing {
      * 0.70 秒に居着いていた — 始めた直後は必ず狙いより溜まる (再生を頼んでから
      * 実際に絵が出るまでの間にも届く) ので、放っておくとそこから下りてこない。
      */
-    if (lag > TARGET * 1.5) return { seek: null, play: true, rate: CATCH_UP };
+    if (lag > target * 1.5) return { seek: null, play: true, rate: CATCH_UP };
     // 追いついた。戻す。**溜まりを使い切る前に戻す**ので、少し余裕を残す
-    if (lag <= TARGET * 1.1) return { seek: null, play: true, rate: 1 };
+    if (lag <= target * 1.1) return { seek: null, play: true, rate: 1 };
     // その間。速さは今のまま (ここで戻すと、速める・戻すを往復する)
     return { seek: null, play: true, rate: null };
+}
+
+/**
+ * 貯める量を決め直す。**止まったら伸ばし、無事が続いたら縮める。**
+ *
+ * 宅内と宅外で必要な量が桁違いに違うのに、どちらから見ているかは分からない。
+ * 決め打ちにすると、宅内に合わせれば宅外で止まり、宅外に合わせれば宅内が
+ * 無駄に遅れる。**実際に止まったかどうかで決める**のがいちばん確か。
+ *
+ * 伸ばすほうを大きく、縮めるほうを小さくしてある。縮めて止まると、
+ * 見ている人には「直っていない」としか映らない。
+ *
+ * @param target いまの量
+ * @param stalled 前回からこちら、詰まったか
+ * @param settledFor 最後に詰まってから経った秒数
+ */
+export function nextTarget(target: number, stalled: boolean, settledFor: number): number {
+    if (stalled) return Math.min(CEILING, target + GROW);
+    if (settledFor >= SETTLED) return Math.max(FLOOR, target - SHRINK);
+    return target;
 }
