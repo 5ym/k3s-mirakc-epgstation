@@ -18,7 +18,7 @@ spec:
         # **入れ替えの合図。** 像のタグは `develop` で動かないので、ここを
         # 書き換えないと ArgoCD には「何も変わっていない」ように見え、
         # 古い Pod がそのまま残る。中身を最後に変えたコミット (CI が書く)
-        denpa.doany.io/agent-image: sha-cea84030e74d
+        denpa.doany.io/agent-image: sha-7b8c0f64064d
     spec:
       # **録画中に入れ替えが来たら、終わるまで居座ってから止まる** (SHUTDOWN_WAIT)。
       # denpa 側と同じ扱い。ここを既定 (30秒) のままにしていた頃は、Pod を
