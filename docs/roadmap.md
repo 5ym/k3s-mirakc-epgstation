@@ -10,7 +10,7 @@
 [stream.md](stream.md) に移してあります。残っているのはこの2つ。
 
 - **データ放送** (第3段階) — psisiarc → web-bml をサイドカーとして起動し、iframe で抱える
-- **低遅延の追い込み** (任意) — WebRTC/WHEP か Media over QUIC。いまは 0.5 秒前後
+- **低遅延の追い込み** (任意) — WebRTC/WHEP か Media over QUIC。いまは 0.5〜0.7 秒
 
 ## 実機で確かめられていないもの
 
