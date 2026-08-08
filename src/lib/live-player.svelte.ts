@@ -121,12 +121,13 @@ export function livePlayer() {
     /** いま焼いてもらっている形。**サーバが返してきたものを持つ** */
     let codec = $state<LiveCodec>('h264');
     /**
-     * 字幕を出すまで待たせる量 (秒)。**サーバが焼き方から決めて寄越す。**
+     * 字幕を出すまで待たせる量 (秒)。**サーバが決めて寄越す。**
      *
-     * 焼き方とコマ数で変わる (`server/live.ts` の `captionLead`)。
-     * 届く前の既定は H.264 のぶん
+     * 焼き方・コマ数・局で変わる (`server/live.ts` の `captionLead`)。局のぶんは
+     * 電波を数えて出すので、`tuned` の値はあとから `lead` で言い直される。
+     * ここに置いてあるのは**それも届く前**の繋ぎで、H.264 の決め打ちに揃えてある
      */
-    let lead = 0.65;
+    let lead = 0.64;
     /**
      * 断り書き。**失敗ではないが、頼まれたとおりにできなかったとき。**
      *
@@ -253,6 +254,45 @@ export function livePlayer() {
         else video.addEventListener('timeupdate', done, { once: true });
     }
 
+    /** 字幕を貼り直し続けている映像。**1つにつき1本** */
+    let following: HTMLVideoElement | null = null;
+
+    /**
+     * 字幕を、**映した1枚ごとに**貼り直す。
+     *
+     * 貼り直しを `pace` に相乗りさせていた頃は、**塊が届いたときにしか
+     * 貼り直していなかった**。塊は 0.05秒ごとなので、ずれるのは**遅れる方向
+     * だけ** — 実機で測ると、狙った 507ms に対して実際に出るのは平均 522ms・
+     * 最大 560ms だった。字幕は 1〜2秒で入れ替わるので、これが「次の表示が
+     * 気持ち遅い」として出る。
+     *
+     * `requestVideoFrameCallback` は**映した1枚ごと**に来るので、貼り直す時刻が
+     * 見えている絵と揃う。持っていないブラウザは画面の書き換えごとに代える
+     * (60Hz なら 16ms)。
+     *
+     * **止めて見ている間は来ない。** 片付け (`sweep`) は `pace` に置いたままに
+     * してあるので、待たせているぶんが溜まりっぱなしにはならない。
+     * `paint` は出すものが変わっていなければその場で戻るので、空回りは安い
+     */
+    function follow(video: HTMLVideoElement): void {
+        if (following === video) return;
+        following = video;
+        const again = () => {
+            // 別の映像に移ったら、こちらは畳む
+            if (following !== video) return;
+            paint(video.currentTime);
+            step();
+        };
+        const step = () => {
+            const request = (
+                video as HTMLVideoElement & { requestVideoFrameCallback?(cb: () => void): number }
+            ).requestVideoFrameCallback;
+            if (typeof request === 'function') request.call(video, again);
+            else requestAnimationFrame(again);
+        };
+        step();
+    }
+
     /**
      * 字幕を重ねる。**再生位置に合う1枚だけ描く。**
      *
@@ -346,10 +386,12 @@ export function livePlayer() {
         if (tenth(video.currentTime) !== position) position = tenth(video.currentTime);
 
         /*
-         * 字幕は再生位置に合わせて出す。**片付けは毎回する** — 待たせている
-         * ぶんは先の時刻に積まれるので、止めて見ている間は出す番が来ない。
-         * 変わったときだけ片付けていた頃は、そのぶんが際限なく溜まった
-         * (1枚 1920x1080 なので、止めっぱなしだと効いてくる)
+         * **片付けは毎回する。** 待たせているぶんは先の時刻に積まれるので、
+         * 止めて見ている間は出す番が来ない。変わったときだけ片付けていた頃は、
+         * そのぶんが際限なく溜まった (1枚 1920x1080 なので、止めっぱなしだと効く)。
+         *
+         * 貼り直しもここでする。**普段効いているのは `follow` のほう**だが、
+         * 止めて見ている間は映した1枚が来ないので、こちらが要る
          */
         paint(video.currentTime);
         sweep(video.currentTime);
@@ -683,6 +725,8 @@ export function livePlayer() {
      */
     async function tune(video: HTMLVideoElement, target: Tuned, keepCaptions = false): Promise<void> {
         element = video;
+        // 字幕は映した1枚ごとに貼り直す (`follow`)。2度目からは何もしない
+        follow(video);
         // 次の絵が出るまで前の絵を貼る。**閉じる前に写す** (閉じると何も映らなくなる)
         freeze();
         /*
@@ -816,22 +860,14 @@ export function livePlayer() {
             if (kind === CHANNEL.subtitle || kind === CHANNEL.subtitleClear) {
                 if (element === null) return;
                 /*
-                 * **いちばん新しく届いている映像に合わせて、決まった量だけ待たせる**
-                 * ([ts/captions.ts](./ts/captions.ts) の `LEAD`)。
+                 * **いちばん新しく届いている映像に合わせて、待たせる量だけ足す**
+                 * ([ts/captions.ts](./ts/captions.ts) の `captionAt`)。待たせる量は
+                 * サーバが決めて寄越す (`lead`)。
                  *
-                 * 字幕は映像より先に出てくる — 電波の中で先に来ているうえ、
-                 * 映像はこちらで焼くのに時間がかかるため。届いた端から出すと、
-                 * その合計ぶん (実機で H.264 0.5〜0.8秒、AV1 1.4〜1.8秒)
-                 * 口が動く前に台詞が出る。
-                 *
-                 * **合わせる先を再生位置にしない。** そこに置くと、貯めている量
-                 * (実機で 159〜487ms) がまるごとずれに乗ってしまう。いちばん
-                 * 新しい映像なら貯めている量に左右されない。
-                 *
-                 * 絶対の時刻で合わせる道は2回外している。mp4 の 0 は多重化器の
-                 * 都合で決まり (`-copyts` を付けても muxer が 0 へ寄せ直すのを
-                 * 実機で確かめた)、焼いている絵の時刻を送る道も、フィルタが
-                 * 符号器より先を走るぶんずれた (実機で 2.4秒 と 5秒)
+                 * 字幕は映像より先に出てくるので、届いた端から出すと口が動く前に
+                 * 台詞が出る。**合わせる先を再生位置にしない**のは、そこに置くと
+                 * 貯めている量がまるごとずれに乗るため — どちらも `captionAt` に実測。
+                 * 絶対の時刻で合わせられない理由は [stream.md](../../docs/stream.md) §5.4
                  */
                 const at = captionAt(edge(), element.currentTime, lead);
 
