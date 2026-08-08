@@ -43,9 +43,22 @@ test.describe('チューナー画面', () => {
 
         await page.getByTestId('epg-collect-now').click();
 
-        // 掴んだ相手が誰で、どの強さで掴んでいるかはチューナー画面に出る
-        await expect(page.getByTestId('tuner-list')).toContainText('番組表', { timeout: 30_000 });
-        await expect(page.getByTestId('tuner-list')).toContainText('掴む強さ 8');
+        /*
+         * 掴んだ相手が誰で、どの強さで掴んでいるかはチューナー画面に出る。
+         *
+         * **2つに分けて見ない。** 「番組表が居る」と「掴む強さ 8」を別々の
+         * `expect` で見ていた頃は、**その間に集め終わって空きに戻り**、2つ目で
+         * 落ちていた (CI で断続的に落ちた。相手は偽エージェントなので速い)。
+         * **両方が書いてある行が1つでもある**か、を1回の待ちで見る。
+         *
+         * 行を数えないのは、**何本のチューナーで集めに行くかが決まっていない**
+         * ため (空いていれば同時に掴む。実際に3本当たった)
+         */
+        const collecting = page
+            .getByTestId('tuner-row')
+            .filter({ hasText: '番組表' })
+            .filter({ hasText: '掴む強さ 8' });
+        await expect(collecting.first()).toBeVisible({ timeout: 30_000 });
 
         // 終わったら押せる状態に戻る。戻らないと次に押せない
         await expect(page.getByTestId('epg-collect-now')).toBeEnabled({ timeout: 120_000 });
