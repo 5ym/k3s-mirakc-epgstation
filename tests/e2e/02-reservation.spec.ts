@@ -204,15 +204,29 @@ test.describe('番組表のマスを押す', () => {
         await page.getByTestId('detail-close').click();
         await expect(detail).toHaveCount(0);
 
-        // はっきり掴んで動かしたときは開かない (動かした先の番組が開いてしまう)
+        /*
+         * はっきり掴んで動かしたときは開かない (動かした先の番組が開いてしまう)。
+         *
+         * **送る向きは余地のあるほうへ。** 番組表は 4:00 から翌 4:00 までの帯なので、
+         * 深夜に走らせると**もう下端まで送られていて、それ以上は動かない** —
+         * 上へ送ると決め打っていた頃は 01:37 に落ちた (実際に CI で落ちた)。
+         * マウスを上へ動かすと中身は下へ送られる (`scrollTop` が増える)
+         */
         const grid = page.getByTestId('guide-grid');
-        const before = await grid.evaluate((el) => el.scrollTop);
+        const room = await grid.evaluate((el) => ({
+            top: el.scrollTop,
+            rest: el.scrollHeight - el.clientHeight - el.scrollTop,
+        }));
+        // 下へ送る余地があるなら上へ動かす。無ければ逆へ
+        const step = room.rest > 120 ? -20 : 20;
         await page.mouse.move(x, y);
         await page.mouse.down();
-        for (let i = 1; i <= 5; i++) await page.mouse.move(x, y - i * 20);
+        for (let i = 1; i <= 5; i++) await page.mouse.move(x, y + i * step);
         await page.mouse.up();
         await expect(detail).toHaveCount(0);
-        expect(await grid.evaluate((el) => el.scrollTop), '掴んで動かせていない').toBeGreaterThan(before);
+        const after = await grid.evaluate((el) => el.scrollTop);
+        if (step < 0) expect(after, '掴んで下へ送れていない').toBeGreaterThan(room.top);
+        else expect(after, '掴んで上へ送れていない').toBeLessThan(room.top);
     });
 
     /*
