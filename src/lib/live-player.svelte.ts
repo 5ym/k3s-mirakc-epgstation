@@ -165,8 +165,8 @@ export function livePlayer() {
     /**
      * 待たせている字幕。**時刻の順に並べておく** ([ts/captions.ts](./ts/captions.ts))。
      *
-     * 字幕は映像より早く届く (エンコードを通らないため) ので、届いた端から
-     * 出すと口が動く前に台詞が出る。再生位置が追いつくまで持っておく
+     * H.264 は届いた時点の再生位置に置くので、ほぼその場で出る。AV1 だけ
+     * 符号器が溜め込むぶん待たせるので、再生位置が追いつくまで持っておく
      */
     let cues: Cue[] = [];
     /** いま重ねている1枚。同じものを描き直さない */
@@ -303,16 +303,6 @@ export function livePlayer() {
      * **絵は画面まるごとの大きさで来る** (1920x1080)。canvas を映像と同じ枠に
      * 敷いて、そこへ引き伸ばして描くので、位置合わせはブラウザ任せでよい
      */
-    /**
-     * いちばん新しく届いている映像の時刻。**まだ何も無ければ null。**
-     *
-     * 字幕を置く先に使う ([ts/captions.ts](./ts/captions.ts) の `captionAt`)
-     */
-    function edge(): number | null {
-        if (buffer === null || buffer.buffered.length === 0) return null;
-        return buffer.buffered.end(buffer.buffered.length - 1);
-    }
-
     function paint(at: number): boolean {
         if (overlay === null) return false;
         // 原点が分かるまでは置き場所が決まらない。出すと合っていない時刻に出る
@@ -854,16 +844,15 @@ export function livePlayer() {
             if (kind === CHANNEL.subtitle || kind === CHANNEL.subtitleClear) {
                 if (element === null) return;
                 /*
-                 * **いちばん新しく届いている映像に合わせて、待たせる量だけ足す**
-                 * ([ts/captions.ts](./ts/captions.ts) の `captionAt`)。待たせる量は
-                 * サーバが決めて寄越す (`lead`)。
+                 * **いま映っている絵に合わせる** ([ts/captions.ts](./ts/captions.ts)
+                 * の `captionAt`)。待たせる量はサーバが決めて寄越す (`lead`) が、
+                 * H.264 は 0 なので実質「届いたら出す」。
                  *
-                 * 字幕は映像より先に出てくるので、届いた端から出すと口が動く前に
-                 * 台詞が出る。**合わせる先を再生位置にしない**のは、そこに置くと
-                 * 貯めている量がまるごとずれに乗るため — どちらも `captionAt` に実測。
-                 * 絶対の時刻で合わせられない理由は [stream.md](../../docs/stream.md) §5.4
+                 * 「いちばん新しく届いている映像」(`buffered.end`) に置いていた頃は、
+                 * **貯めているぶんだけ遅れて**いた。絶対の時刻で合わせられない理由は
+                 * [stream.md](../../docs/stream.md) §5.4
                  */
-                const at = captionAt(edge(), element.currentTime, lead);
+                const at = captionAt(element.currentTime, lead);
 
                 if (kind === CHANNEL.subtitleClear) {
                     cues = insertCue(cues, { at, bitmap: null });

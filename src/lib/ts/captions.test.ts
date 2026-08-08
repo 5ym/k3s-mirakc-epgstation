@@ -4,34 +4,30 @@ import { type Cue, captionAt, currentCue, insertCue, KEEP_CUES, trimCues } from 
 const cue = (at: number): Cue => ({ at, bitmap: null });
 
 /**
- * **合わせる先は「いま映っている絵」ではなく「いちばん新しく届いている映像」。**
+ * **合わせる先は「いま映っている絵」。**
  *
- * 再生位置に置くと、貯めている量 (実機で 159〜487ms) がまるごとずれに乗る。
- * 「たまにぴったり、たまに何百ミリ秒かずれる」という出方をしていたのはこれ。
+ * 「いちばん新しく届いている映像」(`buffered.end`) に置いていた頃は、貯めて
+ * いるぶんだけ遅れて出ていた (実機で 0.2秒)。宅外だと貯めが伸びるので、
+ * 遅れもそのぶん伸びる。
  */
 describe('captionAt', () => {
-    test('いちばん新しい映像から、焼き方ぶんだけ先に置く', () => {
-        expect(captionAt(12.5, 12.0, 0.5)).toBeCloseTo(13.0);
+    /** H.264 は待たせないので、届いたら再生位置にそのまま置く */
+    test('待たせないなら再生位置そのもの', () => {
+        expect(captionAt(12.0, 0)).toBeCloseTo(12.0);
     });
 
-    /** 貯めている量が変わっても、置く先は動かない */
-    test('貯めている量に左右されない', () => {
-        expect(captionAt(12.5, 12.4, 0.5)).toBeCloseTo(captionAt(12.5, 12.0, 0.5));
+    /** AV1 は符号器が溜め込むぶん、映像だけが遅れて届く */
+    test('待たせる量だけ後ろに置く', () => {
+        expect(captionAt(12.0, 0.9)).toBeCloseTo(12.9);
     });
 
-    /** まだ1つも届いていないうちは、再生位置しか手がかりが無い */
-    test('映像がまだ無ければ再生位置から数える', () => {
-        expect(captionAt(null, 3.0, 0.5)).toBeCloseTo(3.5);
-    });
-
-    /** 跳んだ直後など。追い越されていたら再生位置を採る (過去に置かない) */
-    test('再生位置のほうが先なら再生位置を採る', () => {
-        expect(captionAt(5.0, 9.0, 0.5)).toBeCloseTo(9.5);
-    });
-
-    /** 待たせる量が長いほど後ろに置かれる (焼き方ごとの値はサーバが決める) */
     test('待たせる量が長いほど後ろに置く', () => {
-        expect(captionAt(10, 10, 1.4)).toBeGreaterThan(captionAt(10, 10, 0.5));
+        expect(captionAt(10, 1.25)).toBeGreaterThan(captionAt(10, 0.9));
+    });
+
+    /** **貯めている量に触れない。** そこが遅れの出どころだった */
+    test('貯めている量は式に出てこない', () => {
+        expect(captionAt(10, 0)).toBeCloseTo(10);
     });
 });
 
