@@ -208,7 +208,7 @@ describe('TrackList', () => {
 describe('frame', () => {
     test('絵は種別 0x20 で、頭に置き場所が付く', () => {
         const data = png(0x11);
-        const out = frame({ data, lead: null });
+        const out = frame({ data });
         expect(out.kind).toBe(CHANNEL.subtitle);
         const view = new DataView(out.data.buffer, out.data.byteOffset);
         expect([view.getUint16(0), view.getUint16(2), view.getUint16(4), view.getUint16(6)]).toEqual([
@@ -231,7 +231,7 @@ describe('frame', () => {
      * ことになり、**その行と絵の数が合わずに字幕が遅れていた** (captions.ts)
      */
     test('いつ出すかは添えない', () => {
-        expect(frame({ data: png(0x11), lead: null }).pts).toBe(0n);
-        expect(frame({ data: png(0x11), lead: 0.7 }).data.length).toBe(8 + png(0x11).length);
+        expect(frame({ data: png(0x11) }).pts).toBe(0n);
+        expect(frame({ data: png(0x11) }).data.length).toBe(8 + png(0x11).length);
     });
 });

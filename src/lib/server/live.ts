@@ -333,66 +333,54 @@ export function codecsFor(codec: LiveCodec): string {
 }
 
 /**
- * **字幕を出すまで待たせる量 (秒)。ここで決めて画面へ渡す。**
+ * **字幕を出すまで待たせる量 (秒)。焼き方で決まるので、ここで決めて画面へ渡す。**
  *
- * 字幕は映像より先に出てくる。**理由は「電波の中の差」と「焼く遅れ」の2つ。**
+ * 受け側は「いちばん新しく届いている映像」に、この量を足したところへ字幕を置く
+ * ([stream.md](../../../docs/stream.md) §5.4)。
  *
- * ## 1. 電波の中の差
+ * ## H.264 は待たせない
  *
- * 放送は**字幕も映像も前もって送る** — 字幕は受け側が描く手間のぶん、映像は
- * 復号器の溜め (VBV) のぶん。どちらも局ごとに違うが、**差はほぼ揃う**
- * (`ts/caption-lead.ts` の `CaptionLead` が数える):
+ * **字幕が届いたときには、その字幕が属する映像はもう届いている。** 放送は
+ * 字幕も映像も前もって送るが (字幕は描く手間ぶん、映像は復号器の溜めぶん)、
+ * 映像を焼いて包む手間がそれを食う。差し引きで待ちは残らない。
  *
- *     局        字幕 A_c   映像 A_v   差
- *     NHK総合    561ms      269ms    292
- *     TBS        825ms      504ms    321
- *     日テレ     795ms      488ms    307
+ * **ここは2回外した。値ではなく、見方を間違えた。**
  *
- * **前は字幕のぶんしか見ていなかった。** 映像の先回りが式から丸ごと落ちていて、
- * 待たせる量が 0.2〜0.3秒 過大だった (実機で「字幕が遅れる」として出た)。
- * 4局で「7ms のぶれに収まる」と見えたのは、A_c と A_v が局ごとに同じ方向へ
- * 動くためで、**確かめになっていなかった**。
+ * - 1回目は「字幕の先回り」だけを見た。映像も先送りされていることを忘れて
+ *   いて、0.5秒 待たせた。**局差が消えたように見えたのは偶然** — 字幕と
+ *   映像の先回りは局ごとに同じ方向へ動くので、片方だけ見ても揃って見える
+ * - 2回目は両方を見て差を採った (0.42秒)。**今度は焼く手間を数え落とした。**
+ *   差そのものは実測で 292〜321ms と堅いのに、それを足すのが誤り
  *
- * ## 2. 焼く遅れ
+ * **どちらも実機の出口どうしを突き合わせて測っていた。** 焼いた mp4 の中身が
+ * どの放送時刻に当たるかは多重化器が握っていて外から見えず、別々に起こした
+ * ffmpeg は焼き始めの鍵フレームが 0〜0.5秒 ずれる。装置を5通り作って
+ * -60〜+450ms とばらけ、同じ局の2回で 150ms 動いた。**測れないものを
+ * 測ろうとしていた。**
  *
- * 字幕は絵にするだけなのですぐ出るが (電波で届いてから **-15ms**、103本中
- * 102本で一致)、映像は焼いて包むぶん遅れる。**局には依らない** — 出口を
- * mpegts にして放送時刻を直に読むと 111 / 118 / 113ms で揃った。
+ * 決めたのは**画面を見た人**。0 / 0.2 / 0.45 秒を出し比べて 0 がいちばん
+ * 合った。数えるための仕掛け (`ts/caption-lead.ts`) は、そういうわけで消した。
  *
- * mp4 で包むぶんの上乗せは詰め切れていない (**別々に起こした ffmpeg どうしは
- * 焼き始めの鍵フレームが 0〜0.5秒 ずれるので突き合わせられない**)。なので
- * ここは合わせ込みで決める — 画面側に `?lead=` の口を開けてある
- * (`live-player` の `forced`)。
+ * ## AV1 は待たせる
  *
- * ## AV1
+ * **SVT-AV1 が溜め込むぶん、映像だけが遅れて届く。** `lookahead=0` は指定済みで、
+ * 低遅延指定 (`pred-struct=1`) は実機で追いつかなくなった (出口が 6秒 → 22秒 と
+ * 離れていく)。電波が届いてから塊が出るまで H.264 の 0.24〜0.49秒 に対し
+ * 1.1〜1.5秒 かかるので、その差だけ字幕を待たせる。コマ数で変わるのは
+ * 溜める量が枚数で決まっているから。
  *
- * **溜め込むぶんだけ足す。** `lookahead=0` は指定済みで、低遅延指定
- * (`pred-struct=1`) は実機で追いつかなくなった (出口が 6秒 → 22秒 と離れる)。
- * コマ数で変わるのは溜める量が枚数で決まっているから。
- *
- * @param transport 数えた「電波の中の差」(秒)。**数え足りないうちは null** —
- *   そのときは実測の真ん中で進む。分かれば言い直す (`attend`)
+ * **こちらは出し比べていない。** H.264 との差から起こした値なので、
+ * ずれていたら合わせ直す
  */
-export function captionLead(codec: LiveCodec, smooth: boolean, transport: number | null = null): number {
-    const inAir = transport ?? TRANSPORT;
-    if (codec === 'av1') return inAir + (smooth ? AV1_ENCODE : AV1_ENCODE_30);
-    return inAir + H264_ENCODE;
+export function captionLead(codec: LiveCodec, smooth: boolean): number {
+    if (codec === 'av1') return smooth ? AV1_WAIT : AV1_WAIT_30;
+    return 0;
 }
 
-/**
- * 数え終わるまでの「電波の中の差」(秒)。**実測 (292 / 321 / 307ms) の真ん中。**
- *
- * 字幕が数枚届けば本当の値に入れ替わるので、ここはその間だけの繋ぎ
- */
-const TRANSPORT = 0.31;
-/** H.264 で焼いて包むまで (秒)。出口を mpegts にして測ると 0.11〜0.12 */
-const H264_ENCODE = 0.13;
-/** AV1 で焼いて包むまで (秒)。60コマ。SVT-AV1 が溜め込むぶん */
-const AV1_ENCODE = 1.03;
-/** 同 30コマ。溜める量は枚数で決まるので、コマが半分なら尺は倍寄り */
-const AV1_ENCODE_30 = 1.38;
-/** 待たせる量を言い直す刻み (秒)。これ未満の動きでは言わない */
-const LEAD_STEP = 0.02;
+/** AV1 で待たせる量 (秒)。60コマ。H.264 との焼く手間の差 */
+const AV1_WAIT = 0.9;
+/** 同 30コマ。溜める量は枚数で決まるので、コマが半分なら尺は長くなる */
+const AV1_WAIT_30 = 1.25;
 
 interface Viewer {
     connection: Connection;
@@ -749,15 +737,6 @@ export function attend(connection: Connection): void {
     /** いま字幕を受けている局。**焼き方が変わっても、局が同じなら切らない** */
     let captionKey = '';
     let dropCaptions: (() => void) | null = null;
-    /**
-     * その局で数えた「字幕が放送の時計より先に来ている量」(秒)。**局ごとに違う。**
-     *
-     * 字幕が数枚届くまでは分からないので、それまでは決め打ちで進む
-     * (`captionLead`)。局を変えたら捨てる
-     */
-    let transport: number | null = null;
-    /** 最後に画面へ伝えた待たせる量。**変わったときだけ言う** */
-    let toldLead = 0;
 
     const leave = () => {
         if (current === null) return;
@@ -785,8 +764,6 @@ export function attend(connection: Connection): void {
         if (id === captionKey) return;
         dropCaptions?.();
         captionKey = id;
-        // 局が変われば数え直し。先回りの量は放送局ごとに違う
-        transport = null;
         const tell = (notice: Notice) =>
             connection.send(CHANNEL.control, 0n, new TextEncoder().encode(JSON.stringify(notice)));
         dropCaptions = watchCaptions(
@@ -796,17 +773,6 @@ export function attend(connection: Connection): void {
             program,
             track,
             (caption) => {
-                /*
-                 * **数えられたら伝え直す。** 決め打ちのままだと局によって
-                 * 0.15秒 ほどずれる (`captionLead`)。届くたびに言うと無駄なので、
-                 * 前に言った量から動いたときだけ
-                 */
-                if (caption.lead !== null) transport = caption.lead;
-                const lead = captionLead(current?.codec ?? 'h264', current?.smooth ?? true, transport);
-                if (Math.abs(lead - toldLead) >= LEAD_STEP) {
-                    toldLead = lead;
-                    tell({ type: 'lead', lead });
-                }
                 const { kind, pts, data } = frame(caption);
                 connection.send(kind, pts, data);
             },
@@ -889,12 +855,10 @@ export function attend(connection: Connection): void {
             channel,
             codecs: codecsFor(codec),
             codec,
-            lead: captionLead(codec, now.smooth, transport),
+            lead: captionLead(codec, now.smooth),
             audio: now.audio.id,
             audios: now.audios,
         };
-        // ここで伝えた量から動いたときだけ言い直す (字幕が届いてから)
-        toldLead = notice.lead;
         connection.send(CHANNEL.control, 0n, new TextEncoder().encode(JSON.stringify(notice)));
         current = watch(channelType, channel, serviceId, now, codec, viewer);
     };

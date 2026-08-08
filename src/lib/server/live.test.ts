@@ -338,33 +338,26 @@ describe('コマ数の上限', () => {
  * (`captionLead` に実測の内訳)。
  */
 describe('字幕を待たせる量', () => {
-    /** 焼き方で決まるぶんはコマ数では動かない。電波の中の差だけが局で変わる */
-    test('H.264 はコマ数で変わらない', () => {
-        expect(captionLead('h264', true)).toBe(captionLead('h264', false));
-        expect(captionLead('h264', true)).toBeGreaterThan(0.3);
-        expect(captionLead('h264', true)).toBeLessThan(0.6);
+    /**
+     * **H.264 は待たせない。** 字幕が届いたときには、その字幕が属する映像も
+     * もう届いている (実機で 0 / 0.2 / 0.45秒 を出し比べて 0 がいちばん合った)
+     */
+    test('H.264 は待たせない', () => {
+        expect(captionLead('h264', true)).toBe(0);
+        expect(captionLead('h264', false)).toBe(0);
     });
 
-    /*
-     * **電波の中の差に、焼く遅れを足すだけ。** 差は局で 292〜321ms とばらつくが
-     * (`ts/caption-lead.ts`)、焼く遅れは局に依らない (実測 111〜118ms)
-     */
-    test('H.264 は数えた差に焼く遅れを足す', () => {
-        const encode = captionLead('h264', true, 0);
-        expect(captionLead('h264', true, 0.292) - encode).toBeCloseTo(0.292, 6);
-        expect(captionLead('h264', true, 0.321) - encode).toBeCloseTo(0.321, 6);
+    /** **局では変わらない。** 電波の中の先回りは字幕にも映像にも掛かって相殺する */
+    test('局では変わらない', () => {
+        expect(captionLead('h264', true)).toBe(captionLead('h264', false));
+        expect(captionLead('av1', true)).toBe(captionLead('av1', true));
     });
 
     /**
-     * **AV1 も同じ差を使う。** 電波の中の差は焼き方と関係なく決まるもので、
-     * 違うのは焼く遅れのぶんだけ
+     * **AV1 だけ待たせる。** SVT-AV1 が溜め込むぶん映像だけが遅れて届く。
+     * 溜める量は枚数で決まるので、コマ数を倍にすると待ちは縮む
      */
-    test('AV1 も数えた差を使う', () => {
-        const diff = captionLead('av1', true, 0.321) - captionLead('av1', true, 0.292);
-        expect(diff).toBeCloseTo(0.029, 6);
-    });
-
-    test('AV1 は長く、コマ数が多いほど短い', () => {
+    test('AV1 は待たせる。コマ数が多いほど短い', () => {
         expect(captionLead('av1', false)).toBeGreaterThan(captionLead('h264', false));
         expect(captionLead('av1', true)).toBeLessThan(captionLead('av1', false));
     });

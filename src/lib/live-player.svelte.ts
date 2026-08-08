@@ -123,29 +123,11 @@ export function livePlayer() {
     /**
      * 字幕を出すまで待たせる量 (秒)。**サーバが決めて寄越す。**
      *
-     * 焼き方・コマ数・局で変わる (`server/live.ts` の `captionLead`)。局のぶんは
-     * 電波を数えて出すので、`tuned` の値はあとから `lead` で言い直される。
-     * ここに置いてあるのは**それも届く前**の繋ぎで、H.264 の決め打ちに揃えてある
+     * **H.264 は 0** — 字幕が届いたときには、その字幕が属する映像も届いている。
+     * AV1 だけ符号器が溜め込むぶん待たせる (`server/live.ts` の `captionLead`)。
+     * ここに置いてあるのは `tuned` が届く前の繋ぎ
      */
-    let lead = 0.64;
-    /**
-     * 待たせる量を手で決める (`?lead=0.2`)。**合わせ込みのための口。**
-     *
-     * サーバ側の値は測って出しているが、**測り方によって答えが 0〜0.4秒 ずれる** —
-     * 焼き始めの鍵フレームが 0〜0.5秒 動くので、別々に起こした ffmpeg どうしを
-     * 突き合わせる形では詰め切れなかった。ここを開けておけば、**見えている人が
-     * 何秒が正しいかをその場で決められる**。決まったら消す。
-     *
-     * 効くのは字幕を置く時刻だけで、焼き方にも運び方にも触らない
-     */
-    const forced = (() => {
-        if (typeof location === 'undefined') return null;
-        const value = new URLSearchParams(location.search).get('lead');
-        if (value === null) return null;
-        const seconds = Number(value);
-        return Number.isFinite(seconds) && seconds >= 0 && seconds <= 5 ? seconds : null;
-    })();
-    if (forced !== null) lead = forced;
+    let lead = 0;
     /**
      * 断り書き。**失敗ではないが、頼まれたとおりにできなかったとき。**
      *
@@ -818,13 +800,6 @@ export function livePlayer() {
                 const notice = JSON.parse(new TextDecoder().decode(body)) as Notice;
                 if (notice.type === 'error') {
                     fail(notice.message);
-                } else if (notice.type === 'lead') {
-                    /*
-                     * **数え直した待たせる量。** 局によって違うぶんは電波を
-                     * 数えないと分からないので、選局した時点の値は決め打ち。
-                     * 手で決めてあるなら (`?lead=`) そちらを通す
-                     */
-                    if (forced === null) lead = notice.lead;
                 } else if (notice.type === 'captions') {
                     /*
                      * **1枚も届いていなくても、あることは分かる。** 届いてから
@@ -840,7 +815,7 @@ export function livePlayer() {
                     audios = notice.audios;
                     audio = notice.audio;
                     codec = notice.codec;
-                    if (forced === null) lead = notice.lead;
+                    lead = notice.lead;
                     start(video, notice.codecs, notice.codec);
                 }
                 return;
