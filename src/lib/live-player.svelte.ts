@@ -129,6 +129,24 @@ export function livePlayer() {
      */
     let lead = 0.64;
     /**
+     * 待たせる量を手で決める (`?lead=0.2`)。**合わせ込みのための口。**
+     *
+     * サーバ側の値は測って出しているが、**測り方によって答えが 0〜0.4秒 ずれる** —
+     * 焼き始めの鍵フレームが 0〜0.5秒 動くので、別々に起こした ffmpeg どうしを
+     * 突き合わせる形では詰め切れなかった。ここを開けておけば、**見えている人が
+     * 何秒が正しいかをその場で決められる**。決まったら消す。
+     *
+     * 効くのは字幕を置く時刻だけで、焼き方にも運び方にも触らない
+     */
+    const forced = (() => {
+        if (typeof location === 'undefined') return null;
+        const value = new URLSearchParams(location.search).get('lead');
+        if (value === null) return null;
+        const seconds = Number(value);
+        return Number.isFinite(seconds) && seconds >= 0 && seconds <= 5 ? seconds : null;
+    })();
+    if (forced !== null) lead = forced;
+    /**
      * 断り書き。**失敗ではないが、頼まれたとおりにできなかったとき。**
      *
      * いまのところ「AV1 を出せない端末なので H.264 に戻した」の1つだけ。
@@ -803,9 +821,10 @@ export function livePlayer() {
                 } else if (notice.type === 'lead') {
                     /*
                      * **数え直した待たせる量。** 局によって違うぶんは電波を
-                     * 数えないと分からないので、選局した時点の値は決め打ち
+                     * 数えないと分からないので、選局した時点の値は決め打ち。
+                     * 手で決めてあるなら (`?lead=`) そちらを通す
                      */
-                    lead = notice.lead;
+                    if (forced === null) lead = notice.lead;
                 } else if (notice.type === 'captions') {
                     /*
                      * **1枚も届いていなくても、あることは分かる。** 届いてから
@@ -821,7 +840,7 @@ export function livePlayer() {
                     audios = notice.audios;
                     audio = notice.audio;
                     codec = notice.codec;
-                    lead = notice.lead;
+                    if (forced === null) lead = notice.lead;
                     start(video, notice.codecs, notice.codec);
                 }
                 return;

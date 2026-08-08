@@ -338,36 +338,32 @@ describe('コマ数の上限', () => {
  * (`captionLead` に実測の内訳)。
  */
 describe('字幕を待たせる量', () => {
-    /** 実測は局で 0.49〜0.79秒。コマ数では動かないので、真ん中を1つ持つ */
+    /** 焼き方で決まるぶんはコマ数では動かない。電波の中の差だけが局で変わる */
     test('H.264 はコマ数で変わらない', () => {
         expect(captionLead('h264', true)).toBe(captionLead('h264', false));
-        expect(captionLead('h264', true)).toBeGreaterThan(0.49);
-        expect(captionLead('h264', true)).toBeLessThan(0.79);
+        expect(captionLead('h264', true)).toBeGreaterThan(0.3);
+        expect(captionLead('h264', true)).toBeLessThan(0.6);
     });
 
     /*
-     * **数えられたら、その局のぶんで出す。** 局差の出どころは電波の中の
-     * 先回りで、それを引き算1つに畳める (実測で差は 7ms のぶれに収まる)
+     * **電波の中の差に、焼く遅れを足すだけ。** 差は局で 292〜321ms とばらつくが
+     * (`ts/caption-lead.ts`)、焼く遅れは局に依らない (実測 111〜118ms)
      */
-    test('H.264 は数えた先回りから出す', () => {
-        // NHK総合 562ms → 実測のずれ 497ms
-        expect(captionLead('h264', true, 0.562)).toBeCloseTo(0.5, 2);
-        // TBS 835ms → 実測のずれ 779ms
-        expect(captionLead('h264', true, 0.835)).toBeCloseTo(0.775, 3);
+    test('H.264 は数えた差に焼く遅れを足す', () => {
+        const encode = captionLead('h264', true, 0);
+        expect(captionLead('h264', true, 0.292) - encode).toBeCloseTo(0.292, 6);
+        expect(captionLead('h264', true, 0.321) - encode).toBeCloseTo(0.321, 6);
     });
 
     /**
-     * **AV1 は数えても効かない。** 符号器の溜め込みが先回りより大きく動く —
-     * 60コマで先回りが 273ms 違う2局が、出方はどちらも 1397/1398ms だった
+     * **AV1 も同じ差を使う。** 電波の中の差は焼き方と関係なく決まるもので、
+     * 違うのは焼く遅れのぶんだけ
      */
-    test('AV1 は数えた値を使わない', () => {
-        expect(captionLead('av1', true, 0.562)).toBe(captionLead('av1', true, 0.835));
+    test('AV1 も数えた差を使う', () => {
+        const diff = captionLead('av1', true, 0.321) - captionLead('av1', true, 0.292);
+        expect(diff).toBeCloseTo(0.029, 6);
     });
 
-    /**
-     * **AV1 は1秒以上先に出る。** SVT-AV1 が溜め込むぶん映像が遅れるため。
-     * 溜める量は枚数で決まるので、コマ数を倍にすると待ちは縮む
-     */
     test('AV1 は長く、コマ数が多いほど短い', () => {
         expect(captionLead('av1', false)).toBeGreaterThan(captionLead('h264', false));
         expect(captionLead('av1', true)).toBeLessThan(captionLead('av1', false));

@@ -1,15 +1,22 @@
 /**
- * **字幕が、放送の時計よりどれだけ先に来ているか** を TS から数える。
+ * **電波の中で、字幕が映像よりどれだけ先に来ているか** を TS から数える。
  *
- * 字幕は「いつ出すか」を持って流れてくるので、受け側が描く手間のぶん
- * 前もって送られる。その量は**局ごとに違う** (実機で 562〜835ms)。
+ * 放送は**字幕も映像も前もって送る**。字幕は受け側が描く手間のぶん、映像は
+ * 復号器の溜め (VBV) のぶん。どちらも局ごとに違うが、**差はほぼ揃う**:
  *
- * この差はそのまま「字幕が映像より先に出る量」の差になるので、**決め打ちにすると
- * 真ん中を採っても 0.15秒 残る。** ここを数えれば、残るのは焼き方で決まるぶんだけ
- * になる — 突き合わせた実測は `server/live.ts` の `captionLead` にある。
+ *     局        字幕 A_c   映像 A_v   差
+ *     NHK総合    561ms      269ms    292
+ *     TBS        825ms      504ms    321
+ *     日テレ     795ms      488ms    307
  *
- * ffmpeg は要らない。**PCR と字幕の PTS を引き算するだけ**なので、TS を
- * 流している途中でそのまま数えられる。
+ * **見るのは差のほう。** 片方だけ数えていた頃は、映像の先回りがまるごと
+ * 落ちていて、待たせる量が 0.2〜0.3秒 過大になっていた。
+ *
+ * ここに焼く遅れを足したものが「受け側が待たせる量」になる
+ * (`server/live.ts` の `captionLead`)。
+ *
+ * ffmpeg は要らない。**PCR と PTS を引き算するだけ**なので、TS を流している
+ * 途中でそのまま数えられる。
  */
 
 import { descriptors, PACKET, PacketStream, SectionAssembler, SYNC } from './psi';
@@ -35,9 +42,11 @@ const CAPTION_TAG_FIRST = 0x30;
 const CAPTION_TAG_LAST = 0x37;
 /** 字幕もデータ放送も、PMT ではこれ (ITU-T H.222.0 の private PES) */
 const STREAM_TYPE_PRIVATE = 0x06;
+/** 放送の映像は MPEG-2。**ワンセグ (H.264 = 0x1b) は採らない** */
+const STREAM_TYPE_MPEG2 = 0x02;
 
 /**
- * 1局ぶんの TS を食わせると、字幕の先回りの量 (秒) を出す。
+ * 1局ぶんの TS を食わせると、**字幕と映像の先回りの差** (秒) を出す。
  *
  * **渡すのは1局に絞ったあとの TS** (`ServiceFilter` を通したもの)。丸ごとだと
  * 別の局の PMT を拾ってしまう。
@@ -49,18 +58,23 @@ export class CaptionLead {
     private pcrPid = -1;
     /** 字幕の PID。**PMT の並びで最初の1本**だけ見る (ffmpeg の `s:0` と同じ) */
     private captionPid = -1;
+    /** 映像の PID。こちらの先回りも数えて差を採る */
+    private videoPid = -1;
     private pcr = -1;
     private readonly seen: number[] = [];
+    private readonly seenVideo: number[] = [];
 
     /**
-     * 数えた量 (秒)。**まだ分からなければ null。**
+     * 字幕と映像の先回りの差 (秒)。**まだ分からなければ null。**
      *
-     * 中央値を採る。字幕は数十秒あくことがあるので、平均だと1本の外れが長く残る
+     * 中央値どうしを引く。字幕は数十秒あくことがあるので、平均だと1本の
+     * 外れが長く残る。映像は毎秒何十本も来るので、こちらはすぐ埋まる
      */
     get lead(): number | null {
-        if (this.seen.length < ENOUGH) return null;
-        const sorted = this.seen.slice().sort((a, b) => a - b);
-        return sorted[Math.floor(sorted.length / 2)];
+        const caption = middle(this.seen);
+        const video = middle(this.seenVideo);
+        if (caption === null || video === null) return null;
+        return caption - video;
     }
 
     /** 1局に絞った TS を食わせる */
@@ -89,10 +103,10 @@ export class CaptionLead {
             for (const section of this.pat.feed(packet)) this.readPat(section);
             return;
         }
-        if (this.pmt !== null && this.captionPid < 0) {
+        if (this.pmt !== null && (this.captionPid < 0 || this.videoPid < 0)) {
             for (const section of this.pmt.feed(packet)) this.readPmt(section);
         }
-        if (pid !== this.captionPid) return;
+        if (pid !== this.captionPid && pid !== this.videoPid) return;
 
         if (adaptation === 0 || adaptation === 2) return;
         let at = 4;
@@ -109,10 +123,11 @@ export class CaptionLead {
                 ((pes[11] & 0xfe) >> 1) * 32768 +
                 pes[12] * 128 +
                 ((pes[13] & 0xfe) >> 1),
+            pid === this.captionPid ? this.seen : this.seenVideo,
         );
     }
 
-    private count(pts: number): void {
+    private count(pts: number, into: number[]): void {
         if (this.pcr < 0) return;
         let gap = pts - this.pcr;
         // 90kHz は 2^33 で一周する。跨いだ直後は近いほうへ寄せ直す
@@ -120,8 +135,8 @@ export class CaptionLead {
         if (gap > WRAP / 2) gap -= WRAP;
         const seconds = gap / 90000;
         if (Math.abs(seconds) > SANE) return;
-        this.seen.push(seconds);
-        if (this.seen.length > KEEP) this.seen.shift();
+        into.push(seconds);
+        if (into.length > KEEP) into.shift();
     }
 
     private readPat(section: Uint8Array): void {
@@ -144,6 +159,7 @@ export class CaptionLead {
             const type = section[at];
             const pid = ((section[at + 1] & 0x1f) << 8) | section[at + 2];
             const length = ((section[at + 3] & 0x0f) << 8) | section[at + 4];
+            if (type === STREAM_TYPE_MPEG2 && this.videoPid < 0) this.videoPid = pid;
             if (type === STREAM_TYPE_PRIVATE && this.captionPid < 0) {
                 for (const [tag, body] of descriptors(section.subarray(at + 5, at + 5 + length))) {
                     // **文字スーパー (0x38〜) は採らない。** あちらは別の口で流れてくる
@@ -159,4 +175,11 @@ export class CaptionLead {
             at += 5 + length;
         }
     }
+}
+
+/** 真ん中の値。**足りなければ null** */
+function middle(values: number[]): number | null {
+    if (values.length < ENOUGH) return null;
+    const sorted = values.slice().sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)];
 }

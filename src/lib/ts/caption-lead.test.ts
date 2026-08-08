@@ -79,9 +79,15 @@ const join = (...parts: Uint8Array[]) => {
     return out;
 };
 
-/** PCR を置いてから、その `ms` ミリ秒先の時刻を持つ字幕を流す */
-function ahead(lead: CaptionLead, pcr: number, ms: number, pid = CAPTION_PID): void {
-    lead.feed(join(pcrPacket(pcr), pesPacket(pid, pcr + Math.round((ms / 1000) * 90000))));
+const tick = (ms: number) => Math.round((ms / 1000) * 90000);
+
+/**
+ * PCR を置いてから、**映像と字幕をそれぞれの先回りで流す。**
+ *
+ * 放送は両方とも前もって送る。数えたいのはその差
+ */
+function ahead(lead: CaptionLead, pcr: number, ms: number, video = 0, pid = CAPTION_PID): void {
+    lead.feed(join(pcrPacket(pcr), pesPacket(VIDEO_PID, pcr + tick(video)), pesPacket(pid, pcr + tick(ms))));
 }
 
 /**
@@ -95,25 +101,36 @@ describe('CaptionLead', () => {
         return lead;
     };
 
-    test('字幕の時刻と PCR の差を出す', () => {
+    test('字幕と映像の先回りの差を出す', () => {
         const lead = started();
-        for (let i = 0; i < 5; i++) ahead(lead, 90000 * (100 + i), 600);
-        expect(lead.lead).toBeCloseTo(0.6, 3);
+        // 字幕 600ms 先・映像 300ms 先 → 差は 300ms
+        for (let i = 0; i < 5; i++) ahead(lead, 90000 * (100 + i), 600, 300);
+        expect(lead.lead).toBeCloseTo(0.3, 3);
+    });
+
+    /** **映像のぶんを見ないと過大になる。** 前はここが落ちていた */
+    test('映像の先回りが大きい局ほど、待たせる量は小さい', () => {
+        const near = started();
+        for (let i = 0; i < 5; i++) ahead(near, 90000 * (100 + i), 800, 500);
+        const far = started();
+        for (let i = 0; i < 5; i++) ahead(far, 90000 * (100 + i), 800, 200);
+        expect(near.lead).toBeLessThan(far.lead ?? 0);
+        expect(near.lead).toBeCloseTo(0.3, 3);
     });
 
     /** 1本で決めると、たまたま早く送られた1枚に引きずられる */
     test('数え足りないうちは分からないと言う', () => {
         const lead = started();
         expect(lead.lead).toBeNull();
-        ahead(lead, 9000000, 600);
+        ahead(lead, 9000000, 600, 300);
         expect(lead.lead).toBeNull();
     });
 
     /** 真ん中を採る。飛び値1つで動かない */
     test('外れた1本に引きずられない', () => {
         const lead = started();
-        for (const ms of [600, 610, 590, 3000, 605]) ahead(lead, 9000000, ms);
-        expect(lead.lead).toBeCloseTo(0.605, 2);
+        for (const ms of [600, 610, 590, 3000, 605]) ahead(lead, 9000000, ms, 300);
+        expect(lead.lead).toBeCloseTo(0.305, 2);
     });
 
     /**
@@ -122,7 +139,7 @@ describe('CaptionLead', () => {
      */
     test('文字スーパーは数えない', () => {
         const lead = started();
-        for (let i = 0; i < 5; i++) ahead(lead, 9000000, 2000, SUPER_PID);
+        for (let i = 0; i < 5; i++) ahead(lead, 9000000, 2000, 300, SUPER_PID);
         expect(lead.lead).toBeNull();
     });
 
@@ -134,22 +151,22 @@ describe('CaptionLead', () => {
             const pcr = 8589934592 - 18000 - i;
             const pts = (pcr + 54000) % 8589934592;
             expect(pts).toBeLessThan(pcr);
-            lead.feed(join(pcrPacket(pcr), pesPacket(CAPTION_PID, pts)));
+            lead.feed(join(pcrPacket(pcr), pesPacket(VIDEO_PID, pcr + 27000), pesPacket(CAPTION_PID, pts)));
         }
-        expect(lead.lead).toBeCloseTo(0.6, 3);
+        expect(lead.lead).toBeCloseTo(0.3, 3);
     });
 
     /** ありえない差は捨てる。選局した直後などに出る */
     test('離れすぎているものは捨てる', () => {
         const lead = started();
-        for (let i = 0; i < 5; i++) ahead(lead, 9000000, 30000);
+        for (let i = 0; i < 5; i++) ahead(lead, 9000000, 30000, 300);
         expect(lead.lead).toBeNull();
     });
 
     /** PMT を読むまでは、どの PID が字幕かも分からない */
     test('PMT が来る前は数えない', () => {
         const lead = new CaptionLead();
-        for (let i = 0; i < 5; i++) ahead(lead, 9000000, 600);
+        for (let i = 0; i < 5; i++) ahead(lead, 9000000, 600, 300);
         expect(lead.lead).toBeNull();
     });
 });
