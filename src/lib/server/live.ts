@@ -358,13 +358,42 @@ export function codecsFor(codec: LiveCodec): string {
  *
  * **AV1 が1秒以上重いのは SVT-AV1 が溜め込むため。** `lookahead=0` は指定済みで、
  * 低遅延指定 (`pred-struct=1`) は実機で追いつかなくなった (出口が 6秒 → 22秒 と
- * 離れていく)。コマ数で変わるのは溜める量が枚数で決まっているからで、局差は
- * ほとんど無い (60コマで 1397 と 1398)。
+ * 離れていく)。コマ数で変わるのは溜める量が枚数で決まっているから。
+ *
+ * ## H.264 は局ごとに数える。**AV1 は数えても効かない**
+ *
+ * 局差の出どころは**電波の中の先回り** (`ts/caption-lead.ts` の `CaptionLead`)。
+ * TS を読むだけで数えられるので、H.264 はそれを使う。実測を並べると、差は
+ * 7ms のぶれに収まる:
+ *
+ *     局        数えた先回り   字幕が映像より先に出る量   差
+ *     NHK総合      562ms              497ms            -65
+ *     MX           606ms              543ms            -63
+ *     日テレ       799ms              748ms            -51
+ *     TBS          835ms              779ms            -56
+ *
+ * **AV1 には効かない。** 符号器の溜め込みが先回りより大きく動くので、数えても
+ * 追いつかない — 60コマで先回りが 273ms 違う2局が、出方はどちらも 1397/1398ms
+ * だった (30コマでは 109ms しか動かない)。決め打ちのほうが近い。
+ *
+ * @param transport 数えた先回り (秒)。**数え足りないうちは null** — そのときは
+ *   実測の真ん中で進む。局が分かれば言い直す (`attend`)
  */
-export function captionLead(codec: LiveCodec, smooth: boolean): number {
-    if (codec !== 'av1') return 0.65;
-    return smooth ? 1.4 : 1.75;
+export function captionLead(codec: LiveCodec, smooth: boolean, transport: number | null = null): number {
+    if (codec === 'av1') return smooth ? 1.4 : 1.75;
+    return (transport ?? TRANSPORT) - H264_ENCODE;
 }
+
+/**
+ * 数え終わるまでの先回り (秒)。**実測 (562 / 606 / 799 / 835ms) の真ん中。**
+ *
+ * 字幕が数枚届けば本当の値に入れ替わるので、ここはその間だけの繋ぎ
+ */
+const TRANSPORT = 0.7;
+/** 先回りから引くぶん (秒)。焼いて包む手間と、字幕を絵にする手間の差 */
+const H264_ENCODE = 0.06;
+/** 待たせる量を言い直す刻み (秒)。これ未満の動きでは言わない */
+const LEAD_STEP = 0.02;
 
 interface Viewer {
     connection: Connection;
@@ -703,6 +732,15 @@ export function attend(connection: Connection): void {
     /** いま字幕を受けている局。**焼き方が変わっても、局が同じなら切らない** */
     let captionKey = '';
     let dropCaptions: (() => void) | null = null;
+    /**
+     * その局で数えた「字幕が放送の時計より先に来ている量」(秒)。**局ごとに違う。**
+     *
+     * 字幕が数枚届くまでは分からないので、それまでは決め打ちで進む
+     * (`captionLead`)。局を変えたら捨てる
+     */
+    let transport: number | null = null;
+    /** 最後に画面へ伝えた待たせる量。**変わったときだけ言う** */
+    let toldLead = 0;
 
     const leave = () => {
         if (current === null) return;
@@ -730,6 +768,8 @@ export function attend(connection: Connection): void {
         if (id === captionKey) return;
         dropCaptions?.();
         captionKey = id;
+        // 局が変われば数え直し。先回りの量は放送局ごとに違う
+        transport = null;
         const tell = (notice: Notice) =>
             connection.send(CHANNEL.control, 0n, new TextEncoder().encode(JSON.stringify(notice)));
         dropCaptions = watchCaptions(
@@ -739,6 +779,17 @@ export function attend(connection: Connection): void {
             program,
             track,
             (caption) => {
+                /*
+                 * **数えられたら伝え直す。** 決め打ちのままだと局によって
+                 * 0.15秒 ほどずれる (`captionLead`)。届くたびに言うと無駄なので、
+                 * 前に言った量から動いたときだけ
+                 */
+                if (caption.lead !== null) transport = caption.lead;
+                const lead = captionLead(current?.codec ?? 'h264', current?.smooth ?? true, transport);
+                if (Math.abs(lead - toldLead) >= LEAD_STEP) {
+                    toldLead = lead;
+                    tell({ type: 'lead', lead });
+                }
                 const { kind, pts, data } = frame(caption);
                 connection.send(kind, pts, data);
             },
@@ -821,10 +872,12 @@ export function attend(connection: Connection): void {
             channel,
             codecs: codecsFor(codec),
             codec,
-            lead: captionLead(codec, now.smooth),
+            lead: captionLead(codec, now.smooth, transport),
             audio: now.audio.id,
             audios: now.audios,
         };
+        // ここで伝えた量から動いたときだけ言い直す (字幕が届いてから)
+        toldLead = notice.lead;
         connection.send(CHANNEL.control, 0n, new TextEncoder().encode(JSON.stringify(notice)));
         current = watch(channelType, channel, serviceId, now, codec, viewer);
     };

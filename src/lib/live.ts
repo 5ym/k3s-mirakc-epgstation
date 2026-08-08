@@ -127,6 +127,17 @@ export type Notice =
           /** いま出しているもの (`CaptionTrack.index`) */
           track: number;
       }
+    | {
+          /**
+           * 字幕を待たせる量が変わった。**`tuned` のあとに来る。**
+           *
+           * 量は焼き方と**局**で決まる (`server/live.ts` の `captionLead`)。
+           * 局のぶんは電波を数えて出すので、選局した時点ではまだ分からない —
+           * `tuned` では決め打ちで渡しておいて、数えられたらここで言い直す
+           */
+          type: 'lead';
+          lead: number;
+      }
     | { type: 'error'; message: string };
 
 /**

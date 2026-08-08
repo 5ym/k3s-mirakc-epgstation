@@ -756,6 +756,12 @@ export function livePlayer() {
                 const notice = JSON.parse(new TextDecoder().decode(body)) as Notice;
                 if (notice.type === 'error') {
                     fail(notice.message);
+                } else if (notice.type === 'lead') {
+                    /*
+                     * **数え直した待たせる量。** 局によって違うぶんは電波を
+                     * 数えないと分からないので、選局した時点の値は決め打ち
+                     */
+                    lead = notice.lead;
                 } else if (notice.type === 'captions') {
                     /*
                      * **1枚も届いていなくても、あることは分かる。** 届いてから

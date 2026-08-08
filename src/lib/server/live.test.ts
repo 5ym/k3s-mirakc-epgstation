@@ -48,11 +48,7 @@ describe('ライブの焼き方', () => {
      *    120KB   丸ごと 1/3 通る   1局に絞る 3/3
      *
      * 絞れば 20KB でも通る。**そこまで下げてある** — 6回ずつ測ると
-     * 100KB は最短 474ms、20KB は最短 441ms で、33ms は固定の費用。
-     *
-     * **上げる方向には床がある。** 実測した ffmpeg の立ち上がりは
-     * 1.5MB → 1429ms、800KB → 972ms、400KB → 約 700ms、200KB → 754ms。
-     * 750ms 前後で止まるのは、放送の MPEG-2 が GOP の頭を待つため
+     * 100KB は最短 474ms、20KB は最短 441ms で、33ms は固定の費用
      */
     test('入口の解析は 20KB まで', () => {
         const args = plain();
@@ -347,6 +343,25 @@ describe('字幕を待たせる量', () => {
         expect(captionLead('h264', true)).toBe(captionLead('h264', false));
         expect(captionLead('h264', true)).toBeGreaterThan(0.49);
         expect(captionLead('h264', true)).toBeLessThan(0.79);
+    });
+
+    /*
+     * **数えられたら、その局のぶんで出す。** 局差の出どころは電波の中の
+     * 先回りで、それを引き算1つに畳める (実測で差は 7ms のぶれに収まる)
+     */
+    test('H.264 は数えた先回りから出す', () => {
+        // NHK総合 562ms → 実測のずれ 497ms
+        expect(captionLead('h264', true, 0.562)).toBeCloseTo(0.5, 2);
+        // TBS 835ms → 実測のずれ 779ms
+        expect(captionLead('h264', true, 0.835)).toBeCloseTo(0.775, 3);
+    });
+
+    /**
+     * **AV1 は数えても効かない。** 符号器の溜め込みが先回りより大きく動く —
+     * 60コマで先回りが 273ms 違う2局が、出方はどちらも 1397/1398ms だった
+     */
+    test('AV1 は数えた値を使わない', () => {
+        expect(captionLead('av1', true, 0.562)).toBe(captionLead('av1', true, 0.835));
     });
 
     /**

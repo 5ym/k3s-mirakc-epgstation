@@ -315,7 +315,8 @@ export function pmtSection(serviceId: number, esPid: number, componentTag: numbe
 export function programMap(
     serviceId: number,
     pcrPid: number,
-    streams: [number, number][],
+    /** `[種別, PID]`。**3つ目は記述子**の並び (字幕の部品タグなど) */
+    streams: ([number, number] | [number, number, number[]])[],
     ecmPid?: number,
 ): Uint8Array {
     const programInfo =
@@ -333,8 +334,8 @@ export function programMap(
         ...be(0xf000 | programInfo.length),
         ...programInfo,
     ];
-    for (const [streamType, pid] of streams) {
-        body.push(streamType, 0xe0 | (pid >> 8), pid & 0xff, 0xf0, 0x00);
+    for (const [streamType, pid, info = []] of streams) {
+        body.push(streamType, 0xe0 | (pid >> 8), pid & 0xff, ...be(0xf000 | info.length), ...info);
     }
     return withCrc(body);
 }

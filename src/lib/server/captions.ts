@@ -63,6 +63,7 @@
  */
 
 import { type CaptionTrack, CHANNEL } from '$lib/live';
+import { CaptionLead } from '$lib/ts/caption-lead';
 import { ServiceFilter } from '$lib/ts/service-filter';
 import { config } from './config';
 import { chunks, lines } from './stream';
@@ -160,6 +161,14 @@ export function captionArgs(program: number, track = 0): string[] {
 export interface Caption {
     /** パレットではない RGBA の PNG。画面まるごとの大きさ */
     data: Uint8Array;
+    /**
+     * この局で、字幕が放送の時計よりどれだけ先に来ているか (秒)。
+     * **まだ数え足りなければ null** ([ts/caption-lead.ts](../ts/caption-lead.ts))。
+     *
+     * 待たせる量を決めるのに使う (`live.ts` の `captionLead`)。局ごとに
+     * 0.56〜0.84秒 と違うので、決め打ちにすると 0.15秒 ほど残る
+     */
+    lead: number | null;
 }
 
 export type CaptionListener = (caption: Caption) => void;
@@ -314,6 +323,8 @@ class Captions {
     private readonly listeners = new Set<CaptionListener>();
     private readonly watchers = new Set<TrackListener>();
     private readonly splitter = new PngSplitter();
+    /** 字幕がどれだけ先に来ているか。**局ごとに違うので数える** */
+    private readonly leads = new CaptionLead();
     private readonly aborter = new AbortController();
     private proc: ReturnType<typeof Bun.spawn> | null = null;
     /**
@@ -404,6 +415,8 @@ class Captions {
                 if (this.stopped) break;
                 const out = filter === null ? chunk : filter.filter(chunk);
                 if (out.length === 0) continue;
+                // ffmpeg へ渡すのと同じものを数える (1局に絞ったあとの TS)
+                this.leads.feed(out);
                 writer.write(out);
                 await writer.flush();
             }
@@ -460,7 +473,7 @@ class Captions {
         const key = Bun.hash(png).toString(36);
         if (key === this.last) return;
         this.last = key;
-        this.hand({ data: png });
+        this.hand({ data: png, lead: this.leads.lead });
     }
 
     private hand(caption: Caption): void {
