@@ -417,7 +417,12 @@ class Captions {
                 if (out.length === 0) continue;
                 // ffmpeg へ渡すのと同じものを数える (1局に絞ったあとの TS)
                 this.leads.feed(out);
-                writer.write(out);
+                /*
+                 * **書けたことを待つ。** 待たずに捨てると、ffmpeg が降りたあとの
+                 * EPIPE が誰にも受け取られない転びになり、**サーバごと落ちる** —
+                 * 実機でここが落ちた (`live.ts` の `pump` に実測)
+                 */
+                await writer.write(out);
                 await writer.flush();
             }
         } finally {

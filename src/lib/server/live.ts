@@ -351,10 +351,8 @@ export function codecsFor(codec: LiveCodec): string {
  *     AV1     NHK総合 1687ms        NHK総合 1398ms
  *             TBS     1796ms        TBS     1397ms
  *
- * **H.264 は局で 0.49〜0.79秒 とばらつく。** 電波が届いてから復号済みの1枚が
- * 出るまでが NHK系 137ms・民放 300ms ほどで、放送局ごとの送り出しの詰め方が
- * そのまま出ている。**真ん中を採る** — どちらに寄せても 0.15秒 ほど残るが、
- * 直す前は 0.73秒 ずれていたので桁が違う。
+ * **H.264 は局で 0.3秒 ほどばらつく。** 電波が届いてから復号済みの1枚が出るまでが
+ * NHK系 137ms・民放 300ms ほどで、放送局ごとの送り出しの詰め方がそのまま出ている。
  *
  * **AV1 が1秒以上重いのは SVT-AV1 が溜め込むため。** `lookahead=0` は指定済みで、
  * 低遅延指定 (`pred-struct=1`) は実機で追いつかなくなった (出口が 6秒 → 22秒 と
@@ -363,7 +361,7 @@ export function codecsFor(codec: LiveCodec): string {
  * ## H.264 は局ごとに数える。**AV1 は数えても効かない**
  *
  * 局差の出どころは**電波の中の先回り** (`ts/caption-lead.ts` の `CaptionLead`)。
- * TS を読むだけで数えられるので、H.264 はそれを使う。実測を並べると、差は
+ * TS を読むだけで数えられるので、H.264 はそれを使う。上の表と並べると、差は
  * 7ms のぶれに収まる:
  *
  *     局        数えた先回り   字幕が映像より先に出る量   差
@@ -373,8 +371,8 @@ export function codecsFor(codec: LiveCodec): string {
  *     TBS          835ms              779ms            -56
  *
  * **AV1 には効かない。** 符号器の溜め込みが先回りより大きく動くので、数えても
- * 追いつかない — 60コマで先回りが 273ms 違う2局が、出方はどちらも 1397/1398ms
- * だった (30コマでは 109ms しか動かない)。決め打ちのほうが近い。
+ * 追いつかない — 60コマの2局は先回りが 273ms 違うのに、出方は上の表のとおり
+ * ほとんど同じだった (30コマでも 109ms しか動かない)。決め打ちのほうが近い。
  *
  * @param transport 数えた先回り (秒)。**数え足りないうちは null** — そのときは
  *   実測の真ん中で進む。局が分かれば言い直す (`attend`)
@@ -547,6 +545,23 @@ class Session {
      *
      * **放送の番号が分からないときは絞らない。** 絞りようが無いので、
      * 丸ごと渡して ffmpeg に最初の映像を採らせる (`encodeArgs` も同じ判断)
+     *
+     * ## `write` の返りを待つ。**待たないとサーバごと落ちる**
+     *
+     * bun の `FileSink.write` は、**捌けなければ Promise を返す**
+     * (捌けたときは書けた数)。放っておくと、ffmpeg が降りたあとの
+     * EPIPE が**誰にも受け取られない転び**になり、bun はそれで
+     * **プロセスを終わらせる** — ライブ1本の後始末で、録画まで道連れになる。
+     *
+     * `try`/`catch` では止まらない。投げられるのではなく、捨てた Promise が
+     * あとから転ぶため。実機で落ちた (`captions.ts` の `pump` で EPIPE、
+     * 終了コード 1)。同じ形を作って数えると:
+     *
+     *     write を待たない   15回中 8回 落ちる
+     *     write を待つ       15回中 0回
+     *
+     * 待つのは詰まりの面倒を見ることにもなる。捌けるまで読むのを止めれば
+     * いいだけで、放送を落とすことにはならない (汲み出しは別に回っている)
      */
     private async pump(
         stream: ReadableStream<Uint8Array>,
@@ -559,7 +574,8 @@ class Session {
                 if (this.stopped) break;
                 const out = filter === null ? chunk : filter.filter(chunk);
                 if (out.length === 0) continue;
-                writer.write(out);
+                // **書けたことを待つ** (上の説明)。待たないと、転んだときに拾い手が居ない
+                await writer.write(out);
                 await writer.flush();
             }
         } finally {
